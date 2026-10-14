@@ -58,7 +58,8 @@ object Store {
 
     // ---- theme / settings / default EQ -----------------------------------------------------
 
-    fun loadTheme(): ThemeConfig = read("theme.json")?.let { Json.theme(it) } ?: ThemeConfig()
+    /** The saved theme, or null if none has been saved yet. */
+    fun loadTheme(): ThemeConfig? = read("theme.json")?.let { Json.theme(it) }
     fun saveTheme(t: ThemeConfig) = writeDebounced("theme.json") { Json.theme(t).toString() }
 
     fun loadSettings(): AppSettings = read("settings.json")?.let { Json.settings(it) } ?: AppSettings()

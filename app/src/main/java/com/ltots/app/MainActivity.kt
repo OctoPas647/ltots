@@ -4,17 +4,53 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import com.ltots.app.data.ThemeConfig
 import com.ltots.app.playback.PlayerConnection
 import com.ltots.app.ui.AppRoot
 import com.ltots.app.ui.theme.LToTSTheme
+import com.ltots.app.ui.theme.ThemeState
 
 class MainActivity : ComponentActivity() {
+    private var bars: ThemeConfig = ThemeState.config.value
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         PlayerConnection.connect(this)
+        applySystemBars()
         setContent {
+            val cfg by ThemeState.config.collectAsState()
+            LaunchedEffect(cfg.hideNavBar, cfg.hideStatusBar, cfg.darkMode) {
+                bars = cfg
+                applySystemBars()
+            }
             LToTSTheme { AppRoot() }
         }
+    }
+
+    // Android shows the bars again after dialogs, the notification shade or switching apps;
+    // re-hide them whenever LToTS gets focus back.
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) applySystemBars()
+    }
+
+    private fun applySystemBars() {
+        val c = WindowCompat.getInsetsController(window, window.decorView)
+        // Swiping in from the edge shows the bars briefly, then they hide again on their own.
+        c.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        if (bars.hideNavBar) c.hide(WindowInsetsCompat.Type.navigationBars())
+        else c.show(WindowInsetsCompat.Type.navigationBars())
+        if (bars.hideStatusBar) c.hide(WindowInsetsCompat.Type.statusBars())
+        else c.show(WindowInsetsCompat.Type.statusBars())
+        // Dark icons on light themes, light icons on dark ones.
+        c.isAppearanceLightStatusBars = !bars.darkMode
+        c.isAppearanceLightNavigationBars = !bars.darkMode
     }
 }

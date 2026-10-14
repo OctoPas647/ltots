@@ -41,6 +41,12 @@ data class ThemeConfig(
     val spectrumStyle: SpectrumStyle = SpectrumStyle.CURVE,
     val spectrumOpacity: Float = 0.85f,
     val showPreEqGhost: Boolean = true,
+    /** AMOLED: pure #000 background — no colour blobs or artwork glow, so black pixels stay off. */
+    val pureBlack: Boolean = false,
+    /** Hide Android's navigation bar inside the app (swipe up from the bottom edge to reveal it). */
+    val hideNavBar: Boolean = true,
+    /** Hide the status bar (clock, battery) too, for fully full-screen. */
+    val hideStatusBar: Boolean = false,
 )
 
 data class AppSettings(
@@ -112,6 +118,7 @@ object Json {
         put("corner", t.cornerDp.toDouble()); put("dark", t.darkMode)
         put("specStyle", t.spectrumStyle.name); put("specOpacity", t.spectrumOpacity.toDouble())
         put("ghost", t.showPreEqGhost)
+        put("black", t.pureBlack); put("hideNav", t.hideNavBar); put("hideStatus", t.hideStatusBar)
     }
 
     fun theme(o: JSONObject): ThemeConfig {
@@ -134,6 +141,9 @@ object Json {
             spectrumStyle = runCatching { SpectrumStyle.valueOf(o.optString("specStyle")) }.getOrDefault(d.spectrumStyle),
             spectrumOpacity = o.optDouble("specOpacity", d.spectrumOpacity.toDouble()).toFloat(),
             showPreEqGhost = o.optBoolean("ghost", d.showPreEqGhost),
+            pureBlack = o.optBoolean("black", d.pureBlack),
+            hideNavBar = o.optBoolean("hideNav", d.hideNavBar),
+            hideStatusBar = o.optBoolean("hideStatus", d.hideStatusBar),
         )
     }
 

@@ -26,6 +26,10 @@ newer APK updates the app and keeps your settings.
   instead of LDAC, and offers **bit-perfect USB output** (Android 14+) for USB DACs.
 - **Liquid glass UI** – real refraction and blur; colours, blur, refraction, tint, rim light, corner
   roundness, background motion, album-art glow and visualizer style are all adjustable.
+- **AMOLED theme** (default on new installs) – pure black with an electric-cyan accent; "Pure black"
+  can also be switched on for any theme.
+- **Full screen** – the navigation bar is hidden inside the app (swipe up from the bottom edge to
+  bring it back); the status bar can be hidden too.
 - Local library with songs, albums, artists and search.
 
 ## Roadmap

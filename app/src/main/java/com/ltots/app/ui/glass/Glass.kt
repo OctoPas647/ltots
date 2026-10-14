@@ -144,9 +144,18 @@ fun AppBackground(artwork: Bitmap?, modifier: Modifier = Modifier) {
     val a = cfg.gradientA.toColor()
     val b = cfg.gradientB.toColor()
     val c = cfg.gradientC.toColor()
-    val base = if (pal.dark) Color(0xFF07060C) else Color(0xFFF4F2FA)
+    val base = when {
+        cfg.pureBlack -> Color.Black
+        pal.dark -> Color(0xFF07060C)
+        else -> Color(0xFFF4F2FA)
+    }
+    if (cfg.pureBlack) {
+        // AMOLED: true black only, so the screen's pixels stay switched off behind the glass.
+        Box(modifier.background(Color.Black))
+        return
+    }
 
-    val t by if (cfg.animateBackground) {
+    val t by if (cfg.animateBackground && !cfg.pureBlack) {
         val period = (60000 / max(0.05f, cfg.animationSpeed)).toInt()
         rememberInfiniteTransition(label = "bg").animateFloat(
             0f, (2 * Math.PI).toFloat(),

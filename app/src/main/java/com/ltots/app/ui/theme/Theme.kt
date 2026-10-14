@@ -25,8 +25,26 @@ object ThemeState {
     private val _config = MutableStateFlow(ThemeConfig())
     val config: StateFlow<ThemeConfig> = _config
 
-    fun init() {
-        _config.value = Store.loadTheme()
+    /** The AMOLED theme: pure black with an electric-cyan accent. Default for new installs. */
+    val amoled = ThemeConfig(
+        accent = 0xFF00E5FF, gradientA = 0xFF000000, gradientB = 0xFF000000, gradientC = 0xFF003A42,
+        pureBlack = true, animateBackground = false, artworkBackground = false,
+        glassTint = 0.55f, rimLight = 0.9f, refraction = 0.4f, darkMode = true,
+    )
+
+    /**
+     * @param freshInstall true on the very first run. New installs start on AMOLED; existing
+     *   installs that never picked a theme keep the one they've been seeing.
+     */
+    fun init(freshInstall: Boolean) {
+        val saved = Store.loadTheme()
+        _config.value = saved ?: if (freshInstall) amoled else ThemeConfig()
+        if (saved == null) Store.saveTheme(_config.value)
+    }
+
+    /** Switch to a preset look without touching the system-bar choices. */
+    fun applyPreset(t: ThemeConfig) = update { cur ->
+        t.copy(hideNavBar = cur.hideNavBar, hideStatusBar = cur.hideStatusBar)
     }
 
     fun update(transform: (ThemeConfig) -> ThemeConfig) {
@@ -35,9 +53,10 @@ object ThemeState {
         Store.saveTheme(t)
     }
 
-    fun reset() = update { ThemeConfig() }
+    fun reset() = applyPreset(amoled)
 
     val presets: List<Pair<String, ThemeConfig>> = listOf(
+        "AMOLED" to amoled,
         "Aurora" to ThemeConfig(),
         "Sunset" to ThemeConfig(accent = 0xFFFF8A5C, gradientA = 0xFF4A1230, gradientB = 0xFF6B2A10, gradientC = 0xFF2B0F4D),
         "Ocean" to ThemeConfig(accent = 0xFF3FD5FF, gradientA = 0xFF04263F, gradientB = 0xFF06435A, gradientC = 0xFF0C1C4A),
@@ -80,15 +99,22 @@ fun LToTSTheme(content: @Composable () -> Unit) {
         text = text,
         textDim = text.copy(alpha = 0.72f),
         textFaint = text.copy(alpha = 0.45f),
-        glassTint = if (dark) lerp(Color(0xFF15102A), accent, 0.12f) else Color.White,
+        glassTint = when {
+            cfg.pureBlack -> lerp(Color(0xFF0B0B0D), accent, 0.05f)
+            dark -> lerp(Color(0xFF15102A), accent, 0.12f)
+            else -> Color.White
+        },
         line = text.copy(alpha = 0.12f),
         dark = dark,
     )
     val scheme = if (dark) {
         darkColorScheme(
             primary = accent, onPrimary = palette.onAccent, secondary = accent,
-            background = Color.Transparent, surface = Color(0xFF1A1630), onSurface = text, onBackground = text,
-            surfaceContainerHigh = Color(0xFF241F3D), outline = palette.line,
+            background = Color.Transparent,
+            surface = if (cfg.pureBlack) Color(0xFF0E0E10) else Color(0xFF1A1630),
+            onSurface = text, onBackground = text,
+            surfaceContainerHigh = if (cfg.pureBlack) Color(0xFF151518) else Color(0xFF241F3D),
+            outline = palette.line,
         )
     } else {
         lightColorScheme(

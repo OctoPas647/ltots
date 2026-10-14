@@ -16,6 +16,10 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -92,7 +96,7 @@ fun AppRoot() {
         AppBackground(artwork, Modifier.fillMaxSize().layerBackdrop(backdrop))
 
         CompositionLocalProvider(LocalBackdrop provides backdrop) {
-            Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars)) {
+            Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars.union(WindowInsets.displayCutout.only(WindowInsetsSides.Top)))) {
                 Crossfade(tab, label = "tab") { t ->
                     when (t) {
                         Tab.LIBRARY -> LibraryScreen(player, onOpenPlayer = { tab = Tab.PLAYER })

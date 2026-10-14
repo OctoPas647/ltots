@@ -11,7 +11,8 @@ class LToTSApp : Application() {
     override fun onCreate() {
         super.onCreate()
         Store.init(this)
-        ThemeState.init()
+        val pkg = packageManager.getPackageInfo(packageName, 0)
+        ThemeState.init(freshInstall = pkg.firstInstallTime == pkg.lastUpdateTime)
         AudioEngine.init(this)
     }
 }

@@ -2,6 +2,7 @@ package com.ltots.app.ui.screens
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -72,13 +73,17 @@ fun LookScreen() {
                 SectionTitle("Themes", Modifier.padding(horizontal = 16.dp))
                 Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     ThemeState.presets.forEach { (name, t) ->
-                        Column(Modifier.clip(RoundedCornerShape(16.dp)).clickable { set { t } }.padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        val on = cfg.copy(hideNavBar = t.hideNavBar, hideStatusBar = t.hideStatusBar) == t
+                        Column(Modifier.clip(RoundedCornerShape(16.dp)).clickable { ThemeState.applyPreset(t) }.padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                             Box(
                                 Modifier.size(64.dp).clip(RoundedCornerShape(16.dp)).background(
                                     Brush.linearGradient(listOf(t.gradientA.toColor(), t.accent.toColor(), t.gradientB.toColor()))
-                                )
+                                ).border(if (on) 2.dp else 1.dp, if (on) pal.text else pal.text.copy(alpha = 0.15f), RoundedCornerShape(16.dp))
                             )
-                            Text(name, color = pal.textDim, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
+                            Text(
+                                name, color = if (on) pal.text else pal.textDim, style = MaterialTheme.typography.bodySmall,
+                                fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, modifier = Modifier.padding(top = 4.dp),
+                            )
                         }
                     }
                 }
@@ -105,12 +110,33 @@ fun LookScreen() {
         GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
             Column(Modifier.padding(16.dp)) {
                 SectionTitle("Background")
-                SwitchRow("Dark mode", cfg.darkMode, { on -> set { it.copy(darkMode = on) } })
-                SwitchRow("Moving colours", cfg.animateBackground, { on -> set { it.copy(animateBackground = on) } })
-                if (cfg.animateBackground) {
-                    LabeledSlider("Motion speed", cfg.animationSpeed, { v -> set { it.copy(animationSpeed = v) } }, 0.1f..3f, "%.1f×".format(Locale.ROOT, cfg.animationSpeed))
+                SwitchRow(
+                    "Pure black (AMOLED)", cfg.pureBlack, { on -> set { it.copy(pureBlack = on, darkMode = if (on) true else it.darkMode) } },
+                    sub = "True black background — black pixels switch off, saving battery.",
+                )
+                if (!cfg.pureBlack) {
+                    SwitchRow("Dark mode", cfg.darkMode, { on -> set { it.copy(darkMode = on) } })
+                    SwitchRow("Moving colours", cfg.animateBackground, { on -> set { it.copy(animateBackground = on) } })
+                    if (cfg.animateBackground) {
+                        LabeledSlider("Motion speed", cfg.animationSpeed, { v -> set { it.copy(animationSpeed = v) } }, 0.1f..3f, "%.1f×".format(Locale.ROOT, cfg.animationSpeed))
+                    }
+                    SwitchRow("Album art glow", cfg.artworkBackground, { on -> set { it.copy(artworkBackground = on) } }, sub = "Melts the current song's cover into the background.")
                 }
-                SwitchRow("Album art glow", cfg.artworkBackground, { on -> set { it.copy(artworkBackground = on) } }, sub = "Melts the current song's cover into the background.")
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
+            Column(Modifier.padding(16.dp)) {
+                SectionTitle("Screen")
+                SwitchRow(
+                    "Hide navigation bar", cfg.hideNavBar, { on -> set { it.copy(hideNavBar = on) } },
+                    sub = "Swipe up from the bottom edge to bring it back for a moment.",
+                )
+                SwitchRow(
+                    "Hide status bar", cfg.hideStatusBar, { on -> set { it.copy(hideStatusBar = on) } },
+                    sub = "Clock and battery at the top. Swipe down from the top edge to see them.",
+                )
             }
         }
 
@@ -130,7 +156,7 @@ fun LookScreen() {
 
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-            Pill("Reset look to default", false, { ThemeState.reset() })
+            Pill("Reset look to default (AMOLED)", false, { ThemeState.reset() })
         }
         Spacer(Modifier.height(BottomChrome.calculateBottomPadding() - 80.dp))
     }
