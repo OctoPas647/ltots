@@ -203,65 +203,71 @@ private fun PitchSpeedCard() {
     val pal = LocalPalette.current
     val cents by AudioEngine.pitchCents.collectAsState()
     val speed by AudioEngine.speed.collectAsState()
+    val tape by AudioEngine.tape.collectAsState()
     val settings by AudioEngine.settings.collectAsState()
-    var tapeMode by rememberSaveable { mutableStateOf(false) }
-
-    fun setSpeed(s: Float) {
-        val sp = s.coerceIn(0.25f, 3f)
-        val c = if (tapeMode) (1200.0 * ln(sp.toDouble()) / ln(2.0)).roundToInt() else cents
-        AudioEngine.setPitchSpeed(c, sp)
-    }
+    val sliderColors = SliderDefaults.colors(
+        thumbColor = pal.accent, activeTrackColor = pal.accent, inactiveTrackColor = pal.text.copy(alpha = 0.15f),
+        activeTickColor = androidx.compose.ui.graphics.Color.Transparent, inactiveTickColor = androidx.compose.ui.graphics.Color.Transparent,
+    )
 
     GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
         Column(Modifier.padding(18.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 SectionTitle("Pitch & speed", Modifier.weight(1f))
-                Pill("Tape", tapeMode, { tapeMode = !tapeMode })
+                Pill("Tape", tape, { AudioEngine.setTape(!tape) })
                 Spacer(Modifier.width(8.dp))
-                Pill("Reset", false, { AudioEngine.setPitchSpeed(0, 1f) })
+                Pill("Reset", false, { AudioEngine.resetPitchSpeed() })
             }
 
-            // Pitch
+            // Pitch — heard live while dragging (in tape mode it's applied on release).
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Pitch", color = pal.textDim, modifier = Modifier.weight(1f))
                 Text(pitchLabel(cents), color = pal.text, fontWeight = FontWeight.SemiBold)
             }
             Slider(
-                value = cents / 100f, onValueChange = { v ->
-                    val c = (v * 100).roundToInt()
-                    if (tapeMode) AudioEngine.setPitchSpeed(c, 2.0.pow(c / 1200.0).toFloat()) else AudioEngine.setPitchSpeed(c, speed)
-                },
+                value = (cents / 100f).coerceIn(-12f, 12f),
+                // Snaps to whole semitones; the ±10 ct buttons fine-tune.
+                onValueChange = { v -> AudioEngine.setPitch(v.roundToInt() * 100 + cents.mod(100).let { if (it > 50) it - 100 else it }) },
+                steps = 23,
+                onValueChangeFinished = { if (tape) AudioEngine.commit() },
                 valueRange = -12f..12f,
-                colors = SliderDefaults.colors(thumbColor = pal.accent, activeTrackColor = pal.accent, inactiveTrackColor = pal.text.copy(alpha = 0.15f)),
+                colors = sliderColors,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(-100 to "−1 st", -10 to "−10 ct", 10 to "+10 ct", 100 to "+1 st").forEach { (d, l) ->
                     Pill(l, false, {
-                        val c = cents + d
-                        if (tapeMode) AudioEngine.setPitchSpeed(c, 2.0.pow(c / 1200.0).toFloat()) else AudioEngine.setPitchSpeed(c, speed)
+                        AudioEngine.setPitch(cents + d)
+                        if (tape) AudioEngine.commit()
                     })
                 }
             }
 
             Spacer(Modifier.height(14.dp))
-            // Speed
+            // Speed — previewed while dragging, applied on release (no stutter while you drag).
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Speed", color = pal.textDim, modifier = Modifier.weight(1f))
                 Text("%.2f×".format(Locale.ROOT, speed), color = pal.text, fontWeight = FontWeight.SemiBold)
             }
             Slider(
-                value = speed.coerceIn(0.5f, 2f), onValueChange = { setSpeed((it * 100).roundToInt() / 100f) },
+                value = speed.coerceIn(0.5f, 2f),
+                onValueChange = { AudioEngine.previewSpeed((it * 100).roundToInt() / 100f) },
+                onValueChangeFinished = { AudioEngine.commit() },
                 valueRange = 0.5f..2f,
-                colors = SliderDefaults.colors(thumbColor = pal.accent, activeTrackColor = pal.accent, inactiveTrackColor = pal.text.copy(alpha = 0.15f)),
+                colors = sliderColors,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(-0.05f to "−0.05", -0.01f to "−0.01", 0.01f to "+0.01", 0.05f to "+0.05").forEach { (d, l) ->
-                    Pill(l, false, { setSpeed(((speed + d) * 100).roundToInt() / 100f) })
+                    Pill(l, false, {
+                        AudioEngine.previewSpeed(((speed + d) * 100).roundToInt() / 100f)
+                        AudioEngine.commit()
+                    })
                 }
             }
             Text(
-                if (tapeMode) "Tape mode: speed and pitch move together, like a record."
-                else if (settings.perSongPitchSpeed) "Saved for this song." else "Applies to every song.",
+                buildString {
+                    append(if (tape) "Tape mode: speed and pitch move together, like a record." else "Pitch and speed are independent.")
+                    append(if (settings.perSongPitchSpeed) " Saved for this song." else " Applies to every song.")
+                },
                 color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 10.dp),
             )
         }

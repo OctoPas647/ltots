@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -140,7 +141,8 @@ fun DownloadsScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
     BackHandler(enabled = stack.isNotEmpty()) { stack.removeAt(stack.lastIndex) }
 
     // Load whatever page is on top of the stack.
-    LaunchedEffect(page) {
+    var reload by remember { mutableStateOf(0) }
+    LaunchedEffect(page, reload) {
         val p = page ?: run { loaded = null; return@LaunchedEffect }
         loaded = Loaded.Loading
         loaded = runCatching<Loaded> {
@@ -173,7 +175,7 @@ fun DownloadsScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
             is LinkTarget.Song -> scope.launch {
                 toast = "Looking up the song…"
                 val s = runCatching { InnerTube.song(link.videoId) }.getOrNull()
-                    ?: YtSong(link.videoId, "YouTube video", emptyList(), isVideo = true)
+                    ?: YtSong(link.videoId, com.ltots.app.download.Downloader.PLACEHOLDER_TITLE, emptyList(), isVideo = true)
                 val n = DownloadManager.enqueueSong(s)
                 toast = if (n > 0) "Downloading “${s.title}”" else "Already downloaded or in the queue"
                 if (fromShare) input = ""
@@ -249,7 +251,7 @@ fun DownloadsScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
             when (val l = loaded) {
                 null -> HomeContent(player, onOpenPlayer, onToast = { toast = it })
                 Loaded.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = pal.accent) }
-                is Loaded.Error -> Message(l.message, "Try again") { val p = stack.removeAt(stack.lastIndex); stack += p }
+                is Loaded.Error -> Message(l.message, "Try again") { reload++ }
                 is Loaded.Results -> SearchContent(l.result, (page as? Page.Search)?.params,
                     onChip = { chip -> (page as? Page.Search)?.let { p -> stack[stack.lastIndex] = p.copy(params = if (chip.selected) null else chip.params) } },
                     onOpen = ::open)
@@ -342,9 +344,10 @@ private fun SearchContent(r: SearchResult, params: String?, onChip: (com.ltots.a
             return@Column
         }
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 12.dp)) {
-            r.sections.forEach { s ->
-                s.title?.let { t -> item(key = "h_$t${s.hashCode()}") { SectionTitle(t, Modifier.padding(start = 12.dp, top = 8.dp)) } }
-                items(s.items, key = { keyOf(it) + s.hashCode() }) { ItemRow(it, onClick = { onOpen(it) }) }
+            // Keys include the position: YouTube sometimes lists the same song twice.
+            r.sections.forEachIndexed { si, s ->
+                s.title?.let { t -> item(key = "h$si") { SectionTitle(t, Modifier.padding(start = 12.dp, top = 8.dp)) } }
+                itemsIndexed(s.items, key = { idx, it -> "$si-$idx-" + keyOf(it) }) { _, it -> ItemRow(it, onClick = { onOpen(it) }) }
             }
             item {
                 Text(
@@ -414,7 +417,7 @@ private fun CollectionContent(c: Collection, onToast: (String) -> Unit, onArtist
                 }
             }
         }
-        items(c.tracks, key = { "t" + it.videoId }) { t ->
+        itemsIndexed(c.tracks, key = { idx, it -> "t$idx-" + it.videoId }) { _, t ->
             val on = t.videoId in selected
             ItemRow(t, onClick = { if (on) selected.remove(t.videoId) else selected.add(t.videoId) }, leading = {
                 Checkbox(
@@ -444,7 +447,7 @@ private fun ArtistContent(a: ArtistPage, onOpen: (YtItem) -> Unit) {
         if (a.sections.isEmpty()) item { Text("Nothing to show for this artist here.", color = pal.textDim, modifier = Modifier.padding(16.dp)) }
         a.sections.forEachIndexed { i, s ->
             s.title?.let { t -> item("h$i") { SectionTitle(t, Modifier.padding(start = 12.dp, top = 8.dp)) } }
-            items(s.items, key = { "$i" + keyOf(it) }) { ItemRow(it, onClick = { onOpen(it) }) }
+            itemsIndexed(s.items, key = { idx, it -> "$i-$idx-" + keyOf(it) }) { _, it -> ItemRow(it, onClick = { onOpen(it) }) }
         }
     }
 }

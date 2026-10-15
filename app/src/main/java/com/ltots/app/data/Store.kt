@@ -76,12 +76,16 @@ object Store {
         return "profiles/$hash.json"
     }
 
+    /** Thread-safe (also called from the audio thread); "no profile" is cached too. */
     fun loadProfile(key: String): SongProfile? = synchronized(profileCache) {
-        profileCache.getOrPut(key) { read(profileFile(key))?.let { Json.profile(it) } }
+        if (profileCache.containsKey(key)) return profileCache[key]
+        val p = read(profileFile(key))?.let { Json.profile(it) }
+        profileCache[key] = p
+        p
     }
 
     fun saveProfile(key: String, p: SongProfile?) {
-        val empty = p == null || (p.eq == null && p.pitchCents == null && p.speed == null)
+        val empty = p == null || p.isEmpty
         synchronized(profileCache) { profileCache[key] = if (empty) null else p }
         if (empty) deleteFile(profileFile(key))
         else writeDebounced(profileFile(key)) { Json.profile(p).toString() }

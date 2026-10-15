@@ -21,18 +21,28 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.math.abs
+import kotlin.math.ln
 import kotlin.math.pow
+import kotlin.math.roundToInt
 
 /**
- * App-wide sound engine. Owns the EQ processor, per-song profiles, pitch/speed, output
- * monitoring and bit-perfect routing. The playback service builds its player from here, and
- * the UI reads/edits everything through these flows.
+ * App-wide sound engine. Owns the processing chain, per-song profiles, pitch/speed, output
+ * monitoring and bit-perfect routing.
+ *
+ * The audio thread reads settings through [SoundSource] (by song id), so each song gets its own
+ * EQ and pitch from its first sample. The UI edits through the functions below; pitch changes
+ * reach the audio instantly, speed changes are applied when a slider is released.
  */
 @UnstableApi
-object AudioEngine {
+object AudioEngine : SoundSource {
     val tap = AnalyzerTap()
-    val eqProcessor = EqProcessor(tap)
+    val eqProcessor = EqProcessor(tap, this)
+    val timePitch = TimePitchProcessor(this)
+    val outputStage = OutputStage()
     private val scope = MainScope()
+    private val versionCounter = AtomicInteger(0)
 
     private lateinit var appContext: Context
     lateinit var output: OutputMonitor
@@ -51,7 +61,7 @@ object AudioEngine {
     lateinit var defaultEq: MutableStateFlow<EqState>
         private set
 
-    /** Profile key (media id) of the song that's playing. */
+    /** Profile key (media id) of the song the UI shows as playing. */
     private val _songKey = MutableStateFlow<String?>(null)
     val songKey: StateFlow<String?> = _songKey
 
@@ -65,6 +75,8 @@ object AudioEngine {
     val pitchCents: StateFlow<Int> = _pitchCents
     private val _speed = MutableStateFlow(1f)
     val speed: StateFlow<Float> = _speed
+    private val _tape = MutableStateFlow(false)
+    val tape: StateFlow<Boolean> = _tape
 
     private var initialized = false
 
@@ -75,28 +87,50 @@ object AudioEngine {
         settings = MutableStateFlow(Store.loadSettings())
         defaultEq = MutableStateFlow(Store.loadDefaultEq())
         output = OutputMonitor(appContext)
-
         effectiveEq = combine(defaultEq, _songProfile) { def, prof -> prof?.eq ?: def }
             .stateIn(scope, SharingStarted.Eagerly, defaultEq.value)
-        scope.launch { effectiveEq.collect { eqProcessor.setState(it) } }
-        eqProcessor.setState(effectiveEq.value)
-        eqProcessor.int16Output = settings.value.bitPerfectUsb
-
+        outputStage.int16Output = settings.value.bitPerfectUsb
+        if (!settings.value.perSongPitchSpeed) loadGlobalPitchSpeed()
         output.onDeviceChanged = { reapplyBitPerfect() }
         scope.launch { tap.info.collect { reapplyBitPerfect() } }
     }
 
+    private fun changed() { versionCounter.incrementAndGet() }
+
+    // ---- SoundSource (called on the audio thread) ------------------------------------------
+
+    override val version: Int get() = versionCounter.get()
+
+    override fun eqFor(mediaId: String?): EqState {
+        if (!initialized) return EqState(enabled = false)
+        val prof = mediaId?.let { Store.loadProfile(it) }
+        return prof?.eq ?: defaultEq.value
+    }
+
+    override fun pitchScaleFor(mediaId: String?): Double {
+        if (!initialized) return 1.0
+        val s = settings.value
+        if (!s.perSongPitchSpeed || mediaId == null) return scaleOf(_pitchCents.value, _speed.value, _tape.value)
+        val p = Store.loadProfile(mediaId)
+        return scaleOf(p?.pitchCents ?: 0, p?.speed ?: 1f, p?.tape ?: false)
+    }
+
+    override val preserveFormants: Boolean get() = initialized && settings.value.preserveFormants
+
+    private fun scaleOf(cents: Int, speed: Float, tape: Boolean): Double =
+        if (tape) speed.toDouble() else 2.0.pow(cents / 1200.0)
+
     // ---- player ----------------------------------------------------------------------------
 
     fun buildPlayer(context: Context): ExoPlayer {
+        val chain = LToTSProcessorChain(eqProcessor, timePitch, outputStage)
         val renderers = object : DefaultRenderersFactory(context) {
             override fun buildAudioSink(
                 context: Context,
                 enableFloatOutput: Boolean,
                 enableAudioOutputPlaybackParams: Boolean,
             ): AudioSink = DefaultAudioSink.Builder(context)
-                // Our EQ runs first, then Media3's Sonic handles pitch & speed.
-                .setAudioProcessorChain(LToTSProcessorChain(eqProcessor))
+                .setAudioProcessorChain(chain)
                 .build()
         }
         val p = ExoPlayer.Builder(context, renderers)
@@ -108,8 +142,8 @@ object AudioEngine {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = onSongChanged(mediaItem)
         })
         _player.value = p
-        p.playbackParameters = PlaybackParameters(_speed.value, 2.0.pow(_pitchCents.value / 1200.0).toFloat())
         onSongChanged(p.currentMediaItem)
+        applySpeedToPlayer()
         return p
     }
 
@@ -124,13 +158,15 @@ object AudioEngine {
         val prof = key?.let { Store.loadProfile(it) }
         _songProfile.value = prof
         if (settings.value.perSongPitchSpeed) {
-            setPitchSpeed(prof?.pitchCents ?: 0, prof?.speed ?: 1f, persist = false)
+            _pitchCents.value = prof?.pitchCents ?: 0
+            _speed.value = prof?.speed ?: 1f
+            _tape.value = prof?.tape ?: false
+            applySpeedToPlayer()
         }
     }
 
     // ---- EQ editing ------------------------------------------------------------------------
 
-    /** True when the playing song has its own EQ (edits go to the song, not the default). */
     val songHasOwnEq: Boolean get() = _songProfile.value?.eq != null
 
     fun updateEq(transform: (EqState) -> EqState) {
@@ -145,55 +181,127 @@ object AudioEngine {
             defaultEq.value = updated
             Store.saveDefaultEq(updated)
         }
+        changed()
     }
 
-    /** Give the current song its own EQ, starting from what's playing now. */
     fun makeEqSongSpecific() {
         val key = _songKey.value ?: return
         val prof = (_songProfile.value ?: SongProfile()).copy(eq = effectiveEq.value)
         _songProfile.value = prof
         Store.saveProfile(key, prof)
+        changed()
     }
 
-    /** Drop the song's own EQ so it follows the default again. */
     fun useDefaultEqForSong() {
         val key = _songKey.value ?: return
         val prof = _songProfile.value?.copy(eq = null)
         _songProfile.value = prof
         Store.saveProfile(key, prof)
+        changed()
     }
 
     // ---- pitch & speed ---------------------------------------------------------------------
 
-    fun setPitchSpeed(cents: Int, speed: Float, persist: Boolean = true) {
-        val c = cents.coerceIn(-2400, 2400)
-        val s = speed.coerceIn(0.25f, 3f)
+    /** Pitch in cents (100 = one semitone). Heard immediately — safe to call while dragging. */
+    fun setPitch(cents: Int) {
+        val c = cents.coerceIn(-1200, 1200)
+        if (_tape.value) {
+            // Tape mode: pitch and speed move together; the speed part is applied by commit().
+            _pitchCents.value = c
+            _speed.value = 2.0.pow(c / 1200.0).toFloat().coerceIn(0.5f, 2f)
+            return
+        }
+        if (c == _pitchCents.value) return
         _pitchCents.value = c
-        _speed.value = s
-        _player.value?.playbackParameters = PlaybackParameters(s, 2.0.pow(c / 1200.0).toFloat())
-        if (persist && settings.value.perSongPitchSpeed) {
-            val key = _songKey.value ?: return
-            val base = _songProfile.value ?: SongProfile()
-            val prof = base.copy(
-                pitchCents = c.takeIf { it != 0 },
-                speed = s.takeIf { it != 1f },
-            )
-            _songProfile.value = prof
-            Store.saveProfile(key, prof)
+        persist()
+        changed()
+    }
+
+    /** Shows a new speed while the slider moves; it's applied by [commit]. */
+    fun previewSpeed(s: Float) {
+        val v = s.coerceIn(0.5f, 2f)
+        _speed.value = v
+        if (_tape.value) _pitchCents.value = (1200.0 * ln(v.toDouble()) / ln(2.0)).roundToInt()
+    }
+
+    /** Applies the previewed speed (and tape pitch) — call when a slider is released. */
+    fun commit() {
+        persist()
+        applySpeedToPlayer()
+        changed()
+    }
+
+    fun setTape(on: Boolean) {
+        if (on == _tape.value) return
+        _tape.value = on
+        if (on) _speed.value = 2.0.pow(_pitchCents.value / 1200.0).toFloat().coerceIn(0.5f, 2f)
+        else _speed.value = 1f
+        commit()
+    }
+
+    fun resetPitchSpeed() {
+        _pitchCents.value = 0
+        _speed.value = 1f
+        commit()
+    }
+
+    private fun applySpeedToPlayer() {
+        val p = _player.value ?: return
+        val s = _speed.value
+        if (abs(p.playbackParameters.speed - s) > 1e-4f || p.playbackParameters.pitch != 1f) {
+            p.playbackParameters = PlaybackParameters(s, 1f)
         }
     }
 
+    private fun persist() {
+        val c = _pitchCents.value
+        val s = _speed.value
+        val t = _tape.value
+        if (settings.value.perSongPitchSpeed) {
+            val key = _songKey.value ?: return
+            val prof = (_songProfile.value ?: SongProfile()).copy(
+                pitchCents = c.takeIf { it != 0 },
+                speed = s.takeIf { abs(it - 1f) > 1e-4f },
+                tape = t.takeIf { it },
+            )
+            _songProfile.value = prof
+            Store.saveProfile(key, prof)
+        } else {
+            updateSettingsQuiet { it.copy(globalPitchCents = c, globalSpeed = s, globalTape = t) }
+        }
+    }
+
+    private fun loadGlobalPitchSpeed() {
+        val s = settings.value
+        _pitchCents.value = s.globalPitchCents
+        _speed.value = s.globalSpeed
+        _tape.value = s.globalTape
+    }
+
     // ---- settings & bit-perfect ------------------------------------------------------------
+
+    private fun updateSettingsQuiet(transform: (AppSettings) -> AppSettings) {
+        val new = transform(settings.value)
+        settings.value = new
+        Store.saveSettings(new)
+    }
 
     fun updateSettings(transform: (AppSettings) -> AppSettings) {
         val old = settings.value
         val new = transform(old)
         settings.value = new
         Store.saveSettings(new)
+        if (old.perSongPitchSpeed != new.perSongPitchSpeed) {
+            if (new.perSongPitchSpeed) onSongChanged(_player.value?.currentMediaItem) else {
+                loadGlobalPitchSpeed()
+                applySpeedToPlayer()
+            }
+        }
         if (old.bitPerfectUsb != new.bitPerfectUsb) {
-            eqProcessor.int16Output = new.bitPerfectUsb
+            outputStage.int16Output = new.bitPerfectUsb
             reapplyBitPerfect(forceRebuild = true)
         }
+        changed()
     }
 
     private fun reapplyBitPerfect(forceRebuild: Boolean = false) {

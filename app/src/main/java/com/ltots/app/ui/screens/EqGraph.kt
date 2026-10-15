@@ -204,6 +204,8 @@ private fun DrawScope.drawGrid(g: GraphGeometry, text: Color, measurer: androidx
     for (f in listOf(50f, 100f, 200f, 500f, 1000f, 2000f, 5000f, 10000f)) {
         val x = g.x(f)
         drawLine(text.copy(alpha = 0.07f), Offset(x, 0f), Offset(x, size.height), strokeWidth = 1f)
-        drawText(measurer, formatFreq(f), Offset(x + 4f, size.height - 16f), style)
+        val label = measurer.measure(formatFreq(f), style)
+        // Sit the label fully inside the graph (it used to be clipped by the panel's edge).
+        drawText(label, topLeft = Offset(x + 4f, size.height - label.size.height - 10f))
     }
 }

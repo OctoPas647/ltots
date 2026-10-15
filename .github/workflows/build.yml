@@ -31,14 +31,21 @@ jobs:
       - name: Install Android SDK packages
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0" "build-tools;37.0.0" > /dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0" "build-tools;37.0.0" "ndk;29.0.14206865" "cmake;4.1.2" > /dev/null
 
       - name: Restore signing key
         if: env.HAS_KEY == 'true'
         run: echo "${{ secrets.LTOTS_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/ltots.jks"
 
-      - name: Audio engine tests
+      - name: Tests (audio engine, YouTube Music parser, UI screens)
         run: ./gradlew --no-daemon :app:testDebugUnitTest
+
+      - name: Keep UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ui-screenshots
+          path: app/build/ui-shots/
 
       - name: Build release APK
         env:

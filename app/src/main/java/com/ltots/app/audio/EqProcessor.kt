@@ -7,107 +7,176 @@ import androidx.media3.common.audio.BaseAudioProcessor
 import androidx.media3.common.util.UnstableApi
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import kotlin.math.abs
 import kotlin.math.pow
-import kotlin.math.tanh
 
 /**
- * The heart of LToTS' sound path. Sits in front of Media3's pitch/speed stage (Sonic) and:
- *  - runs every EQ band as a double-precision biquad (transposed direct form II),
- *  - applies preamp + automatic headroom so boosts never clip,
- *  - catches any remaining overs with a soft limiter just under 0 dBFS,
- *  - outputs 32-bit float, or TPDF-dithered 16-bit when bit-perfect USB output needs it,
- *  - copies the signal before and after the EQ into ring buffers for the live spectrum.
+ * First stage of LToTS' sound path:
+ *  - reads any PCM the decoder gives (16/24/32-bit or float) and outputs 32-bit float;
+ *  - runs every EQ band as a double-precision biquad;
+ *  - applies preamp + automatic headroom;
+ *  - when the EQ changes mid-song, crossfades from the old settings to the new ones over
+ *    ~20 ms so dragging a band never clicks;
+ *  - knows which song it is processing (from Media3's stream metadata) and uses that song's
+ *    own EQ from its first sample;
+ *  - copies the signal before and after the EQ to the analyzer for the live view.
  */
 @UnstableApi
-class EqProcessor(private val analyzerTap: AnalyzerTap) : BaseAudioProcessor() {
+class EqProcessor(
+    private val analyzerTap: AnalyzerTap,
+    @Volatile var source: SoundSource = StaticSoundSource(),
+) : BaseAudioProcessor() {
 
-    /** Latest EQ requested by the UI. Swapped atomically; picked up on the audio thread. */
-    @Volatile private var requested: EqState = EqState()
+    private class Plan(val sections: Array<Section>, val gain: Double, val state: EqState)
 
-    /** When true, output dithered 16-bit PCM (needed for bit-perfect USB). Takes effect on reconfigure. */
-    @Volatile var int16Output: Boolean = false
+    private var plan: Plan? = null
+    /** Previous plan while a crossfade is running. */
+    private var fadingFrom: Plan? = null
+    private var fadePos = 0
+    private val fadeLen get() = (sampleRate / 50).coerceAtLeast(64) // 20 ms
 
-    private var applied: EqState? = null
-    private var appliedSampleRate = 0
-    private var sections: Array<Section> = emptyArray()
-    private var inputGain = 1.0
+    private var seenVersion = -1
+    private var mediaId: String? = null
     private var channels = 2
     private var sampleRate = 48000
     private var inEncoding = C.ENCODING_PCM_16BIT
-    private var outInt16 = false
-    private var ditherSeed = 0x2545F491
+    private var scratch = DoubleArray(0)
 
-    fun setState(state: EqState) {
-        requested = state
-    }
+    /** The song currently flowing through (for tests and diagnostics). */
+    val currentMediaId: String? get() = mediaId
 
     override fun onConfigure(inputAudioFormat: AudioFormat): AudioFormat {
         val enc = inputAudioFormat.encoding
         if (enc != C.ENCODING_PCM_16BIT && enc != C.ENCODING_PCM_FLOAT &&
             enc != C.ENCODING_PCM_24BIT && enc != C.ENCODING_PCM_32BIT
-        ) {
-            throw AudioProcessor.UnhandledAudioFormatException(inputAudioFormat)
+        ) throw AudioProcessor.UnhandledAudioFormatException(inputAudioFormat)
+        return AudioFormat(inputAudioFormat.sampleRate, inputAudioFormat.channelCount, C.ENCODING_PCM_FLOAT)
+    }
+
+    override fun onFlush(streamMetadata: AudioProcessor.StreamMetadata) {
+        val fmt = inputAudioFormat
+        val formatChanged = fmt.sampleRate != sampleRate || fmt.channelCount != channels
+        sampleRate = fmt.sampleRate
+        channels = fmt.channelCount
+        inEncoding = fmt.encoding
+        val newId = StreamIds.mediaIdOf(streamMetadata) ?: mediaId
+        // A new song starting right after the previous one (gapless): keep the filters'
+        // memory so the join stays seamless. A seek or format change starts clean.
+        val gapless = newId != mediaId && streamMetadata.positionOffsetUs == 0L && !formatChanged
+        mediaId = newId
+        val newPlan = buildPlan(source.eqFor(mediaId), previous = if (gapless) plan else null)
+        if (!gapless) newPlan.sections.forEach { it.reset() }
+        plan = newPlan
+        fadingFrom = null
+        seenVersion = source.version
+        analyzerTap.onFormat(sampleRate, channels, inEncoding, C.ENCODING_PCM_FLOAT)
+        analyzerTap.onFlush(streamMetadata.positionOffsetUs)
+    }
+
+    override fun onReset() {
+        plan = null
+        fadingFrom = null
+        mediaId = null
+        seenVersion = -1
+    }
+
+    /** Settings changed while playing: switch with a short crossfade. */
+    private fun maybeUpdate() {
+        val v = source.version
+        if (v == seenVersion) return
+        seenVersion = v
+        val want = source.eqFor(mediaId)
+        val cur = plan
+        if (cur != null && cur.state == want) return
+        val next = buildPlan(want, previous = cur)
+        if (cur != null) {
+            fadingFrom = cur
+            fadePos = 0
         }
-        channels = inputAudioFormat.channelCount
-        sampleRate = inputAudioFormat.sampleRate
-        inEncoding = enc
-        outInt16 = int16Output
-        applied = null
-        analyzerTap.onFormat(sampleRate, channels, enc, if (outInt16) C.ENCODING_PCM_16BIT else C.ENCODING_PCM_FLOAT)
-        return AudioFormat(
-            sampleRate,
-            channels,
-            if (outInt16) C.ENCODING_PCM_16BIT else C.ENCODING_PCM_FLOAT,
-        )
+        plan = next
+    }
+
+    private fun buildPlan(state: EqState, previous: Plan?): Plan {
+        val fs = sampleRate.toDouble()
+        val old = previous?.sections?.associateBy { it.id }
+        val active = if (state.enabled) state.bands.filter { it.enabled } else emptyList()
+        val sections = active.mapNotNull { band ->
+            val coefs = BiquadCoefs.design(band, fs)
+            if (coefs === BiquadCoefs.IDENTITY) return@mapNotNull null
+            // New filter objects, but starting from the old ones' memory, so the faded-in
+            // path is already "warmed up" and doesn't ring.
+            Section(band.id, channels).also { s ->
+                s.coefs = coefs
+                old?.get(band.id)?.let { o -> if (o.channels == channels) s.copyStateFrom(o) }
+            }
+        }.toTypedArray()
+        val gain = 10.0.pow(EqMath.inputGainDb(state, fs) / 20.0)
+        return Plan(sections, gain, state)
     }
 
     override fun queueInput(inputBuffer: ByteBuffer) {
         if (!inputBuffer.hasRemaining()) return
-        refreshFiltersIfNeeded()
+        if (plan == null) plan = buildPlan(source.eqFor(mediaId), null)
+        maybeUpdate()
 
-        val inBytesPerSample = when (inEncoding) {
+        val inBytes = when (inEncoding) {
             C.ENCODING_PCM_16BIT -> 2
             C.ENCODING_PCM_24BIT -> 3
             else -> 4
         }
-        val frames = inputBuffer.remaining() / (inBytesPerSample * channels)
-        val outBytesPerSample = if (outInt16) 2 else 4
-        val out = replaceOutputBuffer(frames * channels * outBytesPerSample)
-        inputBuffer.order(ByteOrder.LITTLE_ENDIAN)
-        out.order(ByteOrder.nativeOrder())
-
-        val secs = sections
-        val nSec = secs.size
-        val gain = inputGain
         val ch = channels
-        val tap = analyzerTap
+        val frames = inputBuffer.remaining() / (inBytes * ch)
+        inputBuffer.order(ByteOrder.LITTLE_ENDIAN)
+        val n = frames * ch
+        if (scratch.size < n) scratch = DoubleArray(n)
+        val x = scratch
+        for (i in 0 until n) x[i] = readSample(inputBuffer)
+        // Skip any stray partial frame so the buffer is fully consumed.
+        inputBuffer.position(inputBuffer.limit())
 
+        val out = replaceOutputBuffer(n * 4).order(ByteOrder.nativeOrder())
+        val p = plan!!
+        val from = fadingFrom
+        val tap = analyzerTap
+        val fl = fadeLen
         for (f in 0 until frames) {
-            var monoIn = 0f
-            var monoOut = 0f
+            var monoIn = 0.0
+            var monoOut = 0.0
+            val base = f * ch
             for (c in 0 until ch) {
-                val x: Double = readSample(inputBuffer)
-                monoIn += x.toFloat()
-                var y = x * gain
-                for (s in 0 until nSec) y = secs[s].process(y, c)
-                y = softLimit(y)
-                monoOut += y.toFloat()
-                if (outInt16) {
-                    out.putShort(toInt16Dithered(y))
-                } else {
-                    out.putFloat(y.toFloat())
+                val s = x[base + c]
+                monoIn += s
+                var y = run(p, s, c)
+                if (from != null) {
+                    val yOld = run(from, s, c)
+                    val t = (fadePos + 1).toDouble() / fl
+                    y = yOld + (y - yOld) * t
                 }
+                monoOut += y
+                out.putFloat(y.toFloat())
             }
-            tap.write(monoIn / ch, monoOut / ch)
+            if (from != null && ++fadePos >= fl) fadingFrom = null
+            tap.write((monoIn / ch).toFloat(), (monoOut / ch).toFloat())
         }
         tap.commit(frames)
         out.flip()
+        guardStability(p)
+    }
+
+    private fun run(p: Plan, x: Double, c: Int): Double {
+        var y = x * p.gain
+        val secs = p.sections
+        for (s in secs.indices) y = secs[s].process(y, c)
+        return y
+    }
+
+    /** A filter must never get stuck on NaN/infinity (that would silence the song for good). */
+    private fun guardStability(p: Plan) {
+        for (s in p.sections) if (!s.isFinite()) s.reset()
     }
 
     private fun readSample(b: ByteBuffer): Double = when (inEncoding) {
         C.ENCODING_PCM_16BIT -> b.short / 32768.0
-        C.ENCODING_PCM_FLOAT -> b.float.toDouble()
+        C.ENCODING_PCM_FLOAT -> b.float.toDouble().let { if (it.isFinite()) it else 0.0 }
         C.ENCODING_PCM_24BIT -> {
             val lo = b.get().toInt() and 0xFF
             val mid = b.get().toInt() and 0xFF
@@ -117,47 +186,7 @@ class EqProcessor(private val analyzerTap: AnalyzerTap) : BaseAudioProcessor() {
         else -> b.int / 2147483648.0
     }
 
-    private fun toInt16Dithered(y: Double): Short {
-        // Triangular (TPDF) dither of ±1 LSB keeps quantisation noise benign and signal-independent.
-        ditherSeed = ditherSeed xor (ditherSeed shl 13)
-        ditherSeed = ditherSeed xor (ditherSeed ushr 17)
-        ditherSeed = ditherSeed xor (ditherSeed shl 5)
-        val r1 = (ditherSeed and 0xFFFF) / 65536.0
-        val r2 = ((ditherSeed ushr 16) and 0xFFFF) / 65536.0
-        val v = y * 32767.0 + (r1 - r2)
-        val rounded = Math.round(v).coerceIn(-32768L, 32767L)
-        return rounded.toInt().toShort()
-    }
-
-    private fun refreshFiltersIfNeeded() {
-        val want = requested
-        if (want === applied && appliedSampleRate == sampleRate) return
-        val fs = sampleRate.toDouble()
-        val old = sections.associateBy { it.id }
-        val active = if (want.enabled) want.bands.filter { it.enabled } else emptyList()
-        sections = active.map { band ->
-            val coefs = BiquadCoefs.design(band, fs)
-            // Keep filter memory for bands that already existed so dragging a band is click-free.
-            val sec = old[band.id]?.takeIf { it.channels == channels } ?: Section(band.id, channels)
-            sec.coefs = coefs
-            sec
-        }.filter { it.coefs !== BiquadCoefs.IDENTITY }.toTypedArray()
-        inputGain = 10.0.pow(EqMath.inputGainDb(want, fs) / 20.0)
-        applied = want
-        appliedSampleRate = sampleRate
-    }
-
-    override fun onFlush(streamMetadata: AudioProcessor.StreamMetadata) {
-        for (s in sections) s.reset()
-        analyzerTap.onFlush(streamMetadata.positionOffsetUs)
-    }
-
-    override fun onReset() {
-        sections = emptyArray()
-        applied = null
-    }
-
-    private class Section(val id: Long, val channels: Int) {
+    internal class Section(val id: Long, val channels: Int) {
         var coefs: BiquadCoefs = BiquadCoefs.IDENTITY
         private val z1 = DoubleArray(channels)
         private val z2 = DoubleArray(channels)
@@ -170,22 +199,17 @@ class EqProcessor(private val analyzerTap: AnalyzerTap) : BaseAudioProcessor() {
             return y
         }
 
+        fun copyStateFrom(o: Section) {
+            o.z1.copyInto(z1); o.z2.copyInto(z2)
+        }
+
+        fun isFinite(): Boolean {
+            for (c in 0 until channels) if (!z1[c].isFinite() || !z2[c].isFinite()) return false
+            return true
+        }
+
         fun reset() {
             z1.fill(0.0); z2.fill(0.0)
-        }
-    }
-
-    companion object {
-        private const val KNEE = 0.89 // ≈ -1 dBFS: everything below passes untouched
-        private const val CEILING = 0.98 // ≈ -0.2 dBFS: nothing ever goes above this
-
-        /** Transparent below -1 dBFS; above it, rounds peaks off smoothly instead of hard clipping. */
-        fun softLimit(x: Double): Double {
-            val a = abs(x)
-            if (a <= KNEE) return x
-            val range = CEILING - KNEE
-            val y = KNEE + range * tanh((a - KNEE) / range)
-            return if (x < 0) -y else y
         }
     }
 }

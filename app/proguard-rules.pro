@@ -10,3 +10,6 @@
 -dontwarn java.beans.**
 -dontwarn org.w3c.dom.bootstrap.**
 -keep class com.ltots.app.download.DownloadService { *; }
+
+# Rubber Band: the native code looks up this class, its native methods and its "handle" field by name.
+-keep class com.breakfastquay.rubberband.** { *; }

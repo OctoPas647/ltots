@@ -13,7 +13,11 @@ data class SongProfile(
     /** Pitch shift in cents (100 cents = 1 semitone). */
     val pitchCents: Int? = null,
     val speed: Float? = null,
-)
+    /** Speed and pitch linked like a record player. */
+    val tape: Boolean? = null,
+) {
+    val isEmpty get() = eq == null && pitchCents == null && speed == null && tape == null
+}
 
 data class EqPreset(val name: String, val eq: EqState, val builtIn: Boolean = false)
 
@@ -57,6 +61,12 @@ data class AppSettings(
     /** Remember pitch & speed per song (otherwise they reset on every new song). */
     val perSongPitchSpeed: Boolean = true,
     val analyzerBands: Int = 96,
+    /** Keep voices sounding natural when shifting pitch (off = classic key change). */
+    val preserveFormants: Boolean = false,
+    /** Pitch/speed used for every song when [perSongPitchSpeed] is off. */
+    val globalPitchCents: Int = 0,
+    val globalSpeed: Float = 1f,
+    val globalTape: Boolean = false,
 )
 
 /** Hand-written JSON (de)serialisation — no reflection, so it survives R8 untouched. */
@@ -103,12 +113,14 @@ object Json {
         p.eq?.let { put("eq", eq(it)) }
         p.pitchCents?.let { put("pitch", it) }
         p.speed?.let { put("speed", it.toDouble()) }
+        p.tape?.let { put("tape", it) }
     }
 
     fun profile(o: JSONObject) = SongProfile(
         eq = o.optJSONObject("eq")?.let { eq(it) },
         pitchCents = if (o.has("pitch")) o.getInt("pitch") else null,
         speed = if (o.has("speed")) o.getDouble("speed").toFloat() else null,
+        tape = if (o.has("tape")) o.getBoolean("tape") else null,
     )
 
     fun theme(t: ThemeConfig) = JSONObject().apply {
@@ -155,11 +167,17 @@ object Json {
         put("bitPerfect", s.bitPerfectUsb)
         put("perSongPS", s.perSongPitchSpeed)
         put("bands", s.analyzerBands)
+        put("formants", s.preserveFormants)
+        put("gPitch", s.globalPitchCents); put("gSpeed", s.globalSpeed.toDouble()); put("gTape", s.globalTape)
     }
 
     fun settings(o: JSONObject) = AppSettings(
         bitPerfectUsb = o.optBoolean("bitPerfect", false),
         perSongPitchSpeed = o.optBoolean("perSongPS", true),
         analyzerBands = o.optInt("bands", 96),
+        preserveFormants = o.optBoolean("formants", false),
+        globalPitchCents = o.optInt("gPitch", 0),
+        globalSpeed = o.optDouble("gSpeed", 1.0).toFloat(),
+        globalTape = o.optBoolean("gTape", false),
     )
 }

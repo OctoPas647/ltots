@@ -20,9 +20,28 @@ val hasReleaseKey = releaseStoreFile != null && file(releaseStoreFile).exists()
 
 val buildNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
 
+// A desktop build of the Rubber Band JNI library, so unit tests run the real pitch engine.
+val hostLibDir = layout.buildDirectory.dir("hostlib")
+val buildHostRubberBand by tasks.registering(Exec::class) {
+    val rb = file("src/main/cpp/rubberband")
+    val out = hostLibDir.map { it.file("librubberband-jni.so") }
+    val javaHome = File(System.getProperty("java.home"))
+    inputs.dir(rb)
+    outputs.file(out)
+    doFirst { hostLibDir.get().asFile.mkdirs() }
+    commandLine(
+        "g++", "-O2", "-fPIC", "-shared", "-std=c++17",
+        "-I$rb", "-I$rb/src",
+        "-I${javaHome}/include", "-I${javaHome}/include/linux",
+        "$rb/single/RubberBandSingle.cpp", "$rb/src/jni/RubberBandStretcherJNI.cpp",
+        "-o", out.get().asFile.absolutePath,
+    )
+}
+
 android {
     namespace = "com.ltots.app"
     compileSdk = 37
+    ndkVersion = "29.0.14206865"
 
     defaultConfig {
         applicationId = "com.ltots.app"
@@ -68,6 +87,14 @@ android {
         compose = true
     }
 
+    // Rubber Band (pitch & speed engine), compiled from source for the phone.
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "4.1.2"
+        }
+    }
+
     lint {
         // Media3's @UnstableApi opt-in is a lint check; this app uses those APIs on purpose.
         disable += "UnsafeOptInUsageError"
@@ -76,6 +103,20 @@ android {
 
     testOptions {
         unitTests.isReturnDefaultValues = true
+        unitTests.isIncludeAndroidResources = true
+        unitTests.all { test ->
+            // Audio tests run the real Rubber Band engine, built for this computer.
+            test.dependsOn(buildHostRubberBand)
+            test.systemProperty("java.library.path", hostLibDir.get().asFile.absolutePath)
+            test.systemProperty("roborazzi.test.record", "true")
+            test.maxHeapSize = "2g"
+            // Robolectric (Android 16 sandbox) needs these on JDK 21.
+            test.jvmArgs(
+                "--add-exports=java.base/jdk.internal.access=ALL-UNNAMED",
+                "--add-opens=java.base/jdk.internal.access=ALL-UNNAMED",
+                "--add-opens=java.base/java.io=ALL-UNNAMED",
+            )
+        }
     }
 
     packaging {
@@ -115,5 +156,14 @@ dependencies {
     implementation("io.github.junkfood02.youtubedl-android:ffmpeg:$ytdl")
 
     testImplementation("junit:junit:4.13.2")
+    // UI tests on the desktop JVM: Robolectric runs the real Android/Compose code, Roborazzi
+    // captures screenshots of each screen.
+    testImplementation("org.robolectric:robolectric:4.17")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.76.0")
+    testImplementation(composeBom)
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    testImplementation("androidx.test:core:1.7.0")
+    testImplementation("androidx.test.ext:junit:1.3.0")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
     testImplementation("org.json:json:20260814")
 }

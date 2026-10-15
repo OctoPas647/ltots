@@ -93,8 +93,9 @@ class Downloader(private val context: Context) {
                 .addOption("-f", formatSelector)
             val infoOut = YoutubeDL.execute(infoReq, "$taskId-info").out
             val info = JSONObject(infoOut.substring(infoOut.indexOf('{')))
-            val cover = prepareCover(meta, work)
-            rewriteInfo(info, meta, cover?.file)
+            val m = fillFromInfo(meta, info)
+            val cover = prepareCover(m, work)
+            rewriteInfo(info, m, cover?.file)
             val infoFile = File(work, "info.json").apply { writeText(info.toString()) }
 
             val req = YoutubeDLRequest(emptyList())
@@ -116,14 +117,31 @@ class Downloader(private val context: Context) {
 
             val audio = work.listFiles()?.firstOrNull { it.extension in AUDIO_EXTENSIONS }
                 ?: throw IllegalStateException("yt-dlp finished but produced no audio file")
-            val uri = saveToMusic(audio, meta)
+            val uri = saveToMusic(audio, m)
             val codec = if (audio.extension == "opus") "Opus" else audio.extension.uppercase()
             val abr = info.optDouble("abr", 0.0).takeIf { it > 0 }?.let { " · ${it.toInt()} kbps" } ?: ""
             val coverNote = cover?.let { " · ${it.size}×${it.size} cover" } ?: ""
-            return Result(uri, meta, "$codec$abr$coverNote · original stream, not re-encoded")
+            return Result(uri, m, "$codec$abr$coverNote · original stream, not re-encoded")
         } finally {
             work.deleteRecursively()
         }
+    }
+
+    /** If YouTube Music couldn't be asked (e.g. offline lookup failed), take names from yt-dlp. */
+    private fun fillFromInfo(m: TrackMeta, info: JSONObject): TrackMeta {
+        val placeholder = m.title.isBlank() || m.title == PLACEHOLDER_TITLE
+        val noArtist = m.artist.isBlank() || m.artist == "Unknown artist"
+        if (!placeholder && !noArtist) return m
+        val title = info.optString("track").ifBlank { info.optString("title") }.ifBlank { m.title }
+        val artist = info.optString("artist").ifBlank { info.optString("creator") }
+            .ifBlank { info.optString("channel").ifBlank { info.optString("uploader") }.removeSuffix(" - Topic") }
+            .ifBlank { m.artist }
+        return m.copy(
+            title = if (placeholder) title else m.title,
+            artist = if (noArtist) artist else m.artist,
+            album = m.album ?: info.optString("album").ifBlank { null },
+            year = m.year ?: info.optInt("release_year", 0).takeIf { it > 0 }?.toString(),
+        )
     }
 
     private class Cover(val file: File, val size: Int)
@@ -233,6 +251,7 @@ class Downloader(private val context: Context) {
     }
 
     companion object {
+        const val PLACEHOLDER_TITLE = "YouTube video"
         private val AUDIO_EXTENSIONS = setOf("opus", "m4a", "webm", "ogg", "mp3", "aac", "flac")
         private val illegal = Regex("""[\\/:*?"<>|\u0000-\u001F]""")
         fun safe(s: String) = illegal.replace(s, " ").replace(Regex("\\s+"), " ").trim().trimEnd('.').take(120)

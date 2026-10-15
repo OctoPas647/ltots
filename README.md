@@ -19,7 +19,9 @@ newer APK updates the app and keeps your settings.
 - **Live view** – the spectrum after the EQ, a faint outline of the sound before it, and a scrolling
   waveform, all synced to what you're hearing.
 - **Per-song EQ** – give any song its own EQ; it loads automatically whenever that song plays.
-- **Pitch & speed** – independent (or linked "tape" mode), remembered per song.
+- **Pitch & speed** – independent (or linked "tape" mode), remembered per song, powered by the
+  Rubber Band R3 engine (studio-grade). Pitch changes are heard live while dragging; speed is
+  applied on release. At original pitch and speed the engine is bypassed bit-exactly.
 - **Clean signal path** – 64-bit EQ processing, automatic headroom so boosts never clip, a soft
   limiter just below 0 dBFS, 32-bit float output.
 - **Output awareness** – shows where audio is going, warns when earbuds fall back to LE Audio (LC3)
@@ -72,6 +74,20 @@ Releases are signed with a private key stored as repository secrets
 
 Without them the workflow still builds and tests the app but doesn't publish a release.
 
+## Licence note
+
+LToTS includes the [Rubber Band Library](https://breakfastquay.com/rubberband/) (GPL v2 or later)
+in `app/src/main/cpp/rubberband`. Anyone distributing the app therefore has to do so under
+GPL-compatible terms.
+
+## Tests
+
+`./gradlew :app:testDebugUnitTest` runs, on the desktop JVM:
+- the real audio chain driven like Media3's audio output (pitch accuracy, live pitch dragging,
+  speed changes, per-song switching at song boundaries, EQ crossfades, limiter, bit-perfect);
+- the YouTube Music parser against captured real responses;
+- the app's screens under Robolectric, with screenshots saved to `app/build/ui-shots/`.
+
 ## Code map
 
 ```
@@ -82,6 +98,6 @@ app/src/main/java/com/ltots/app/
   download/  yt-dlp engine, download queue, tagging/cover, background service
   playback/  background playback service + connection
   ui/        glass system, screens (Library, Playing, EQ, Look, Sound), components
-app/src/test/  audio-path tests (test tones through EQ → pitch/speed, measured numerically),
-               YouTube Music parser tests against captured real responses, colour tests
+app/src/main/cpp/  Rubber Band (pitch/speed engine) + CMake build
+app/src/test/  audio-chain tests, YouTube Music parser tests, colour tests, UI tests
 ```

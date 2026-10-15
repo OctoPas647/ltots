@@ -64,12 +64,12 @@ class OutputMonitor(context: Context) {
     }
 
     init {
-        am.registerAudioDeviceCallback(callback, handler)
+        runCatching { am.registerAudioDeviceCallback(callback, handler) }
         refresh()
     }
 
     fun refresh() {
-        val d = currentDevice()
+        val d = runCatching { currentDevice() }.getOrDefault(OutputDevice())
         if (d.info?.id != _device.value.info?.id || d.kind != _device.value.kind) {
             _device.value = d
             onDeviceChanged?.invoke()

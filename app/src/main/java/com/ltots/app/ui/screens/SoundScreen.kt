@@ -84,8 +84,9 @@ fun SoundScreen() {
                 SectionTitle("Signal path")
                 PathRow("Decoded", if (info.sampleRate > 0) "${"%.1f".format(Locale.ROOT, info.sampleRate / 1000.0)} kHz · ${info.channels} ch" else "—")
                 PathRow("EQ & limiter", "64-bit floating point")
-                PathRow("Pitch & speed", "Sonic time-stretch (only when changed)")
-                PathRow("Sent to Android", info.encodingName(info.outputEncoding))
+                PathRow("Pitch & speed", "Rubber Band R3 (only when changed)")
+                PathRow("Limiter", "Soft, above −1 dBFS only")
+                PathRow("Sent to Android", if (settings.bitPerfectUsb) "16-bit, dithered" else "32-bit float")
                 PathRow("Output", device.kindLabel)
             }
         }
@@ -103,6 +104,11 @@ fun SoundScreen() {
                     "Remember pitch & speed per song", settings.perSongPitchSpeed,
                     { on -> AudioEngine.updateSettings { it.copy(perSongPitchSpeed = on) } },
                     sub = "Off: pitch and speed stay the same across songs.",
+                )
+                SwitchRow(
+                    "Natural voices when shifting pitch", settings.preserveFormants,
+                    { on -> AudioEngine.updateSettings { it.copy(preserveFormants = on) } },
+                    sub = "Keeps singers sounding like themselves instead of chipmunk/giant. Best for vocal tracks; off is a classic key change that suits full songs and instruments.",
                 )
             }
         }

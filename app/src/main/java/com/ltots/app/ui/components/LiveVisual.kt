@@ -86,6 +86,8 @@ fun DrawScope.drawWave(f: SpectrumFrame, color: Color) {
 fun DrawScope.drawSpectrum(levels: FloatArray, style: SpectrumStyle, color: Color, ghost: Boolean) {
     val n = levels.size
     if (n == 0) return
+    // Nothing playing: draw nothing (instead of a flat line along the bottom).
+    if (levels.all { it < 0.01f }) return
     val w = size.width
     val h = size.height
     when (style) {

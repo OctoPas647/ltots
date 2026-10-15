@@ -69,6 +69,8 @@ object DownloadManager {
         downloader = Downloader(app)
         Engine.init(app)
         load()
+        // Forget downloads whose files were deleted from the phone, so they can be downloaded again.
+        scope.launch { pruneMissing() }
         // Anything that was mid-download when the app closed starts again.
         update { list -> list.map { if (it.state.active) it.copy(state = TaskState.QUEUED, progress = 0f) else it } }
         if (_tasks.value.any { it.state == TaskState.QUEUED }) pump()
@@ -113,10 +115,12 @@ object DownloadManager {
         }
     }
 
-    @Synchronized
-    private fun update(transform: (List<DownloadTask>) -> List<DownloadTask>) {
-        _tasks.value = transform(_tasks.value)
-        save()
+    private val lock = Any()
+
+    /** All task-list changes go through here, so progress and state updates never overwrite each other. */
+    private fun update(save: Boolean = true, transform: (List<DownloadTask>) -> List<DownloadTask>) {
+        synchronized(lock) { _tasks.value = transform(_tasks.value) }
+        if (save) save()
     }
 
     private fun updateTask(id: String, transform: (DownloadTask) -> DownloadTask) =
@@ -126,10 +130,27 @@ object DownloadManager {
 
     fun isDownloaded(videoId: String) = _downloaded.value.containsKey(videoId)
 
+    private fun fileExists(uri: String): Boolean = runCatching {
+        app.contentResolver.query(Uri.parse(uri), arrayOf(android.provider.MediaStore.MediaColumns._ID), null, null, null)
+            ?.use { it.moveToFirst() } ?: true // no answer from the provider: assume it's still there
+    }.getOrDefault(true)
+
+    private fun pruneMissing() {
+        val gone = _downloaded.value.filterValues { !fileExists(it) }.keys
+        if (gone.isNotEmpty()) {
+            synchronized(lock) { _downloaded.value = _downloaded.value - gone }
+            save()
+        }
+    }
+
     fun isQueued(videoId: String) = _tasks.value.any { it.meta.videoId == videoId && !it.state.finished }
 
     /** Adds songs to the queue. Returns how many were actually added (the rest are already here). */
     fun enqueue(songs: List<TrackMeta>, sourcePlaylist: String? = null): Int {
+        // Re-check files the index thinks we have (the user may have deleted them).
+        val claimed = songs.mapNotNull { s -> _downloaded.value[s.videoId]?.let { s.videoId to it } }
+        val missing = claimed.filter { !fileExists(it.second) }.map { it.first }
+        if (missing.isNotEmpty()) synchronized(lock) { _downloaded.value = _downloaded.value - missing.toSet() }
         val fresh = songs.distinctBy { it.videoId }.filter { !isDownloaded(it.videoId) && !isQueued(it.videoId) }
         if (fresh.isEmpty()) return 0
         val newTasks = fresh.map { DownloadTask(UUID.randomUUID().toString(), it, sourcePlaylist = sourcePlaylist) }
@@ -255,12 +276,14 @@ object DownloadManager {
                 if (line == "tagging") updateTask(task.id) { it.copy(state = TaskState.TAGGING, progress = 1f) }
                 else if (now - lastUi > 250) {
                     lastUi = now
-                    _tasks.value = _tasks.value.map { if (it.id == task.id) it.copy(progress = p) else it }
+                    update(save = false) { l -> l.map { if (it.id == task.id && it.state == TaskState.DOWNLOADING) it.copy(progress = p) else it } }
                 }
             }
-            _downloaded.value = _downloaded.value + (meta.videoId to result.uri.toString()) + (task.meta.videoId to result.uri.toString())
+            synchronized(lock) {
+                _downloaded.value = _downloaded.value + (meta.videoId to result.uri.toString()) + (task.meta.videoId to result.uri.toString())
+            }
             updateTask(task.id) {
-                it.copy(state = TaskState.DONE, progress = 1f, finishedAt = System.currentTimeMillis(),
+                it.copy(meta = result.meta, state = TaskState.DONE, progress = 1f, finishedAt = System.currentTimeMillis(),
                     savedUri = result.uri.toString(), qualityNote = result.qualityNote)
             }
             _libraryVersion.value++
