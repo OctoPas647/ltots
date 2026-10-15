@@ -35,6 +35,8 @@ class TimePitchProcessor(@Volatile var source: SoundSource = StaticSoundSource()
     private var speed = 1.0
     private var pitch = 1.0
     private var formants = false
+    private var efficient = false
+    private var rbOptions = 0
     private var engaged = false
     private var toDrop = 0
     private var seenVersion = -1
@@ -51,6 +53,9 @@ class TimePitchProcessor(@Volatile var source: SoundSource = StaticSoundSource()
     /** True while Rubber Band is in the signal path (for tests/diagnostics). */
     val isEngaged: Boolean get() = engaged
     val currentSpeed: Double get() = speed
+    /** Frames in / out since creation (diagnostics). */
+    @Volatile var totalIn = 0L; private set
+    @Volatile var totalOut = 0L; private set
 
     fun setSpeed(s: Double) { pendingSpeed = s.coerceIn(0.25, 4.0) }
 
@@ -75,8 +80,10 @@ class TimePitchProcessor(@Volatile var source: SoundSource = StaticSoundSource()
         mediaId = StreamIds.mediaIdOf(streamMetadata) ?: mediaId
         pitch = source.pitchScaleFor(mediaId)
         formants = source.preserveFormants
+        efficient = source.efficientPitch
         seenVersion = source.version
         pendingFrames = 0
+        endHandled = false
         engaged = false
         if (needsEngine()) engage()
     }
@@ -92,9 +99,13 @@ class TimePitchProcessor(@Volatile var source: SoundSource = StaticSoundSource()
 
     private fun needsEngine() = abs(speed - 1.0) > 1e-6 || abs(pitch - 1.0) > 1e-6
 
+    /**
+     * R3 ("finer") is the studio-quality engine; R2 ("faster") needs roughly half the CPU, which
+     * matters for battery when pitch or speed stays changed for a long time.
+     */
     private fun options(): Int =
         RubberBandStretcher.OptionProcessRealTime or
-            RubberBandStretcher.OptionEngineFiner or
+            (if (efficient) RubberBandStretcher.OptionEngineFaster else RubberBandStretcher.OptionEngineFiner) or
             RubberBandStretcher.OptionPitchHighConsistency or
             RubberBandStretcher.OptionChannelsTogether or
             (if (formants) RubberBandStretcher.OptionFormantPreserved else 0)
@@ -115,9 +126,11 @@ class TimePitchProcessor(@Volatile var source: SoundSource = StaticSoundSource()
 
     /** Puts Rubber Band in the path, primed so its output lines up with its input. */
     private fun engageUnsafe() {
-        if (rb == null || rbRate != sampleRate || rbChannels != channels) {
+        val opts = options()
+        if (rb == null || rbRate != sampleRate || rbChannels != channels || rbOptions != opts) {
             rb?.dispose()
-            rb = RubberBandStretcher(sampleRate, channels, options(), 1.0 / speed, pitch)
+            rb = RubberBandStretcher(sampleRate, channels, opts, 1.0 / speed, pitch)
+            rbOptions = opts
             rbRate = sampleRate
             rbChannels = channels
             rb!!.setMaxProcessSize(CHUNK)
@@ -151,9 +164,13 @@ class TimePitchProcessor(@Volatile var source: SoundSource = StaticSoundSource()
         seenVersion = v
         val p = source.pitchScaleFor(mediaId)
         val f = source.preserveFormants
-        if (!engaged) {
+        val e = source.efficientPitch
+        if (!engaged || e != efficient) {
+            // Not running yet, or switching engines (a fresh start, heard as a tiny skip).
             pitch = p
             formants = f
+            efficient = e
+            engaged = false
             if (needsEngine()) engage()
             return
         }
@@ -171,6 +188,7 @@ class TimePitchProcessor(@Volatile var source: SoundSource = StaticSoundSource()
         val ch = channels
         val frames = inputBuffer.remaining() / (4 * ch)
         inputBuffer.order(ByteOrder.nativeOrder())
+        totalIn += frames
 
         if (!engaged) {
             // Bit-exact pass-through.
@@ -178,6 +196,7 @@ class TimePitchProcessor(@Volatile var source: SoundSource = StaticSoundSource()
             val lim = inputBuffer.position() + frames * ch * 4
             val slice = inputBuffer.duplicate().also { it.limit(lim) }
             out.put(slice)
+            totalOut += frames
             inputBuffer.position(inputBuffer.limit())
             out.flip()
             return
@@ -198,28 +217,36 @@ class TimePitchProcessor(@Volatile var source: SoundSource = StaticSoundSource()
         emit()
     }
 
+    /**
+     * End of stream (end of song, or Media3 draining before a speed change). Media3's pipeline
+     * may call this many times; only the first does anything, and nothing is emitted unless
+     * there is real audio — otherwise the pipeline never sees this stage as finished and
+     * playback freezes (that was the "stuck after changing speed" bug).
+     */
     override fun onQueueEndOfStream() {
+        if (endHandled) return
+        endHandled = true
         val s = rb
         if (!engaged || s == null) return
         pendingFrames = 0
         capOutput = true
-        s.process(inBuf, 0, 0, true)
-        var guard = 0
-        while (guard++ < 10_000) {
-            val a = s.available()
-            if (a < 0) break
-            if (a == 0) {
-                // Final block still being produced; push an empty final call.
-                s.process(inBuf, 0, 0, true)
-                if (s.available() == 0) break
-                continue
+        try {
+            s.process(inBuf, 0, 0, true)
+            var guard = 0
+            while (guard++ < 1_000) {
+                if ((framesIn / speed).toLong() - framesOut <= 0) break
+                if (s.available() <= 0) break
+                drain(s)
             }
-            drain(s)
-            if ((framesIn / speed).toLong() - framesOut <= 0) break
+        } finally {
+            capOutput = false
         }
-        capOutput = false
-        emit()
+        // The stretcher has seen its final block; it must be reset before it can take more.
+        engaged = false
+        if (pendingFrames > 0) emit()
     }
+
+    private var endHandled = false
 
     private fun drain(s: RubberBandStretcher) {
         val ch = channels
@@ -244,7 +271,7 @@ class TimePitchProcessor(@Volatile var source: SoundSource = StaticSoundSource()
             if (keep <= 0) continue
             ensurePending((pendingFrames + keep) * ch)
             var idx = pendingFrames * ch
-            for (f in start until got) for (c in 0 until ch) {
+            for (f in start until start + keep) for (c in 0 until ch) {
                 val v = outBuf[c][f]
                 pending[idx++] = if (v.isFinite()) v else 0f
             }
@@ -260,6 +287,8 @@ class TimePitchProcessor(@Volatile var source: SoundSource = StaticSoundSource()
     }
 
     private fun emit() {
+        if (pendingFrames == 0) return
+        totalOut += pendingFrames
         val n = pendingFrames * channels
         val out = replaceOutputBuffer(n * 4)
         out.asFloatBuffer().put(pending, 0, n)

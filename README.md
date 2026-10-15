@@ -21,7 +21,8 @@ newer APK updates the app and keeps your settings.
 - **Per-song EQ** – give any song its own EQ; it loads automatically whenever that song plays.
 - **Pitch & speed** – independent (or linked "tape" mode), remembered per song, powered by the
   Rubber Band R3 engine (studio-grade). Pitch changes are heard live while dragging; speed is
-  applied on release. At original pitch and speed the engine is bypassed bit-exactly.
+  applied on release. At original pitch and speed the engine is bypassed bit-exactly. Optional
+  battery-saving engine (Rubber Band R2) in Sound.
 - **Clean signal path** – 64-bit EQ processing, automatic headroom so boosts never clip, a soft
   limiter just below 0 dBFS, 32-bit float output.
 - **Output awareness** – shows where audio is going, warns when earbuds fall back to LE Audio (LC3)
@@ -43,8 +44,13 @@ newer APK updates the app and keeps your settings.
   - queue with several downloads at once, background downloading with a notification,
     retry/cancel, history, and playlists you can keep in sync;
   - files saved to `Music/LToTS/Artist/Album/`, visible to any app;
-  - built on yt-dlp (bundled, updatable in-app with "Update engine").
+  - built on yt-dlp (bundled, updatable in-app with "Update engine"); "Test engine" checks the
+    whole download engine on the phone, and tapping a failed download shows (and copies) exactly
+    what went wrong.
 - Local library with songs, albums, artists and search.
+- **Battery-friendly** – the visualizer runs at 60 fps by default (30/60/120/off in Look), sleeps
+  while nothing plays and drops to 30 fps with Battery Saver; the moving background updates 20
+  times a second and only while the app is on screen; nothing in the UI runs with the screen off.
 
 ## Roadmap
 
@@ -85,8 +91,13 @@ GPL-compatible terms.
 `./gradlew :app:testDebugUnitTest` runs, on the desktop JVM:
 - the real audio chain driven like Media3's audio output (pitch accuracy, live pitch dragging,
   speed changes, per-song switching at song boundaries, EQ crossfades, limiter, bit-perfect);
+- the real ExoPlayer + Media3 audio output + Rubber Band playing through a real-time output,
+  while speed and pitch change (position must keep moving at the right rate, no gaps);
 - the YouTube Music parser against captured real responses;
 - the app's screens under Robolectric, with screenshots saved to `app/build/ui-shots/`.
+
+With `-Dltots.live=true` two extra tests talk to the real YouTube Music / YouTube (search and the
+complete download pipeline with the bundled yt-dlp).
 
 ## Code map
 

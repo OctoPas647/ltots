@@ -93,10 +93,14 @@ fun rememberPlayerUi(controller: MediaController?): PlayerUi {
         ui.refresh()
         onDispose { controller.removeListener(listener) }
     }
-    LaunchedEffect(controller) {
+    // Seek bar position, refreshed only while the app is visible (awaitOnScreen): with the
+    // screen off nothing here wakes the phone.
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(controller, lifecycle) {
         while (true) {
+            awaitOnScreen(lifecycle)
             ui.controller?.let { ui.positionMs = it.currentPosition; ui.bufferedFraction = it.bufferedPercentage / 100f }
-            delay(if (ui.isPlaying) 200 else 600)
+            delay(if (ui.isPlaying) 250 else 700)
         }
     }
     return ui

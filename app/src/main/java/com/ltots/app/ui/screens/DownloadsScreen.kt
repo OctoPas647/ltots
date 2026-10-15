@@ -25,6 +25,8 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -135,7 +137,8 @@ fun DownloadsScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
     LaunchedEffect(toast) { if (toast != null) { delay(3200); toast = null } }
 
     // Warm up the engine in the background and check for a newer yt-dlp once a week.
-    LaunchedEffect(Unit) { if (Engine.ensureReady()) Engine.autoUpdateIfDue() }
+    // Weekly engine update — never while songs are downloading (it replaces yt-dlp's file).
+    LaunchedEffect(Unit) { if (Engine.ensureReady() && !DownloadManager.hasWork()) Engine.autoUpdateIfDue() }
 
     val page = stack.lastOrNull()
     BackHandler(enabled = stack.isNotEmpty()) { stack.removeAt(stack.lastIndex) }
@@ -529,8 +532,10 @@ private fun Intro() {
 private fun TaskRow(t: DownloadTask, player: PlayerUi, onOpenPlayer: () -> Unit) {
     val pal = LocalPalette.current
     val m = t.meta
+    var showLog by remember(t.id) { mutableStateOf(false) }
     Column(
-        Modifier.fillMaxWidth().clickable(enabled = t.state == TaskState.DONE && t.savedUri != null) {
+        Modifier.fillMaxWidth().clickable(enabled = (t.state == TaskState.DONE && t.savedUri != null) || t.state == TaskState.FAILED) {
+            if (t.state == TaskState.FAILED) { showLog = !showLog; return@clickable }
             val uri = Uri.parse(t.savedUri)
             val track = Track(
                 id = uri.lastPathSegment?.toLongOrNull() ?: -1L, uri = uri, title = m.title, artist = m.artist,
@@ -571,6 +576,31 @@ private fun TaskRow(t: DownloadTask, player: PlayerUi, onOpenPlayer: () -> Unit)
                 modifier = Modifier.fillMaxWidth().padding(top = 6.dp).height(3.dp).clip(RoundedCornerShape(2.dp)),
             )
         }
+        if (showLog && t.state == TaskState.FAILED) {
+            DetailsBox(t.log ?: (t.error ?: "No details were recorded."), "LToTS download log — ${m.title}")
+        }
+    }
+}
+
+/** Scrollable, copyable technical details (what yt-dlp said). */
+@Composable
+private fun DetailsBox(text: String, clipLabel: String) {
+    val pal = LocalPalette.current
+    val context = LocalContext.current
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+        Box(
+            Modifier.fillMaxWidth().heightIn(max = 220.dp).clip(RoundedCornerShape(12.dp))
+                .background(Color.Black.copy(alpha = 0.35f)).verticalScroll(rememberScrollState()).padding(10.dp)
+        ) {
+            androidx.compose.foundation.text.selection.SelectionContainer {
+                Text(text, color = pal.textDim, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 11.sp, lineHeight = 14.sp)
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Pill("Copy details", false, {
+            val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            cb.setPrimaryClip(android.content.ClipData.newPlainText(clipLabel, text))
+        })
     }
 }
 
@@ -605,6 +635,8 @@ private fun EngineCard(onToast: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     val engine by Engine.state.collectAsState()
     val settings by DownloadManager.settings.collectAsState()
+    var testing by remember { mutableStateOf(false) }
+    var testReport by remember { mutableStateOf<String?>(null) }
     Column(Modifier.padding(16.dp)) {
         SectionTitle("Download settings")
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -636,11 +668,17 @@ private fun EngineCard(onToast: (String) -> Unit) {
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Pill(if (engine.updating) "Updating…" else "Update engine", false, {
-                if (!engine.updating) scope.launch { onToast(Engine.update()) }
+                if (DownloadManager.hasWork()) onToast("Let the current downloads finish first")
+                else if (!engine.updating) scope.launch { onToast(Engine.update()) }
             })
-            Spacer(Modifier.width(10.dp))
-            Text("Use this if downloads start failing — YouTube changes often.", color = pal.textFaint, style = MaterialTheme.typography.bodySmall)
+            Spacer(Modifier.width(8.dp))
+            Pill(if (testing) "Testing…" else "Test engine", false, {
+                if (!testing) { testing = true; scope.launch { testReport = Engine.selfTest(); testing = false } }
+            })
         }
+        Text("If downloads fail: Update engine, then Test engine. Tap a failed song to see why.",
+            color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
+        testReport?.let { DetailsBox(it, "LToTS engine test") }
     }
 }
 

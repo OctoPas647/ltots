@@ -1,12 +1,6 @@
 package com.ltots.app.ui.glass
 
 import android.graphics.Bitmap
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -32,6 +26,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.preferredFrameRate
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -155,19 +151,29 @@ fun AppBackground(artwork: Bitmap?, modifier: Modifier = Modifier) {
         return
     }
 
-    val t by if (cfg.animateBackground && !cfg.pureBlack) {
-        val period = (60000 / max(0.05f, cfg.animationSpeed)).toInt()
-        rememberInfiniteTransition(label = "bg").animateFloat(
-            0f, (2 * Math.PI).toFloat(),
-            infiniteRepeatable(tween(period, easing = LinearEasing), RepeatMode.Restart),
-            label = "bgT",
-        )
-    } else {
-        remember { androidx.compose.runtime.mutableFloatStateOf(0.8f) }
+    // The colour blobs drift very slowly, so 20 updates a second look perfectly smooth — and
+    // every update makes all the glass on screen re-render, so this matters a lot for battery.
+    // Only while the app is on screen, and not at all with Battery Saver on.
+    val phase = remember { androidx.compose.runtime.mutableFloatStateOf(0.8f) }
+    val saver by com.ltots.app.ui.rememberBatterySaver()
+    if (cfg.animateBackground && !saver) {
+        com.ltots.app.ui.WhileOnScreen(cfg.animationSpeed) {
+            val periodMs = 60000f / max(0.05f, cfg.animationSpeed)
+            var last = System.nanoTime()
+            while (true) {
+                kotlinx.coroutines.delay(1000L / BACKGROUND_FPS)
+                androidx.compose.animation.core.withInfiniteAnimationFrameNanos { }
+                val now = System.nanoTime()
+                val step = (now - last) / 1e6f / periodMs * TWO_PI
+                last = now
+                phase.floatValue = (phase.floatValue + step) % TWO_PI
+            }
+        }
     }
 
     Box(modifier.background(base)) {
-        Canvas(Modifier.fillMaxSize()) {
+        Canvas(Modifier.fillMaxSize().graphicsLayer().preferredFrameRate(BACKGROUND_FPS.toFloat())) {
+            val t = phase.floatValue // read while drawing: a new phase only redraws, never recomposes
             blob(a, Offset(size.width * (0.25f + 0.15f * cos(t)), size.height * (0.22f + 0.1f * sin(t * 2))), size.maxDimension * 0.75f)
             blob(b, Offset(size.width * (0.8f + 0.12f * sin(t + 1f)), size.height * (0.55f + 0.14f * cos(t))), size.maxDimension * 0.7f)
             blob(c, Offset(size.width * (0.35f + 0.2f * sin(t * 1.5f + 2f)), size.height * (0.9f + 0.08f * cos(t + 3f))), size.maxDimension * 0.65f)
@@ -190,6 +196,9 @@ fun AppBackground(artwork: Bitmap?, modifier: Modifier = Modifier) {
         )
     }
 }
+
+private const val BACKGROUND_FPS = 20
+private const val TWO_PI = (2 * Math.PI).toFloat()
 
 private fun DrawScope.blob(color: Color, center: Offset, radius: Float) {
     drawCircle(

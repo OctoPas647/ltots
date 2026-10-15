@@ -104,4 +104,30 @@ object Engine {
     }
 
     fun clearMessage() { _state.value = _state.value.copy(message = null) }
+
+    /**
+     * Checks the whole engine on the phone: starts Python, runs yt-dlp, and asks YouTube for a
+     * well-known song's audio (without downloading it). Returns a report the user can copy.
+     */
+    suspend fun selfTest(): String {
+        val head = "LToTS engine test · Android ${android.os.Build.VERSION.RELEASE} (${android.os.Build.MODEL}) · ABI ${android.os.Build.SUPPORTED_ABIS.firstOrNull()}\n"
+        if (!ensureReady()) return head + "FAILED to start: ${_state.value.error}"
+        return withContext(Dispatchers.IO) {
+            val sb = StringBuilder(head)
+            runCatching {
+                val v = YoutubeDL.execute(com.yausername.youtubedl_android.YoutubeDLRequest(emptyList()).addOption("--version"), "selftest-version")
+                sb.append("yt-dlp ").append(v.out.trim()).append(" (").append(v.elapsedTime).append(" ms)\n")
+                val req = com.yausername.youtubedl_android.YoutubeDLRequest("https://music.youtube.com/watch?v=dQw4w9WgXcQ")
+                    .addOption("--simulate").addOption("--no-playlist")
+                    .addOption("-f", Downloader.FORMAT)
+                    .addOption("--print", "%(title)s · format %(format_id)s · %(acodec)s · %(abr)s kbps")
+                val r = YoutubeDL.execute(req, "selftest")
+                sb.append("OK: ").append(r.out.trim()).append(" (").append(r.elapsedTime / 1000).append(" s)\n")
+                if (r.err.isNotBlank()) sb.append(r.err.trim().takeLast(1500)).append('\n')
+            }.onFailure {
+                sb.append("FAILED: ").append(it.javaClass.simpleName).append(": ").append(it.message?.takeLast(5000))
+            }
+            sb.toString()
+        }
+    }
 }

@@ -75,10 +75,13 @@ data class DownloadTask(
     val savedUri: String? = null,
     /** e.g. "Opus · 48 kHz · 1400 px cover". */
     val qualityNote: String? = null,
+    /** For failed downloads: what yt-dlp said, so it can be read and copied. */
+    val log: String? = null,
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id); put("m", meta.toJson()); put("s", state.name); put("e", error)
         put("p", sourcePlaylist); put("at", addedAt); put("ft", finishedAt); put("u", savedUri); put("q", qualityNote)
+        log?.let { put("log", it.takeLast(8000)) }
     }
 
     companion object {
@@ -90,6 +93,7 @@ data class DownloadTask(
             addedAt = o.optLong("at"), finishedAt = o.optLong("ft"),
             savedUri = o.optString("u").ifBlank { null }.takeIf { it != "null" },
             qualityNote = o.optString("q").ifBlank { null }.takeIf { it != "null" },
+            log = o.optString("log").ifBlank { null },
         )
     }
 }

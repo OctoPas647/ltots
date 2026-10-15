@@ -2,13 +2,12 @@ package com.ltots.app.ui.components
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
+import androidx.compose.animation.core.withInfiniteAnimationFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -18,34 +17,75 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.preferredFrameRate
 import androidx.media3.common.util.UnstableApi
 import com.ltots.app.audio.Analyzer
 import com.ltots.app.audio.AudioEngine
 import com.ltots.app.audio.SpectrumFrame
 import com.ltots.app.data.SpectrumStyle
+import com.ltots.app.ui.WhileOnScreen
+import com.ltots.app.ui.rememberBatterySaver
 import com.ltots.app.ui.theme.LocalPalette
 import com.ltots.app.ui.theme.LocalThemeConfig
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 
 /** Holds the analyzer and a frame counter that triggers redraws (not recompositions). */
 class LiveVisual(val analyzer: Analyzer) {
     var tick by mutableLongStateOf(0L)
     var frame: SpectrumFrame = SpectrumFrame(analyzer.bands)
+    /** Frames per second the visual is running at (0 = off). */
+    var fps = 60
 }
 
+/**
+ * Drives the live spectrum. Battery-conscious by design:
+ *  - runs at the chosen rate (60 fps by default) instead of every display refresh;
+ *  - sleeps completely while nothing is playing (once the bars have fallen to rest);
+ *  - stops when the app is in the background or the screen is off;
+ *  - drops to 30 fps when the phone's Battery Saver is on.
+ */
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
 fun rememberLiveVisual(): LiveVisual {
     val settings by AudioEngine.settings.collectAsState()
+    val cfg = LocalThemeConfig.current
+    val saver by rememberBatterySaver()
+    val fps = if (saver) minOf(cfg.visualizerFps, 30) else cfg.visualizerFps
     val lv = remember(settings.analyzerBands) { LiveVisual(Analyzer(AudioEngine.tap, settings.analyzerBands)) }
-    LaunchedEffect(lv) {
+    lv.fps = fps
+    WhileOnScreen(lv, fps) {
+        if (fps <= 0) {
+            lv.frame = SpectrumFrame(lv.analyzer.bands); lv.tick++
+            return@WhileOnScreen
+        }
+        val intervalNs = 1_000_000_000L / fps
+        var last = 0L
         while (true) {
-            withFrameNanos { }
+            val playing = AudioEngine.isPlaying.value
+            if (!playing && lv.frame.isAtRest()) {
+                // Nothing moving: no frames at all until music plays again.
+                AudioEngine.isPlaying.first { it }
+                last = 0L
+            }
+            // Wait out the rest of this frame's slot without asking for display frames.
+            val now = System.nanoTime()
+            val wait = (last + intervalNs - now) / 1_000_000L
+            if (last != 0L && wait > 1) delay(wait - 1)
+            last = withInfiniteAnimationFrameNanos { it }
             val p = AudioEngine.player.value
-            lv.frame = lv.analyzer.update((p?.currentPosition ?: 0L) * 1000L, p?.isPlaying == true)
+            lv.frame = lv.analyzer.update((p?.currentPosition ?: 0L) * 1000L, AudioEngine.isPlaying.value)
             lv.tick++
         }
     }
     return lv
+}
+
+private fun SpectrumFrame.isAtRest(): Boolean {
+    for (v in post) if (v > 0.004f) return false
+    for (v in pre) if (v > 0.004f) return false
+    return true
 }
 
 /** Live spectrum (after EQ), optional pre-EQ ghost, and a scrolling waveform underneath. */
@@ -58,8 +98,12 @@ fun LiveSpectrum(
 ) {
     val cfg = LocalThemeConfig.current
     val pal = LocalPalette.current
-    Canvas(modifier) {
-        @Suppress("UNUSED_VARIABLE") val t = visual.tick // read to redraw every frame
+    if (visual.fps <= 0) return
+    // Own render layer: redrawing the spectrum never forces the rest of the screen (and the
+    // glass panels on it) to be redrawn. The frame-rate hint lets the display drop to the
+    // visualizer's rate instead of running at 120 Hz just for it.
+    Canvas(modifier.graphicsLayer().preferredFrameRate(visual.fps.toFloat())) {
+        @Suppress("UNUSED_VARIABLE") val t = visual.tick // read to redraw on every new frame
         val f = visual.frame
         val alpha = cfg.spectrumOpacity * intensity
         if (showWave) drawWave(f, pal.text.copy(alpha = 0.10f * alpha / 0.85f))

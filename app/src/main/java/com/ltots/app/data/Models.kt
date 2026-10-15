@@ -45,6 +45,8 @@ data class ThemeConfig(
     val spectrumStyle: SpectrumStyle = SpectrumStyle.CURVE,
     val spectrumOpacity: Float = 0.85f,
     val showPreEqGhost: Boolean = true,
+    /** Visualizer refresh rate in frames per second (0 = off). Lower uses less battery. */
+    val visualizerFps: Int = 60,
     /** AMOLED: pure #000 background — no colour blobs or artwork glow, so black pixels stay off. */
     val pureBlack: Boolean = false,
     /** Hide Android's navigation bar inside the app (swipe up from the bottom edge to reveal it). */
@@ -63,6 +65,8 @@ data class AppSettings(
     val analyzerBands: Int = 96,
     /** Keep voices sounding natural when shifting pitch (off = classic key change). */
     val preserveFormants: Boolean = false,
+    /** Use Rubber Band's lighter engine for pitch/speed (about half the battery, slightly less polish). */
+    val efficientPitch: Boolean = false,
     /** Pitch/speed used for every song when [perSongPitchSpeed] is off. */
     val globalPitchCents: Int = 0,
     val globalSpeed: Float = 1f,
@@ -131,7 +135,7 @@ object Json {
         put("tint", t.glassTint.toDouble()); put("rim", t.rimLight.toDouble())
         put("corner", t.cornerDp.toDouble()); put("dark", t.darkMode)
         put("specStyle", t.spectrumStyle.name); put("specOpacity", t.spectrumOpacity.toDouble())
-        put("ghost", t.showPreEqGhost)
+        put("ghost", t.showPreEqGhost); put("vfps", t.visualizerFps)
         put("black", t.pureBlack); put("hideNav", t.hideNavBar); put("hideStatus", t.hideStatusBar)
         put("dyn", t.dynamicColors)
     }
@@ -156,6 +160,7 @@ object Json {
             spectrumStyle = runCatching { SpectrumStyle.valueOf(o.optString("specStyle")) }.getOrDefault(d.spectrumStyle),
             spectrumOpacity = o.optDouble("specOpacity", d.spectrumOpacity.toDouble()).toFloat(),
             showPreEqGhost = o.optBoolean("ghost", d.showPreEqGhost),
+            visualizerFps = o.optInt("vfps", d.visualizerFps).let { if (it in listOf(0, 30, 60, 120)) it else d.visualizerFps },
             pureBlack = o.optBoolean("black", d.pureBlack),
             hideNavBar = o.optBoolean("hideNav", d.hideNavBar),
             hideStatusBar = o.optBoolean("hideStatus", d.hideStatusBar),
@@ -167,7 +172,7 @@ object Json {
         put("bitPerfect", s.bitPerfectUsb)
         put("perSongPS", s.perSongPitchSpeed)
         put("bands", s.analyzerBands)
-        put("formants", s.preserveFormants)
+        put("formants", s.preserveFormants); put("effPitch", s.efficientPitch)
         put("gPitch", s.globalPitchCents); put("gSpeed", s.globalSpeed.toDouble()); put("gTape", s.globalTape)
     }
 
@@ -176,6 +181,7 @@ object Json {
         perSongPitchSpeed = o.optBoolean("perSongPS", true),
         analyzerBands = o.optInt("bands", 96),
         preserveFormants = o.optBoolean("formants", false),
+        efficientPitch = o.optBoolean("effPitch", false),
         globalPitchCents = o.optInt("gPitch", 0),
         globalSpeed = o.optDouble("gSpeed", 1.0).toFloat(),
         globalTape = o.optBoolean("gTape", false),

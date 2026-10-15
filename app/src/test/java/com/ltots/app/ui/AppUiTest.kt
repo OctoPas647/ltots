@@ -12,6 +12,8 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeRight
@@ -111,10 +113,27 @@ class AppUiTest {
         rule.onNodeWithText("AMOLED").performClick()
         idle(1000)
         shot("05_look_amoled")
+        // New visualizer refresh-rate choice (clicked via its accessibility action; the screen
+        // is long). All four options must fit across the screen.
+        rule.onNodeWithText("30 fps").performSemanticsAction(SemanticsActions.OnClick)
+        idle(400)
+        assertEquals(30, com.ltots.app.ui.theme.ThemeState.config.value.visualizerFps)
+        val rootW = rule.onRoot().fetchSemanticsNode().size.width
+        val off = rule.onNodeWithText("Off").fetchSemanticsNode().boundsInRoot
+        assertTrue("rate pills overflow: $off vs $rootW", off.right <= rootW)
+        rule.onNodeWithText("60 fps").performSemanticsAction(SemanticsActions.OnClick)
+        idle(300)
+        assertEquals(60, com.ltots.app.ui.theme.ThemeState.config.value.visualizerFps)
 
         tab("Sound")
         rule.onNodeWithText("Natural voices when shifting pitch").assertIsDisplayed()
         shot("06_sound")
+        rule.onNodeWithText("Battery-saving pitch & speed").performSemanticsAction(SemanticsActions.OnClick)
+        idle(400)
+        assertTrue(AudioEngine.settings.value.efficientPitch)
+        rule.onNodeWithText("Battery-saving pitch & speed").performSemanticsAction(SemanticsActions.OnClick)
+        idle(300)
+        assertTrue(!AudioEngine.settings.value.efficientPitch)
     }
 
     @Test fun pitchIsLiveAndSpeedAppliesOnRelease() {

@@ -60,6 +60,17 @@ object DownloadManager {
     val libraryVersion: StateFlow<Int> = _libraryVersion
 
     private val running = HashMap<String, Job>()
+    /** yt-dlp process name currently used by each task (a new one per attempt). */
+    private val processIds = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val attempts = java.util.concurrent.atomic.AtomicInteger()
+
+    private fun killProcesses(taskId: String) {
+        val pid = processIds[taskId] ?: return
+        for (i in 0..1) {
+            runCatching { YoutubeDL.destroyProcessById("$pid-$i") }
+            runCatching { YoutubeDL.destroyProcessById("$pid-$i-info") }
+        }
+    }
     private var initialized = false
 
     fun init(context: Context) {
@@ -199,20 +210,19 @@ object DownloadManager {
     }
 
     fun cancel(id: String) {
-        runCatching { YoutubeDL.destroyProcessById(id) }
-        runCatching { YoutubeDL.destroyProcessById("$id-info") }
+        killProcesses(id)
         synchronized(running) { running.remove(id)?.cancel() }
         updateTask(id) { if (it.state.finished) it else it.copy(state = TaskState.CANCELED, finishedAt = System.currentTimeMillis()) }
         pump()
     }
 
     fun retry(id: String) {
-        updateTask(id) { it.copy(state = TaskState.QUEUED, progress = 0f, error = null) }
+        updateTask(id) { it.copy(state = TaskState.QUEUED, progress = 0f, error = null, log = null) }
         pump()
     }
 
     fun retryFailed() {
-        update { l -> l.map { if (it.state == TaskState.FAILED) it.copy(state = TaskState.QUEUED, progress = 0f, error = null) else it } }
+        update { l -> l.map { if (it.state == TaskState.FAILED) it.copy(state = TaskState.QUEUED, progress = 0f, error = null, log = null) else it } }
         pump()
     }
 
@@ -226,7 +236,7 @@ object DownloadManager {
             // Stop what's running and put it back in the queue.
             synchronized(running) {
                 running.keys.toList().forEach { id ->
-                    runCatching { YoutubeDL.destroyProcessById(id) }
+                    killProcesses(id)
                     running.remove(id)?.cancel()
                 }
             }
@@ -271,7 +281,9 @@ object DownloadManager {
             }
             updateTask(task.id) { it.copy(meta = meta, state = TaskState.DOWNLOADING, progress = 0f) }
             var lastUi = 0L
-            val result = downloader.download(task.id, meta) { p, line ->
+            val pid = "${task.id}-${attempts.incrementAndGet()}"
+            processIds[task.id] = pid
+            val result = downloader.download(pid, meta) { p, line ->
                 val now = System.currentTimeMillis()
                 if (line == "tagging") updateTask(task.id) { it.copy(state = TaskState.TAGGING, progress = 1f) }
                 else if (now - lastUi > 250) {
@@ -294,28 +306,39 @@ object DownloadManager {
         } catch (e: Throwable) {
             if (_tasks.value.firstOrNull { it.id == task.id }?.state == TaskState.CANCELED) return
             if (_paused.value) return
+            val log = (e as? Downloader.Failure)?.log ?: e.stackTraceToString().take(4000)
             updateTask(task.id) {
-                it.copy(state = TaskState.FAILED, error = friendlyError(e), finishedAt = System.currentTimeMillis())
+                it.copy(state = TaskState.FAILED, error = friendlyError(e), finishedAt = System.currentTimeMillis(),
+                    log = "LToTS ${appVersion()} · yt-dlp ${Engine.state.value.version ?: Engine.BUNDLED_YTDLP} · Android ${android.os.Build.VERSION.RELEASE} (${android.os.Build.MODEL})\n" +
+                        "${e.javaClass.simpleName}: ${e.message?.take(600)}\n\n$log")
             }
         } finally {
+            processIds.remove(task.id)
             synchronized(running) { running.remove(task.id) }
             pump()
         }
     }
 
+    private fun appVersion(): String =
+        runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }.getOrNull() ?: "?"
+
     private fun friendlyError(e: Throwable): String {
-        val m = (e.message ?: e.javaClass.simpleName).lines().lastOrNull { it.contains("ERROR") } ?: e.message ?: "Unknown error"
+        val text = e.message ?: e.javaClass.simpleName
+        val m = text.lines().lastOrNull { it.contains("ERROR") } ?: text.lines().firstOrNull { it.isNotBlank() } ?: "Unknown error"
         return when {
-            m.contains("Sign in to confirm", true) || m.contains("bot", true) ->
+            m.contains("Sign in to confirm", true) || m.contains("not a bot", true) ->
                 "YouTube asked for a sign-in check. Try again later, or tap Update engine."
-            m.contains("not available", true) || m.contains("unavailable", true) -> "This song isn't available in your country or was removed."
+            m.contains("Video unavailable", true) || m.contains("not available in your country", true) ->
+                "This song isn't available in your country or was removed."
             m.contains("Private video", true) -> "This video is private."
-            m.contains("HTTP Error 403", true) || m.contains("nsig", true) || m.contains("signature", true) ->
-                "YouTube changed something. Tap Update engine, then retry."
-            m.contains("Unable to resolve host", true) || m.contains("timed out", true) || m.contains("Network", true) ->
+            m.contains("HTTP Error 403", true) || m.contains("nsig", true) || m.contains("n challenge", true) ||
+                m.contains("Requested format is not available", true) ->
+                "YouTube refused the download. Tap Update engine, then retry."
+            m.contains("Unable to resolve host", true) || m.contains("timed out", true) ||
+                m.contains("Network is unreachable", true) || m.contains("No address associated", true) ->
                 "No internet connection."
             else -> m.removePrefix("ERROR: ").take(220)
-        }
+        } + " (tap for details)"
     }
 
     // ---- foreground service ----------------------------------------------------------------

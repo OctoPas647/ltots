@@ -89,7 +89,12 @@ class SinkSimulator(private val chain: AudioProcessorChain, val sampleRate: Int 
         if (!pipeline.isOperational) return
         pipeline.queueEndOfStream()
         var guard = 0
-        while (!pipeline.isEnded && guard++ < 100_000) collect()
+        // Like the real sink, keep asking until the pipeline says it's done. A processor that
+        // never finishes draining freezes playback on the phone, so it must fail here too.
+        while (!pipeline.isEnded) {
+            check(guard++ < 10_000) { "audio pipeline never finished draining (playback would freeze)" }
+            collect()
+        }
         // Pipeline must be flushed before it accepts input again (the sink always does).
     }
 

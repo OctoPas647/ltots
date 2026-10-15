@@ -17,6 +17,8 @@ interface SoundSource {
     fun pitchScaleFor(mediaId: String?): Double
     /** Keep the character of voices when shifting pitch. */
     val preserveFormants: Boolean
+    /** Use the lighter (battery-saving) pitch/speed engine. */
+    val efficientPitch: Boolean get() = false
 }
 
 /** A fixed source for tests and for before the app is initialised. */
@@ -24,6 +26,7 @@ open class StaticSoundSource(
     var eq: EqState = EqState(enabled = false),
     var pitch: Double = 1.0,
     override var preserveFormants: Boolean = false,
+    override var efficientPitch: Boolean = false,
 ) : SoundSource {
     @Volatile override var version: Int = 0
     override fun eqFor(mediaId: String?) = eq

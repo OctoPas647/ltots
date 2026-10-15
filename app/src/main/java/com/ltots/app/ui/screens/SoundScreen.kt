@@ -84,7 +84,7 @@ fun SoundScreen() {
                 SectionTitle("Signal path")
                 PathRow("Decoded", if (info.sampleRate > 0) "${"%.1f".format(Locale.ROOT, info.sampleRate / 1000.0)} kHz · ${info.channels} ch" else "—")
                 PathRow("EQ & limiter", "64-bit floating point")
-                PathRow("Pitch & speed", "Rubber Band R3 (only when changed)")
+                PathRow("Pitch & speed", (if (settings.efficientPitch) "Rubber Band R2" else "Rubber Band R3") + " (only when changed)")
                 PathRow("Limiter", "Soft, above −1 dBFS only")
                 PathRow("Sent to Android", if (settings.bitPerfectUsb) "16-bit, dithered" else "32-bit float")
                 PathRow("Output", device.kindLabel)
@@ -109,6 +109,11 @@ fun SoundScreen() {
                     "Natural voices when shifting pitch", settings.preserveFormants,
                     { on -> AudioEngine.updateSettings { it.copy(preserveFormants = on) } },
                     sub = "Keeps singers sounding like themselves instead of chipmunk/giant. Best for vocal tracks; off is a classic key change that suits full songs and instruments.",
+                )
+                SwitchRow(
+                    "Battery-saving pitch & speed", settings.efficientPitch,
+                    { on -> AudioEngine.updateSettings { it.copy(efficientPitch = on) } },
+                    sub = "Uses the lighter Rubber Band engine: about half the processing (and battery) while pitch or speed is changed, with slightly less polished sound. Nothing runs at original pitch and speed either way.",
                 )
             }
         }

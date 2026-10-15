@@ -30,7 +30,7 @@ val buildHostRubberBand by tasks.registering(Exec::class) {
     outputs.file(out)
     doFirst { hostLibDir.get().asFile.mkdirs() }
     commandLine(
-        "g++", "-O2", "-fPIC", "-shared", "-std=c++17",
+        "g++", "-O3", "-ffast-math", "-fPIC", "-shared", "-std=c++17",
         "-I$rb", "-I$rb/src",
         "-I${javaHome}/include", "-I${javaHome}/include/linux",
         "$rb/single/RubberBandSingle.cpp", "$rb/src/jni/RubberBandStretcherJNI.cpp",
@@ -109,7 +109,11 @@ android {
             test.dependsOn(buildHostRubberBand)
             test.systemProperty("java.library.path", hostLibDir.get().asFile.absolutePath)
             test.systemProperty("roborazzi.test.record", "true")
+            System.getProperty("ltots.live")?.let { test.systemProperty("ltots.live", it) }
             test.maxHeapSize = "2g"
+            // A native library can only be loaded by one class loader per JVM, and Robolectric
+            // tests use their own; so every test class gets a fresh JVM.
+            test.setForkEvery(1)
             // Robolectric (Android 16 sandbox) needs these on JDK 21.
             test.jvmArgs(
                 "--add-exports=java.base/jdk.internal.access=ALL-UNNAMED",
@@ -159,6 +163,9 @@ dependencies {
     // UI tests on the desktop JVM: Robolectric runs the real Android/Compose code, Roborazzi
     // captures screenshots of each screen.
     testImplementation("org.robolectric:robolectric:4.17")
+    // Media3's own Robolectric helpers: run the real ExoPlayer + audio output in tests.
+    testImplementation("androidx.media3:media3-test-utils:$media3")
+    testImplementation("androidx.media3:media3-test-utils-robolectric:$media3")
     testImplementation("io.github.takahirom.roborazzi:roborazzi:1.76.0")
     testImplementation(composeBom)
     testImplementation("androidx.compose.ui:ui-test-junit4")

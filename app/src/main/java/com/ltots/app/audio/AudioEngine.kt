@@ -56,6 +56,10 @@ object AudioEngine : SoundSource {
     private val _player = MutableStateFlow<ExoPlayer?>(null)
     val player: StateFlow<ExoPlayer?> = _player
 
+    /** Whether sound is actually coming out (the visualizer sleeps when it isn't). */
+    private val _isPlaying = MutableStateFlow(false)
+    val isPlaying: StateFlow<Boolean> = _isPlaying
+
     lateinit var settings: MutableStateFlow<AppSettings>
         private set
     lateinit var defaultEq: MutableStateFlow<EqState>
@@ -116,6 +120,7 @@ object AudioEngine : SoundSource {
     }
 
     override val preserveFormants: Boolean get() = initialized && settings.value.preserveFormants
+    override val efficientPitch: Boolean get() = initialized && settings.value.efficientPitch
 
     private fun scaleOf(cents: Int, speed: Float, tape: Boolean): Double =
         if (tape) speed.toDouble() else 2.0.pow(cents / 1200.0)
@@ -129,9 +134,7 @@ object AudioEngine : SoundSource {
                 context: Context,
                 enableFloatOutput: Boolean,
                 enableAudioOutputPlaybackParams: Boolean,
-            ): AudioSink = DefaultAudioSink.Builder(context)
-                .setAudioProcessorChain(chain)
-                .build()
+            ): AudioSink = buildSink(context, chain)
         }
         val p = ExoPlayer.Builder(context, renderers)
             .setAudioAttributes(attributes, /* handleAudioFocus = */ true)
@@ -140,6 +143,7 @@ object AudioEngine : SoundSource {
             .build()
         p.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = onSongChanged(mediaItem)
+            override fun onIsPlayingChanged(isPlaying: Boolean) { _isPlaying.value = isPlaying }
         })
         _player.value = p
         onSongChanged(p.currentMediaItem)
@@ -147,9 +151,21 @@ object AudioEngine : SoundSource {
         return p
     }
 
+    /** Media3's audio output with LToTS' processing chain (shared with the tests). */
+    fun buildSink(
+        context: Context,
+        chain: LToTSProcessorChain,
+        output: androidx.media3.exoplayer.audio.AudioOutputProvider? = null,
+    ): AudioSink =
+        DefaultAudioSink.Builder(context)
+            .setAudioProcessorChain(chain)
+            .apply { if (output != null) setAudioOutputProvider(output) }
+            .build()
+
     fun releasePlayer() {
         _player.value?.release()
         _player.value = null
+        _isPlaying.value = false
     }
 
     private fun onSongChanged(item: MediaItem?) {

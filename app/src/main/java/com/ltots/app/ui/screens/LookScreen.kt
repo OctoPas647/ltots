@@ -163,6 +163,18 @@ fun LookScreen() {
                 LabeledSlider("Strength", cfg.spectrumOpacity, { v -> set { it.copy(spectrumOpacity = v) } }, 0.1f..1f, pct(cfg.spectrumOpacity))
                 SwitchRow("Show sound before EQ", cfg.showPreEqGhost, { on -> set { it.copy(showPreEqGhost = on) } },
                     sub = "A faint outline of the original sound, so you can see exactly what the EQ changes.")
+                Spacer(Modifier.height(8.dp))
+                Text("Refresh rate", color = LocalPalette.current.textDim, style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(30 to "30 fps", 60 to "60 fps", 120 to "120 fps", 0 to "Off").forEach { (f, l) ->
+                        Pill(l, cfg.visualizerFps == f, { set { it.copy(visualizerFps = f) } })
+                    }
+                }
+                Text(
+                    "Higher is smoother but uses more battery. 60 fps is the best balance; Battery Saver caps it at 30. The visualizer sleeps while nothing is playing.",
+                    color = LocalPalette.current.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp),
+                )
             }
         }
 

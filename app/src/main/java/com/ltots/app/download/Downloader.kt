@@ -29,13 +29,16 @@ import java.util.Collections
 class Downloader(private val context: Context) {
 
     /** Best audio without Premium: Opus (~130–160 kbps), else the best AAC. */
-    private val formatSelector = "bestaudio[acodec=opus]/bestaudio[ext=m4a]/bestaudio"
+    private val formatSelector = FORMAT
 
     private val albumCache = Collections.synchronizedMap(object : LinkedHashMap<String, Collection>(32, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Collection>?) = size > 32
     })
 
     class Result(val uri: Uri, val meta: TrackMeta, val qualityNote: String)
+
+    /** A failed download, with yt-dlp's own output so the user can see (and send) what happened. */
+    class Failure(message: String, val log: String, cause: Throwable? = null) : Exception(message, cause)
 
     // ---- 1. metadata -----------------------------------------------------------------------
 
@@ -81,43 +84,74 @@ class Downloader(private val context: Context) {
 
     // ---- 2–4. download, tag, save ----------------------------------------------------------
 
-    fun download(taskId: String, meta: TrackMeta, onProgress: (Float, String?) -> Unit): Result {
-        val work = File(context.cacheDir, "dl/$taskId").apply { deleteRecursively(); mkdirs() }
-        try {
-            val url = "https://music.youtube.com/watch?v=${meta.videoId}"
+    /**
+     * Downloads one song. YouTube Music's address is tried first; if YouTube refuses it there,
+     * the same video is fetched through the regular YouTube address (a different set of
+     * YouTube clients), which often gets past temporary blocks.
+     * [processId] names the yt-dlp process so the download can be cancelled.
+     */
+    fun download(processId: String, meta: TrackMeta, onProgress: (Float, String?) -> Unit): Result {
+        val urls = listOf(
+            "https://music.youtube.com/watch?v=${meta.videoId}",
+            "https://www.youtube.com/watch?v=${meta.videoId}",
+        )
+        val log = StringBuilder()
+        var last: Throwable? = null
+        for ((i, url) in urls.withIndex()) {
+            try {
+                return downloadFrom(url, "$processId-$i", meta, log, onProgress)
+            } catch (e: YoutubeDL.CanceledException) {
+                throw e
+            } catch (e: InterruptedException) {
+                throw e
+            } catch (e: Throwable) {
+                last = e
+                log.append("\n[LToTS] attempt ${i + 1} ($url) failed: ").append(e.javaClass.simpleName).append(": ")
+                    .append(e.message?.takeLast(4000)).append('\n')
+                if (e is Failure && !e.retryable) break
+            }
+        }
+        val msg = last?.message ?: "Download failed"
+        throw Failure(msg, log.toString().takeLast(12_000), last)
+    }
 
+    private class StepFailure(message: String) : Exception(message)
+
+    private val Failure.retryable get() = cause !is StepFailure
+
+    private fun downloadFrom(url: String, pid: String, meta: TrackMeta, log: StringBuilder, onProgress: (Float, String?) -> Unit): Result {
+        val work = File(context.cacheDir, "dl/$pid").apply { deleteRecursively(); mkdirs() }
+        try {
+            log.append("[LToTS] ").append(url).append('\n')
             // Fetch stream info, then replace YouTube's video metadata with the album metadata.
-            val infoReq = YoutubeDLRequest(url)
-                .addOption("--dump-single-json")
-                .addOption("--no-playlist")
-                .addOption("-f", formatSelector)
-            val infoOut = YoutubeDL.execute(infoReq, "$taskId-info").out
-            val info = JSONObject(infoOut.substring(infoOut.indexOf('{')))
+            val infoReq = YoutubeDLRequest(url).apply { infoArgs().forEach { (k, v) -> if (v == null) addOption(k) else addOption(k, v) } }
+            val infoRes = YoutubeDL.execute(infoReq, "$pid-info")
+            log.append(infoRes.err.takeLast(3000))
+            val infoOut = infoRes.out
+            val start = infoOut.indexOf('{')
+            if (start < 0) throw IllegalStateException("yt-dlp returned no song information. ${infoRes.err.lines().lastOrNull { it.isNotBlank() } ?: ""}")
+            val info = JSONObject(infoOut.substring(start))
             val m = fillFromInfo(meta, info)
             val cover = prepareCover(m, work)
             rewriteInfo(info, m, cover?.file)
             val infoFile = File(work, "info.json").apply { writeText(info.toString()) }
 
-            val req = YoutubeDLRequest(emptyList())
-                .addOption("--load-info-json", infoFile.absolutePath)
-                .addOption("-f", formatSelector)
-                .addOption("-x") // audio only, kept in its original codec (no re-encoding)
-                .addOption("--embed-metadata")
-                .addOption("--embed-thumbnail")
-                .addOption("--enable-file-urls") // the cover is prepared locally (see prepareCover)
-                .addOption("--no-mtime")
-                .addOption("--newline")
-                .addOption("--retries", "5")
-                .addOption("--fragment-retries", "5")
-                .addOption("-o", File(work, "%(id)s.%(ext)s").absolutePath)
-            YoutubeDL.execute(req, taskId) { progress, _, line ->
+            val req = YoutubeDLRequest(emptyList()).apply { downloadArgs(infoFile, work).forEach { (k, v) -> if (v == null) addOption(k) else addOption(k, v) } }
+            val dl = YoutubeDL.execute(req, pid) { progress, _, line ->
                 onProgress((progress / 100f).coerceIn(0f, 1f), line)
             }
+            log.append(dl.out.lines().filter { !it.startsWith("[download]") || "100%" in it }.joinToString("\n").takeLast(3000))
+            log.append(dl.err.takeLast(3000))
             onProgress(1f, "tagging")
 
             val audio = work.listFiles()?.firstOrNull { it.extension in AUDIO_EXTENSIONS }
-                ?: throw IllegalStateException("yt-dlp finished but produced no audio file")
-            val uri = saveToMusic(audio, m)
+                ?: throw IllegalStateException("yt-dlp finished but produced no audio file (files: ${work.list()?.joinToString()})")
+            val uri = try {
+                saveToMusic(audio, m)
+            } catch (e: Exception) {
+                // Saving to Music isn't a YouTube problem; trying another address won't help.
+                throw Failure("Couldn't save to Music/LToTS: ${e.message}", log.toString(), StepFailure(e.message ?: ""))
+            }
             val codec = if (audio.extension == "opus") "Opus" else audio.extension.uppercase()
             val abr = info.optDouble("abr", 0.0).takeIf { it > 0 }?.let { " · ${it.toInt()} kbps" } ?: ""
             val coverNote = cover?.let { " · ${it.size}×${it.size} cover" } ?: ""
@@ -127,8 +161,30 @@ class Downloader(private val context: Context) {
         }
     }
 
+    /** yt-dlp options for the first step: song information and the chosen audio stream. */
+    internal fun infoArgs(): List<Pair<String, String?>> = listOf(
+        "--dump-single-json" to null,
+        "--no-playlist" to null,
+        "-f" to formatSelector,
+    )
+
+    /** yt-dlp options for the second step: fetch that stream and tag it. */
+    internal fun downloadArgs(infoFile: File, work: File): List<Pair<String, String?>> = listOf(
+        "--load-info-json" to infoFile.absolutePath,
+        "-f" to formatSelector,
+        "-x" to null, // audio only, kept in its original codec (no re-encoding)
+        "--embed-metadata" to null,
+        "--embed-thumbnail" to null,
+        "--enable-file-urls" to null, // the cover is prepared locally (see prepareCover)
+        "--no-mtime" to null,
+        "--newline" to null,
+        "--retries" to "5",
+        "--fragment-retries" to "5",
+        "-o" to File(work, "%(id)s.%(ext)s").absolutePath,
+    )
+
     /** If YouTube Music couldn't be asked (e.g. offline lookup failed), take names from yt-dlp. */
-    private fun fillFromInfo(m: TrackMeta, info: JSONObject): TrackMeta {
+    internal fun fillFromInfo(m: TrackMeta, info: JSONObject): TrackMeta {
         val placeholder = m.title.isBlank() || m.title == PLACEHOLDER_TITLE
         val noArtist = m.artist.isBlank() || m.artist == "Unknown artist"
         if (!placeholder && !noArtist) return m
@@ -187,7 +243,7 @@ class Downloader(private val context: Context) {
         return c.inputStream.use { it.readBytes() }
     }
 
-    private fun rewriteInfo(info: JSONObject, m: TrackMeta, cover: File?) {
+    internal fun rewriteInfo(info: JSONObject, m: TrackMeta, cover: File?) {
         // Drop the video's description, keyword tags and upload date — they make messy tags.
         listOf(
             "description", "tags", "categories", "genre", "genres", "upload_date", "release_date",
@@ -252,6 +308,7 @@ class Downloader(private val context: Context) {
 
     companion object {
         const val PLACEHOLDER_TITLE = "YouTube video"
+        const val FORMAT = "bestaudio[acodec=opus]/bestaudio[ext=m4a]/bestaudio"
         private val AUDIO_EXTENSIONS = setOf("opus", "m4a", "webm", "ogg", "mp3", "aac", "flac")
         private val illegal = Regex("""[\\/:*?"<>|\u0000-\u001F]""")
         fun safe(s: String) = illegal.replace(s, " ").replace(Regex("\\s+"), " ").trim().trimEnd('.').take(120)
