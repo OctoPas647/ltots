@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.LibraryMusic
@@ -45,6 +46,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -65,6 +67,7 @@ import com.ltots.app.playback.PlayerConnection
 import com.ltots.app.ui.glass.AppBackground
 import com.ltots.app.ui.glass.GlassPanel
 import com.ltots.app.ui.glass.LocalBackdrop
+import com.ltots.app.ui.screens.DownloadsScreen
 import com.ltots.app.ui.screens.EqScreen
 import com.ltots.app.ui.screens.LibraryScreen
 import com.ltots.app.ui.screens.LookScreen
@@ -76,6 +79,7 @@ enum class Tab(val label: String, val icon: ImageVector) {
     LIBRARY("Library", Icons.Rounded.LibraryMusic),
     PLAYER("Playing", Icons.Rounded.MusicNote),
     EQ("EQ", Icons.Rounded.GraphicEq),
+    DOWNLOADS("Get", Icons.Rounded.Download),
     LOOK("Look", Icons.Rounded.Palette),
     SOUND("Sound", Icons.Rounded.Headphones),
 }
@@ -91,6 +95,18 @@ fun AppRoot() {
     val artwork = rememberArtwork(player.trackId, player.artworkData)
     val backdrop = rememberLayerBackdrop()
 
+    // Dynamic colours: the theme follows the current cover.
+    LaunchedEffect(artwork) { com.ltots.app.ui.theme.DynamicColor.onArtwork(artwork) }
+
+    // Shared links open the Downloads tab; notifications can ask for a tab too.
+    val shared by Inbox.sharedText.collectAsState()
+    val wantTab by Inbox.openTab.collectAsState()
+    LaunchedEffect(shared) { if (shared != null) tab = Tab.DOWNLOADS }
+    LaunchedEffect(wantTab) {
+        wantTab?.let { name -> Tab.entries.firstOrNull { it.name == name }?.let { tab = it } }
+        Inbox.openTab.value = null
+    }
+
     Box(Modifier.fillMaxSize()) {
         // Everything glass refracts this layer.
         AppBackground(artwork, Modifier.fillMaxSize().layerBackdrop(backdrop))
@@ -102,6 +118,7 @@ fun AppRoot() {
                         Tab.LIBRARY -> LibraryScreen(player, onOpenPlayer = { tab = Tab.PLAYER })
                         Tab.PLAYER -> NowPlayingScreen(player, artwork, onOpenEq = { tab = Tab.EQ }, onOpenSound = { tab = Tab.SOUND })
                         Tab.EQ -> EqScreen(player)
+                        Tab.DOWNLOADS -> DownloadsScreen(player, onOpenPlayer = { tab = Tab.PLAYER })
                         Tab.LOOK -> LookScreen()
                         Tab.SOUND -> SoundScreen()
                     }

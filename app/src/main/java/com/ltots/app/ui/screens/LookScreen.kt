@@ -23,6 +23,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -58,7 +59,8 @@ private val swatches = listOf(
 
 @Composable
 fun LookScreen() {
-    val cfg = LocalThemeConfig.current
+    // Edit the saved theme (LocalThemeConfig may be showing cover-based colours).
+    val cfg by ThemeState.config.collectAsState()
     val pal = LocalPalette.current
     fun set(t: (ThemeConfig) -> ThemeConfig) = ThemeState.update(t)
 
@@ -73,7 +75,7 @@ fun LookScreen() {
                 SectionTitle("Themes", Modifier.padding(horizontal = 16.dp))
                 Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     ThemeState.presets.forEach { (name, t) ->
-                        val on = cfg.copy(hideNavBar = t.hideNavBar, hideStatusBar = t.hideStatusBar) == t
+                        val on = cfg.copy(hideNavBar = t.hideNavBar, hideStatusBar = t.hideStatusBar, dynamicColors = t.dynamicColors) == t
                         Column(Modifier.clip(RoundedCornerShape(16.dp)).clickable { ThemeState.applyPreset(t) }.padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                             Box(
                                 Modifier.size(64.dp).clip(RoundedCornerShape(16.dp)).background(
@@ -87,6 +89,16 @@ fun LookScreen() {
                         }
                     }
                 }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
+            Column(Modifier.padding(16.dp)) {
+                SwitchRow(
+                    "Colours from the song's cover", cfg.dynamicColors, { on -> set { it.copy(dynamicColors = on) } },
+                    sub = "The accent and background glow take the average colour of the current cover, like Spotify and YouTube Music. The colours below are used when nothing is playing.",
+                )
             }
         }
 

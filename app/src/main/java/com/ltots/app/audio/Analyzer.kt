@@ -101,18 +101,29 @@ class SpectrumFrame(
 
 /**
  * Turns the tap's ring buffer into smoothed spectrum bars and a waveform, synced to the
- * player's position. Runs on the UI side, once per frame.
+ * player's position. Runs on the UI side, once per display frame (up to 120 Hz).
+ *
+ * Two FFTs per frame: a long one (85 ms) for fine detail in the bass, and a short one (21 ms)
+ * for everything above [SPLIT_HZ], so drums and transients show up instantly. Both windows are
+ * centred on the sample you're hearing right now, and smoothing is time-based so it feels the
+ * same at 60 or 120 fps.
  */
-class Analyzer(private val tap: AnalyzerTap, val bands: Int = 96, private val fftSize: Int = 4096) {
-    private val window = FloatArray(fftSize) { (0.5 - 0.5 * cos(2.0 * PI * it / (fftSize - 1))).toFloat() }
-    private val fft = Fft(fftSize)
-    private val re = FloatArray(fftSize)
-    private val im = FloatArray(fftSize)
-    private val mags = FloatArray(fftSize / 2)
+class Analyzer(private val tap: AnalyzerTap, val bands: Int = 96) {
+    private class Resolution(val size: Int) {
+        val window = FloatArray(size) { (0.5 - 0.5 * cos(2.0 * PI * it / (size - 1))).toFloat() }
+        val fft = Fft(size)
+        val re = FloatArray(size)
+        val im = FloatArray(size)
+        val mags = FloatArray(size / 2)
+    }
+
+    private val long = Resolution(4096)
+    private val short = Resolution(1024)
     private val frame = SpectrumFrame(bands)
     private val smoothPost = FloatArray(bands)
     private val smoothPre = FloatArray(bands)
     private var delayFrames = -1L
+    private var lastNanos = 0L
 
     /** Seconds of history shown in the scrolling waveform. */
     var waveSeconds = 2.5f
@@ -122,10 +133,13 @@ class Analyzer(private val tap: AnalyzerTap, val bands: Int = 96, private val ff
      * @param playing whether audio is moving; when paused the bars fall to rest.
      */
     fun update(positionUs: Long, playing: Boolean): SpectrumFrame {
+        val now = System.nanoTime()
+        val dt = if (lastNanos == 0L) 1f / 60f else ((now - lastNanos) / 1e9f).coerceIn(0.001f, 0.1f)
+        lastNanos = now
         val sr = tap.sampleRate
         val head = tap.published
-        if (head < fftSize || !playing) {
-            decay()
+        if (head < long.size || !playing) {
+            decay(dt)
             return frame
         }
 
@@ -133,60 +147,70 @@ class Analyzer(private val tap: AnalyzerTap, val bands: Int = 96, private val ff
         // estimate jumps (e.g. right after a track change, before the next flush).
         val aheadUs = tap.headMediaTimeUs() - positionUs
         val rawDelay = aheadUs * sr / 1_000_000L
-        val maxDelay = (tap.size - fftSize - waveFrames(sr)).toLong()
+        val maxDelay = (tap.size - long.size - waveFrames(sr)).toLong()
         if (rawDelay in 0..maxDelay) {
-            delayFrames = if (delayFrames < 0) rawDelay else (delayFrames * 7 + rawDelay) / 8
+            delayFrames = if (delayFrames < 0) rawDelay else (delayFrames * 3 + rawDelay) / 4
         } else if (delayFrames < 0) {
             delayFrames = (0.25 * sr).toLong()
         }
-        val end = head - delayFrames.coerceIn(0, maxDelay)
+        val now0 = head - delayFrames.coerceIn(0, maxDelay)
 
-        spectrum(tap.post, end, sr, smoothPost, frame.post)
-        spectrum(tap.pre, end, sr, smoothPre, frame.pre)
-        waveform(end, sr)
+        analyse(tap.post, now0, head, sr, smoothPost, frame.post, dt)
+        analyse(tap.pre, now0, head, sr, smoothPre, frame.pre, dt)
+        waveform(now0, sr)
         return frame
     }
 
     private fun waveFrames(sr: Int) = (waveSeconds * sr).toInt()
 
-    private fun spectrum(src: FloatArray, end: Long, sr: Int, smooth: FloatArray, out: FloatArray) {
-        val start = end - fftSize
-        for (i in 0 until fftSize) {
-            re[i] = src[tap.indexOf(start + i)] * window[i]
-            im[i] = 0f
+    private fun runFft(r: Resolution, src: FloatArray, centre: Long, head: Long) {
+        // Centre the window on "now", but never read past what the audio thread has written.
+        val end = minOf(centre + r.size / 2, head)
+        val start = end - r.size
+        for (i in 0 until r.size) {
+            r.re[i] = src[tap.indexOf(start + i)] * r.window[i]
+            r.im[i] = 0f
         }
-        fft.transform(re, im)
-        val norm = 2f / (fftSize * 0.5f) // Hann coherent gain
-        for (k in 0 until fftSize / 2) {
-            val m = kotlin.math.sqrt(re[k] * re[k] + im[k] * im[k]) * norm
-            mags[k] = m
+        r.fft.transform(r.re, r.im)
+        val norm = 2f / (r.size * 0.5f) // Hann coherent gain
+        for (k in 0 until r.size / 2) r.mags[k] = kotlin.math.sqrt(r.re[k] * r.re[k] + r.im[k] * r.im[k]) * norm
+    }
+
+    private fun bandLevel(r: Resolution, f0: Double, f1: Double, sr: Int): Float {
+        val binHz = sr.toDouble() / r.size
+        val mags = r.mags
+        val k0 = (f0 / binHz).toInt().coerceIn(1, mags.size - 1)
+        val k1 = (f1 / binHz).toInt().coerceIn(k0, mags.size - 1)
+        return if (k1 == k0) {
+            // Band narrower than one FFT bin: interpolate.
+            val fc = (f0 + f1) / 2 / binHz
+            val kk = fc.toInt().coerceIn(0, mags.size - 2)
+            val t = (fc - kk).toFloat().coerceIn(0f, 1f)
+            mags[kk] * (1 - t) + mags[kk + 1] * t
+        } else {
+            var level = 0f
+            for (k in k0..k1) level = max(level, mags[k])
+            level
         }
-        val binHz = sr.toDouble() / fftSize
+    }
+
+    private fun analyse(src: FloatArray, centre: Long, head: Long, sr: Int, smooth: FloatArray, out: FloatArray, dt: Float) {
+        runFft(long, src, centre, head)
+        runFft(short, src, centre, head)
+        // Time-based smoothing: rises in ~12 ms, falls in ~70 ms.
+        val attack = 1f - kotlin.math.exp(-dt / 0.012f)
+        val release = 1f - kotlin.math.exp(-dt / 0.070f)
         for (b in 0 until bands) {
             val f0 = SpectrumFrame.MIN_FREQ * (SpectrumFrame.MAX_FREQ / SpectrumFrame.MIN_FREQ).pow(b.toDouble() / bands)
             val f1 = SpectrumFrame.MIN_FREQ * (SpectrumFrame.MAX_FREQ / SpectrumFrame.MIN_FREQ).pow((b + 1.0) / bands)
-            var k0 = (f0 / binHz).toInt()
-            var k1 = (f1 / binHz).toInt()
-            k0 = k0.coerceIn(1, mags.size - 1)
-            k1 = k1.coerceIn(k0, mags.size - 1)
-            var level: Float
-            if (k1 == k0) {
-                // Low bands narrower than one FFT bin: interpolate.
-                val fc = (f0 + f1) / 2 / binHz
-                val kk = fc.toInt().coerceIn(0, mags.size - 2)
-                val t = (fc - kk).toFloat().coerceIn(0f, 1f)
-                level = mags[kk] * (1 - t) + mags[kk + 1] * t
-            } else {
-                level = 0f
-                for (k in k0..k1) level = max(level, mags[k])
-            }
+            val fc = kotlin.math.sqrt(f0 * f1)
+            val level = if (fc < SPLIT_HZ) bandLevel(long, f0, f1, sr) else bandLevel(short, f0, f1, sr)
             // Gentle tilt (+3 dB/oct) so music looks balanced rather than bass-heavy.
-            val fc = (f0 * f1).let { kotlin.math.sqrt(it) }
             val tilt = (3.0 * ln(fc / 1000.0) / ln(2.0)).toFloat()
             val db = 20f * log10(max(level, 1e-9f)) + tilt
             val v = ((db + 72f) / 72f).coerceIn(0f, 1f)
             val s = smooth[b]
-            smooth[b] = if (v > s) s + (v - s) * 0.6f else s + (v - s) * 0.18f
+            smooth[b] = s + (v - s) * (if (v > s) attack else release)
             out[b] = smooth[b]
         }
     }
@@ -214,16 +238,22 @@ class Analyzer(private val tap: AnalyzerTap, val bands: Int = 96, private val ff
         frame.peak = peak
     }
 
-    private fun decay() {
+    private fun decay(dt: Float) {
+        val k = kotlin.math.exp(-dt / 0.09f)
         for (b in 0 until bands) {
-            smoothPost[b] *= 0.86f; frame.post[b] = smoothPost[b]
-            smoothPre[b] *= 0.86f; frame.pre[b] = smoothPre[b]
+            smoothPost[b] *= k; frame.post[b] = smoothPost[b]
+            smoothPre[b] *= k; frame.pre[b] = smoothPre[b]
         }
         for (c in 0 until SpectrumFrame.WAVE_COLUMNS) {
-            frame.waveMin[c] *= 0.9f; frame.waveMax[c] *= 0.9f
+            frame.waveMin[c] *= k; frame.waveMax[c] *= k
         }
-        frame.peak *= 0.9f
+        frame.peak *= k
         delayFrames = -1
+        if (dt >= 0.1f) lastNanos = 0L
+    }
+
+    companion object {
+        const val SPLIT_HZ = 300.0
     }
 }
 

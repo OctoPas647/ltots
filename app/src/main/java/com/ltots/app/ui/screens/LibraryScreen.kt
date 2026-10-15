@@ -46,6 +46,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -103,7 +104,8 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
         }
     }
 
-    val tracks by produceState(emptyList<Track>(), hasPerm, reload) {
+    val downloadsDone by com.ltots.app.download.DownloadManager.libraryVersion.collectAsState()
+    val tracks by produceState(emptyList<Track>(), hasPerm, reload, downloadsDone) {
         value = if (hasPerm) LocalLibrary.load(context) else emptyList()
     }
 

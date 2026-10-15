@@ -30,6 +30,9 @@ android {
         targetSdk = 36
         versionCode = buildNumber
         versionName = "0.1.$buildNumber"
+        // The download engine (Python, ffmpeg) is native code; ship only the 64-bit ARM build
+        // that every current phone uses, which keeps the APK roughly half the size.
+        ndk { abiFilters += "arm64-v8a" }
     }
 
     signingConfigs {
@@ -77,6 +80,9 @@ android {
 
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        // yt-dlp's Python and ffmpeg run as programs from the native-library folder,
+        // so they must be extracted on install rather than kept inside the APK.
+        jniLibs.useLegacyPackaging = true
     }
 }
 
@@ -102,6 +108,11 @@ dependencies {
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("com.google.guava:guava:33.7.2-android")
+
+    // yt-dlp + Python + ffmpeg for Android (the engine Seal uses).
+    val ytdl = "0.18.1"
+    implementation("io.github.junkfood02.youtubedl-android:library:$ytdl")
+    implementation("io.github.junkfood02.youtubedl-android:ffmpeg:$ytdl")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20260814")

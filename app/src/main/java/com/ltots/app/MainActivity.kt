@@ -13,16 +13,22 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.ltots.app.data.ThemeConfig
 import com.ltots.app.playback.PlayerConnection
 import com.ltots.app.ui.AppRoot
+import com.ltots.app.ui.Inbox
 import com.ltots.app.ui.theme.LToTSTheme
 import com.ltots.app.ui.theme.ThemeState
 
 class MainActivity : ComponentActivity() {
+    companion object {
+        const val EXTRA_TAB = "ltots.tab"
+    }
+
     private var bars: ThemeConfig = ThemeState.config.value
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         PlayerConnection.connect(this)
+        handleIntent(intent)
         applySystemBars()
         setContent {
             val cfg by ThemeState.config.collectAsState()
@@ -32,6 +38,19 @@ class MainActivity : ComponentActivity() {
             }
             LToTSTheme { AppRoot() }
         }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: android.content.Intent?) {
+        intent ?: return
+        if (intent.action == android.content.Intent.ACTION_SEND) {
+            intent.getStringExtra(android.content.Intent.EXTRA_TEXT)?.let { Inbox.sharedText.value = it }
+        }
+        intent.getStringExtra(EXTRA_TAB)?.let { Inbox.openTab.value = it }
     }
 
     // Android shows the bars again after dialogs, the notification shade or switching apps;

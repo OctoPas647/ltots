@@ -47,6 +47,8 @@ data class ThemeConfig(
     val hideNavBar: Boolean = true,
     /** Hide the status bar (clock, battery) too, for fully full-screen. */
     val hideStatusBar: Boolean = false,
+    /** Accent and background glow follow the current song's cover (like Spotify / YT Music). */
+    val dynamicColors: Boolean = true,
 )
 
 data class AppSettings(
@@ -119,6 +121,7 @@ object Json {
         put("specStyle", t.spectrumStyle.name); put("specOpacity", t.spectrumOpacity.toDouble())
         put("ghost", t.showPreEqGhost)
         put("black", t.pureBlack); put("hideNav", t.hideNavBar); put("hideStatus", t.hideStatusBar)
+        put("dyn", t.dynamicColors)
     }
 
     fun theme(o: JSONObject): ThemeConfig {
@@ -144,6 +147,7 @@ object Json {
             pureBlack = o.optBoolean("black", d.pureBlack),
             hideNavBar = o.optBoolean("hideNav", d.hideNavBar),
             hideStatusBar = o.optBoolean("hideStatus", d.hideStatusBar),
+            dynamicColors = o.optBoolean("dyn", d.dynamicColors),
         )
     }
 

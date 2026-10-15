@@ -30,12 +30,23 @@ newer APK updates the app and keeps your settings.
   can also be switched on for any theme.
 - **Full screen** – the navigation bar is hidden inside the app (swipe up from the bottom edge to
   bring it back); the status bar can be hidden too.
+- **Dynamic colours** – the accent and background glow follow the average colour of the
+  current song's cover, fading between songs (switch in Look).
+- **Downloads ("Get" tab)** – search YouTube Music or paste/share a link to a song, album,
+  playlist or artist:
+  - YouTube's best audio (Opus) kept exactly as sent — no re-encoding;
+  - official album metadata (title, artists, album, album artist, track number, year) and the
+    full-size cover embedded in every file;
+  - music videos swapped for the official audio release when one exists;
+  - queue with several downloads at once, background downloading with a notification,
+    retry/cancel, history, and playlists you can keep in sync;
+  - files saved to `Music/LToTS/Artist/Album/`, visible to any app;
+  - built on yt-dlp (bundled, updatable in-app with "Update engine").
 - Local library with songs, albums, artists and search.
 
 ## Roadmap
 
-- **Phase 2** – YouTube Music: sign in, library/playlists/albums sync, streaming, downloads, and
-  picking the best available version of each song.
+- **Phase 2** – YouTube Music streaming (play without downloading) and syncing your own library.
 - **Phase 3** – Search by lyrics: a lyrics database plus an on-device AI model for half-remembered
   lines (runs only while searching).
 
@@ -67,7 +78,10 @@ Without them the workflow still builds and tests the app but doesn't publish a r
 app/src/main/java/com/ltots/app/
   audio/     EQ maths, the real-time EQ processor, analyzer/FFT, output & bit-perfect handling
   data/      local library, per-song profiles, presets, theme & settings storage
+  ytm/       YouTube Music client: search, albums, playlists, artists, song details, links
+  download/  yt-dlp engine, download queue, tagging/cover, background service
   playback/  background playback service + connection
   ui/        glass system, screens (Library, Playing, EQ, Look, Sound), components
-app/src/test/  audio-path tests: test tones through EQ → pitch/speed, measured numerically
+app/src/test/  audio-path tests (test tones through EQ → pitch/speed, measured numerically),
+               YouTube Music parser tests against captured real responses, colour tests
 ```

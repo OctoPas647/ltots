@@ -14,5 +14,6 @@ class LToTSApp : Application() {
         val pkg = packageManager.getPackageInfo(packageName, 0)
         ThemeState.init(freshInstall = pkg.firstInstallTime == pkg.lastUpdateTime)
         AudioEngine.init(this)
+        com.ltots.app.download.DownloadManager.init(this)
     }
 }
