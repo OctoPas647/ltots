@@ -105,8 +105,9 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
     }
 
     val downloadsDone by com.ltots.app.download.DownloadManager.libraryVersion.collectAsState()
-    val tracks by produceState(emptyList<Track>(), hasPerm, reload, downloadsDone) {
-        value = if (hasPerm) LocalLibrary.load(context) else emptyList()
+    // Shown straight from memory when the tab opens again; only re-read when something changed.
+    val tracks by produceState(if (hasPerm) LocalLibrary.cached() ?: emptyList() else emptyList(), hasPerm, reload, downloadsDone) {
+        value = if (hasPerm) LocalLibrary.load(context, version = reload * 100_003 + downloadsDone) else emptyList()
     }
 
     var query by rememberSaveable { mutableStateOf("") }

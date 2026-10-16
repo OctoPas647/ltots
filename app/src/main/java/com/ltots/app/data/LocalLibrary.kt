@@ -64,7 +64,46 @@ data class Track(
 }
 
 object LocalLibrary {
-    suspend fun load(context: Context): List<Track> = withContext(Dispatchers.IO) {
+    @Volatile private var cache: List<Track>? = null
+    @Volatile private var stale = true
+    @Volatile private var cachedVersion = Int.MIN_VALUE
+    private var watching = false
+
+    /** The last loaded library (to show instantly when the Library tab opens again). */
+    fun cached(): List<Track>? = cache
+
+    /**
+     * The phone's music. Kept in memory and only read again from Android's media database when
+     * something actually changed there (or [version] changes, e.g. after a download), instead
+     * of every time the Library tab is opened.
+     */
+    suspend fun load(context: Context, version: Int = 0): List<Track> {
+        val c = cache
+        if (c != null && !stale && version == cachedVersion) return c
+        watch(context)
+        stale = false // cleared before reading, so a change during the read marks it again
+        val fresh = query(context)
+        cache = fresh
+        cachedVersion = version
+        return fresh
+    }
+
+    private fun watch(context: Context) {
+        synchronized(this) {
+            if (watching) return
+            watching = true
+        }
+        val observer = object : android.database.ContentObserver(android.os.Handler(android.os.Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) { stale = true }
+        }
+        runCatching {
+            context.applicationContext.contentResolver.registerContentObserver(
+                MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL), true, observer,
+            )
+        }.onFailure { synchronized(this) { watching = false } }
+    }
+
+    private suspend fun query(context: Context): List<Track> = withContext(Dispatchers.IO) {
         val collection = MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
         val projection = buildList {
             add(MediaStore.Audio.Media._ID)
@@ -113,18 +152,26 @@ object LocalLibrary {
         tracks
     }
 
-    private val artCache = object : LruCache<Long, Bitmap>(48 * 1024 * 1024) {
-        override fun sizeOf(key: Long, value: Bitmap) = value.byteCount
+    private val artCache = object : LruCache<String, Bitmap>(48 * 1024 * 1024) {
+        override fun sizeOf(key: String, value: Bitmap) = value.byteCount
     }
     private val noArt = HashSet<Long>()
 
-    /** Album art for a track, cached. Returns null if the file has none. */
+    /**
+     * Album art for a track, cached per size: list rows keep small thumbnails (little memory,
+     * quick to draw) and the player gets a sharp large one, instead of whichever size happened
+     * to be loaded first. Returns null if the file has none.
+     */
     suspend fun artwork(context: Context, trackId: Long, px: Int = 512): Bitmap? = withContext(Dispatchers.IO) {
-        artCache.get(trackId)?.let { return@withContext it }
-        if (trackId in noArt) return@withContext null
+        val key = "$trackId@$px"
+        artCache.get(key)?.let { return@withContext it }
+        if (synchronized(noArt) { trackId in noArt }) return@withContext null
         val uri = ContentUris.withAppendedId(MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL), trackId)
         val bmp = runCatching { context.contentResolver.loadThumbnail(uri, Size(px, px), null) }.getOrNull()
-        if (bmp != null) artCache.put(trackId, bmp) else synchronized(noArt) { noArt += trackId }
+        if (bmp != null) {
+            bmp.prepareToDraw() // upload to the graphics chip now, not on the first frame that shows it
+            artCache.put(key, bmp)
+        } else synchronized(noArt) { noArt += trackId }
         bmp
     }
 }

@@ -172,7 +172,7 @@ fun LookScreen() {
                     }
                 }
                 Text(
-                    "Higher is smoother but uses more battery. 60 fps is the best balance; Battery Saver caps it at 30. The visualizer sleeps while nothing is playing.",
+                    "Higher is smoother but uses more battery. 30 fps (the default) is already smooth and the easiest on the battery; Battery Saver caps it at 30. The visualizer stops completely with the screen off and sleeps while nothing is playing.",
                     color = LocalPalette.current.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp),
                 )
             }

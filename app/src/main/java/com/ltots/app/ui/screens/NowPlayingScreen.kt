@@ -81,7 +81,7 @@ import kotlin.math.roundToInt
 fun NowPlayingScreen(player: PlayerUi, artwork: Bitmap?, onOpenEq: () -> Unit, onOpenSound: () -> Unit) {
     val pal = LocalPalette.current
     val device by AudioEngine.output.device.collectAsState()
-    val visual = rememberLiveVisual()
+    val visual = rememberLiveVisual(wave = false) // no waveform on this screen
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp),

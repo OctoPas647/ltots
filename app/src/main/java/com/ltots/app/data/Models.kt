@@ -46,7 +46,7 @@ data class ThemeConfig(
     val spectrumOpacity: Float = 0.85f,
     val showPreEqGhost: Boolean = true,
     /** Visualizer refresh rate in frames per second (0 = off). Lower uses less battery. */
-    val visualizerFps: Int = 60,
+    val visualizerFps: Int = 30,
     /** AMOLED: pure #000 background — no colour blobs or artwork glow, so black pixels stay off. */
     val pureBlack: Boolean = false,
     /** Hide Android's navigation bar inside the app (swipe up from the bottom edge to reveal it). */
@@ -140,7 +140,7 @@ object Json {
         put("tint", t.glassTint.toDouble()); put("rim", t.rimLight.toDouble())
         put("corner", t.cornerDp.toDouble()); put("dark", t.darkMode)
         put("specStyle", t.spectrumStyle.name); put("specOpacity", t.spectrumOpacity.toDouble())
-        put("ghost", t.showPreEqGhost); put("vfps", t.visualizerFps)
+        put("ghost", t.showPreEqGhost); put("vfps", t.visualizerFps); put("vfpsV", 2)
         put("black", t.pureBlack); put("hideNav", t.hideNavBar); put("hideStatus", t.hideStatusBar)
         put("dyn", t.dynamicColors)
     }
@@ -165,7 +165,10 @@ object Json {
             spectrumStyle = runCatching { SpectrumStyle.valueOf(o.optString("specStyle")) }.getOrDefault(d.spectrumStyle),
             spectrumOpacity = o.optDouble("specOpacity", d.spectrumOpacity.toDouble()).toFloat(),
             showPreEqGhost = o.optBoolean("ghost", d.showPreEqGhost),
-            visualizerFps = o.optInt("vfps", d.visualizerFps).let { if (it in listOf(0, 30, 60, 120)) it else d.visualizerFps },
+            visualizerFps = o.optInt("vfps", d.visualizerFps).let { if (it in listOf(0, 30, 60, 120)) it else d.visualizerFps }
+                // The old default was 60 fps; settings saved before the 30 fps default move to 30
+                // once (a rate picked after that is kept).
+                .let { if (it == 60 && !o.has("vfpsV")) 30 else it },
             pureBlack = o.optBoolean("black", d.pureBlack),
             hideNavBar = o.optBoolean("hideNav", d.hideNavBar),
             hideStatusBar = o.optBoolean("hideStatus", d.hideStatusBar),

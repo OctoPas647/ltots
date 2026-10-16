@@ -13,13 +13,21 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CoroutineScope
 
-/** Runs [block] while this part of the screen exists (cancelled when it leaves). */
+/**
+ * Runs [block] only while this part of the screen exists *and* the app is visible. When the
+ * screen turns off or the app goes to the background, [block] is cancelled outright (not just
+ * paused), and it starts again from the top when the app is visible again.
+ */
 @Composable
 fun WhileOnScreen(vararg keys: Any?, block: suspend CoroutineScope.() -> Unit) {
-    LaunchedEffect(*keys) { block() }
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(lifecycle, *keys) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { block() }
+    }
 }
 
 /**

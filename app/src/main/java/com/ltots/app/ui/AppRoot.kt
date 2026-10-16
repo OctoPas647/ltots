@@ -55,6 +55,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -171,11 +173,19 @@ private fun MiniPlayer(player: PlayerUi, artwork: android.graphics.Bitmap?, onOp
                 Icon(Icons.Rounded.SkipNext, "Next", tint = pal.text)
             }
         }
-        // Thin progress line along the bottom edge.
-        val frac = if (player.durationMs > 0) (player.positionMs.toFloat() / player.durationMs).coerceIn(0f, 1f) else 0f
+        // Thin progress line along the bottom edge. The position is read while drawing, in its
+        // own layer: as the song plays only this line is redrawn, not the mini player or its glass.
+        val accent = pal.accent
         Box(
-            Modifier.align(Alignment.BottomStart).padding(horizontal = 18.dp).fillMaxWidth(frac).height(2.dp)
-                .clip(RoundedCornerShape(1.dp)).background(pal.accent)
+            Modifier.align(Alignment.BottomStart).padding(horizontal = 18.dp).fillMaxWidth().height(2.dp)
+                .graphicsLayer()
+                .drawBehind {
+                    val frac = if (player.durationMs > 0) (player.positionMs.toFloat() / player.durationMs).coerceIn(0f, 1f) else 0f
+                    if (frac > 0f) {
+                        drawRoundRect(accent, size = androidx.compose.ui.geometry.Size(size.width * frac, size.height),
+                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.dp.toPx()))
+                    }
+                }
         )
     }
 }

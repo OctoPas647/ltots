@@ -72,6 +72,7 @@ import com.ltots.app.ui.components.formatDb
 import com.ltots.app.ui.components.formatFreq
 import com.ltots.app.ui.components.rememberLiveVisual
 import com.ltots.app.ui.glass.GlassPanel
+import com.ltots.app.ui.glass.glassShape
 import com.ltots.app.ui.theme.LocalPalette
 import java.util.Locale
 import kotlin.math.ln
@@ -123,9 +124,15 @@ fun EqScreen(player: PlayerUi) {
 
         Spacer(Modifier.height(12.dp))
 
-        // Graph over the live spectrum + waveform
-        GlassPanel(Modifier.fillMaxWidth().height(320.dp), tintBoost = 0.02f) {
-            LiveSpectrum(visual, Modifier.fillMaxSize().padding(bottom = 18.dp))
+        // Graph over the live spectrum + waveform. The moving parts sit on top of the glass
+        // rather than inside it: the glass (blur, refraction) is then drawn once and left alone,
+        // instead of being re-rendered with every frame of the spectrum.
+        val panelShape = glassShape()
+        Box(Modifier.fillMaxWidth().height(320.dp)) {
+            GlassPanel(Modifier.matchParentSize(), shape = panelShape, tintBoost = 0.02f) {}
+            Box(Modifier.matchParentSize().clip(panelShape)) {
+                LiveSpectrum(visual, Modifier.fillMaxSize().padding(bottom = 18.dp))
+            }
             EqGraph(
                 eq = eq,
                 selectedId = selectedId,

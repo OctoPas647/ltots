@@ -59,9 +59,13 @@ newer APK updates the app and keeps your settings.
   - after 10 minutes paused, the decoder and audio output are released (play resumes exactly
     where it stopped);
   - the live spectrum's audio copy is only made while a spectrum is on screen;
-  - the visualizer runs at 60 fps by default (30/60/120/off in Look), sleeps while nothing
-    plays and drops to 30 fps with Battery Saver; the moving background updates 20 times a
-    second and only while the app is on screen; nothing in the UI runs with the screen off.
+  - the live spectrum and wave run at 30 fps by default (30/60/120/off in Look); everything to
+    do with them is shut down completely when the screen turns off or the app goes to the
+    background, and sleeps while nothing plays or while the audio chip plays directly;
+  - they only analyse what's drawn (no wave on Now Playing, no separate "before EQ" analysis
+    while the EQ is flat), measure only new audio for the wave each frame, and sit above the
+    glass rather than inside it, so the glass isn't re-rendered for every frame;
+  - the moving background updates 20 times a second and only while the app is on screen.
 
 ## Roadmap
 

@@ -32,6 +32,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.kyant.backdrop.backdrops.emptyBackdrop
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
@@ -74,6 +75,19 @@ fun Modifier.glass(
     val pal = LocalPalette.current
     val surface = (tint ?: pal.glassTint).copy(alpha = (cfg.glassTint + tintBoost).coerceIn(0f, 0.95f))
     if (backdrop == null) return this.clip(shape).background(surface)
+    if (cfg.pureBlack) {
+        // AMOLED: what's behind the glass is plain black, and blurring, bending or boosting
+        // black still gives black. So skip that work on the graphics chip entirely and paint
+        // the black directly — it looks exactly the same (rim light and shadow stay).
+        return this.drawBackdrop(
+            backdrop = emptyBackdrop(),
+            shape = { shape },
+            effects = {},
+            highlight = { if (cfg.rimLight > 0.01f) Highlight.Default.copy(alpha = cfg.rimLight) else null },
+            shadow = { Shadow(radius = 20.dp, color = Color.Black.copy(alpha = if (pal.dark) 0.22f else 0.08f)) },
+            onDrawSurface = { drawRect(Color.Black); drawRect(surface) },
+        )
+    }
     return this.drawBackdrop(
         backdrop = backdrop,
         shape = { shape },
