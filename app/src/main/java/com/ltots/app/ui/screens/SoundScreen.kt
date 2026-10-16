@@ -43,6 +43,7 @@ fun SoundScreen() {
     val bitPerfect by AudioEngine.output.bitPerfectStatus.collectAsState()
     val info by AudioEngine.tap.info.collectAsState()
     val settings by AudioEngine.settings.collectAsState()
+    val direct by AudioEngine.direct.collectAsState()
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp)) {
         Text("Sound", style = MaterialTheme.typography.displaySmall, color = pal.text, modifier = Modifier.padding(top = 12.dp))
@@ -82,6 +83,16 @@ fun SoundScreen() {
         GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.06f) {
             Column(Modifier.padding(16.dp)) {
                 SectionTitle("Signal path")
+                if (direct) {
+                    PathRow("Played by", "Phone's audio chip")
+                    Text(
+                        "Nothing to process right now (EQ flat, original pitch and speed), so the audio chip " +
+                            "decodes and plays the file exactly as it is while the processor sleeps. " +
+                            "The live spectrum rests until the EQ or pitch is changed.",
+                        color = pal.textDim, style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 2.dp, bottom = 6.dp),
+                    )
+                }
                 PathRow("Decoded", if (info.sampleRate > 0) "${"%.1f".format(Locale.ROOT, info.sampleRate / 1000.0)} kHz · ${info.channels} ch" else "—")
                 PathRow("EQ & limiter", "64-bit floating point")
                 PathRow("Pitch & speed", (if (settings.efficientPitch) "Rubber Band R2" else "Rubber Band R3") + " (only when changed)")
@@ -94,7 +105,15 @@ fun SoundScreen() {
         Spacer(Modifier.height(12.dp))
         GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.06f) {
             Column(Modifier.padding(16.dp)) {
-                SectionTitle("Quality")
+                SectionTitle("Quality & battery")
+                SwitchRow(
+                    "Power-saving playback", settings.directPlayback,
+                    { on -> AudioEngine.updateSettings { it.copy(directPlayback = on) } },
+                    sub = "When the EQ is off or flat and pitch and speed are original, the phone's audio chip plays " +
+                        "the music by itself and the processor sleeps — the biggest battery saving there is. " +
+                        "Switches back instantly when you change the EQ or pitch. " +
+                        if (direct) "Active now." else "Not active right now (something needs processing, or the chip can't play this file's format).",
+                )
                 SwitchRow(
                     "Bit-perfect USB output", settings.bitPerfectUsb, { on -> AudioEngine.updateSettings { it.copy(bitPerfectUsb = on) } },
                     sub = if (Build.VERSION.SDK_INT >= 34) "For a USB DAC (e.g. HD 599 via a dongle): Android's mixer is bypassed. Use the DAC's or phone's volume as usual. Status: $bitPerfect"

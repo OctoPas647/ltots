@@ -2,6 +2,7 @@ package com.ltots.app.ui.components
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -19,6 +20,8 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.preferredFrameRate
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.media3.common.util.UnstableApi
 import com.ltots.app.audio.Analyzer
 import com.ltots.app.audio.AudioEngine
@@ -55,6 +58,25 @@ fun rememberLiveVisual(): LiveVisual {
     val fps = if (saver) minOf(cfg.visualizerFps, 30) else cfg.visualizerFps
     val lv = remember(settings.analyzerBands) { LiveVisual(Analyzer(AudioEngine.tap, settings.analyzerBands)) }
     lv.fps = fps
+    // Tell the audio thread someone is looking, only while the app is actually visible: with
+    // the screen off or the app in the background it does no visualizer work at all.
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle, fps > 0) {
+        if (fps <= 0) return@DisposableEffect onDispose { }
+        var release: (() -> Unit)? = null
+        fun sync(state: Lifecycle.State) {
+            val visible = state.isAtLeast(Lifecycle.State.STARTED)
+            if (visible && release == null) release = AudioEngine.tap.watch()
+            if (!visible) { release?.invoke(); release = null }
+        }
+        val observer = LifecycleEventObserver { _, _ -> sync(lifecycle.currentState) }
+        lifecycle.addObserver(observer)
+        sync(lifecycle.currentState)
+        onDispose {
+            lifecycle.removeObserver(observer)
+            release?.invoke()
+        }
+    }
     WhileOnScreen(lv, fps) {
         if (fps <= 0) {
             lv.frame = SpectrumFrame(lv.analyzer.bands); lv.tick++

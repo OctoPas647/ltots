@@ -40,6 +40,11 @@ class EqProcessor(
     private var sampleRate = 48000
     private var inEncoding = C.ENCODING_PCM_16BIT
     private var scratch = DoubleArray(0)
+    private var fadeScratch = DoubleArray(0)
+    private var outScratch = FloatArray(0)
+    private var shorts = ShortArray(0)
+    private var floats = FloatArray(0)
+    private var ints = IntArray(0)
 
     /** The song currently flowing through (for tests and diagnostics). */
     val currentMediaId: String? get() = mediaId
@@ -118,72 +123,142 @@ class EqProcessor(
         if (plan == null) plan = buildPlan(source.eqFor(mediaId), null)
         maybeUpdate()
 
+        val ch = channels
         val inBytes = when (inEncoding) {
             C.ENCODING_PCM_16BIT -> 2
             C.ENCODING_PCM_24BIT -> 3
             else -> 4
         }
-        val ch = channels
         val frames = inputBuffer.remaining() / (inBytes * ch)
-        inputBuffer.order(ByteOrder.LITTLE_ENDIAN)
         val n = frames * ch
         if (scratch.size < n) scratch = DoubleArray(n)
+        if (outScratch.size < n) outScratch = FloatArray(n)
         val x = scratch
-        for (i in 0 until n) x[i] = readSample(inputBuffer)
+        readAll(inputBuffer, x, n)
         // Skip any stray partial frame so the buffer is fully consumed.
         inputBuffer.position(inputBuffer.limit())
 
-        val out = replaceOutputBuffer(n * 4).order(ByteOrder.nativeOrder())
+        // The live view only needs the signal while it's on screen; with the screen off the
+        // audio thread does no work for it at all.
+        val tap = analyzerTap
+        val watching = tap.watching
+        if (watching) tap.prepareWrite()
+        if (watching) {
+            for (f in 0 until frames) {
+                var m = 0.0
+                val base = f * ch
+                for (c in 0 until ch) m += x[base + c]
+                tap.writePre((m / ch).toFloat())
+            }
+        }
+
         val p = plan!!
         val from = fadingFrom
-        val tap = analyzerTap
-        val fl = fadeLen
-        for (f in 0 until frames) {
-            var monoIn = 0.0
-            var monoOut = 0.0
-            val base = f * ch
-            for (c in 0 until ch) {
-                val s = x[base + c]
-                monoIn += s
-                var y = run(p, s, c)
-                if (from != null) {
-                    val yOld = run(from, s, c)
-                    val t = (fadePos + 1).toDouble() / fl
-                    y = yOld + (y - yOld) * t
+        // Crossfade from the previous settings (only for the frames still inside the fade).
+        var fadeFrames = 0
+        if (from != null) {
+            fadeFrames = minOf(frames, fadeLen - fadePos)
+            val m = fadeFrames * ch
+            if (fadeScratch.size < m) fadeScratch = DoubleArray(m)
+            System.arraycopy(x, 0, fadeScratch, 0, m)
+            runPlan(from, fadeScratch, fadeFrames)
+        }
+        runPlan(p, x, frames)
+        if (from != null) {
+            val old = fadeScratch
+            val fl = fadeLen.toDouble()
+            for (f in 0 until fadeFrames) {
+                val t = (fadePos + f + 1) / fl
+                val base = f * ch
+                for (c in 0 until ch) {
+                    val i = base + c
+                    x[i] = old[i] + (x[i] - old[i]) * t
                 }
-                monoOut += y
-                out.putFloat(y.toFloat())
             }
-            if (from != null && ++fadePos >= fl) fadingFrom = null
-            tap.write((monoIn / ch).toFloat(), (monoOut / ch).toFloat())
+            fadePos += fadeFrames
+            if (fadePos >= fadeLen) fadingFrom = null
+        }
+
+        val o = outScratch
+        for (i in 0 until n) o[i] = x[i].toFloat()
+        if (watching) {
+            for (f in 0 until frames) {
+                var m = 0.0
+                val base = f * ch
+                for (c in 0 until ch) m += x[base + c]
+                tap.writePost((m / ch).toFloat())
+            }
         }
         tap.commit(frames)
-        out.flip()
+
+        val out = replaceOutputBuffer(n * 4).order(ByteOrder.nativeOrder())
+        out.asFloatBuffer().put(o, 0, n)
+        out.position(0).limit(n * 4)
         guardStability(p)
     }
 
-    private fun run(p: Plan, x: Double, c: Int): Double {
-        var y = x * p.gain
+    /**
+     * Gain, then every filter section in turn, sample by sample. (Running all the sections
+     * on one sample before moving on lets the processor overlap their work; it measured faster
+     * than filtering the block one section at a time.)
+     */
+    private fun runPlan(p: Plan, x: DoubleArray, frames: Int) {
+        val n = frames * channels
+        val g = p.gain
         val secs = p.sections
-        for (s in secs.indices) y = secs[s].process(y, c)
-        return y
+        if (secs.isEmpty()) {
+            if (g != 1.0) for (i in 0 until n) x[i] *= g
+            return
+        }
+        val ch = channels
+        var i = 0
+        for (f in 0 until frames) {
+            for (c in 0 until ch) {
+                var y = x[i] * g
+                for (s in secs.indices) y = secs[s].process(y, c)
+                x[i] = y
+                i++
+            }
+        }
+    }
+
+    private fun readAll(b: ByteBuffer, x: DoubleArray, n: Int) {
+        b.order(ByteOrder.LITTLE_ENDIAN)
+        when (inEncoding) {
+            C.ENCODING_PCM_16BIT -> {
+                if (shorts.size < n) shorts = ShortArray(n)
+                b.asShortBuffer().get(shorts, 0, n)
+                val s = shorts
+                for (i in 0 until n) x[i] = s[i] / 32768.0
+            }
+            C.ENCODING_PCM_FLOAT -> {
+                if (floats.size < n) floats = FloatArray(n)
+                b.asFloatBuffer().get(floats, 0, n)
+                val s = floats
+                for (i in 0 until n) { val v = s[i].toDouble(); x[i] = if (v.isFinite()) v else 0.0 }
+            }
+            C.ENCODING_PCM_24BIT -> {
+                var pos = b.position()
+                for (i in 0 until n) {
+                    val lo = b.get(pos).toInt() and 0xFF
+                    val mid = b.get(pos + 1).toInt() and 0xFF
+                    val hi = b.get(pos + 2).toInt()
+                    x[i] = ((hi shl 16) or (mid shl 8) or lo) / 8388608.0
+                    pos += 3
+                }
+            }
+            else -> {
+                if (ints.size < n) ints = IntArray(n)
+                b.asIntBuffer().get(ints, 0, n)
+                val s = ints
+                for (i in 0 until n) x[i] = s[i] / 2147483648.0
+            }
+        }
     }
 
     /** A filter must never get stuck on NaN/infinity (that would silence the song for good). */
     private fun guardStability(p: Plan) {
         for (s in p.sections) if (!s.isFinite()) s.reset()
-    }
-
-    private fun readSample(b: ByteBuffer): Double = when (inEncoding) {
-        C.ENCODING_PCM_16BIT -> b.short / 32768.0
-        C.ENCODING_PCM_FLOAT -> b.float.toDouble().let { if (it.isFinite()) it else 0.0 }
-        C.ENCODING_PCM_24BIT -> {
-            val lo = b.get().toInt() and 0xFF
-            val mid = b.get().toInt() and 0xFF
-            val hi = b.get().toInt()
-            ((hi shl 16) or (mid shl 8) or lo) / 8388608.0
-        }
-        else -> b.int / 2147483648.0
     }
 
     internal class Section(val id: Long, val channels: Int) {

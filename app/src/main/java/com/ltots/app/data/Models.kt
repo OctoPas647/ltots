@@ -71,6 +71,11 @@ data class AppSettings(
     val globalPitchCents: Int = 0,
     val globalSpeed: Float = 1f,
     val globalTape: Boolean = false,
+    /**
+     * When nothing needs processing (EQ off or flat, original pitch and speed), let the phone's
+     * audio chip decode and play the music so the main processor can sleep.
+     */
+    val directPlayback: Boolean = true,
 )
 
 /** Hand-written JSON (de)serialisation — no reflection, so it survives R8 untouched. */
@@ -174,6 +179,7 @@ object Json {
         put("bands", s.analyzerBands)
         put("formants", s.preserveFormants); put("effPitch", s.efficientPitch)
         put("gPitch", s.globalPitchCents); put("gSpeed", s.globalSpeed.toDouble()); put("gTape", s.globalTape)
+        put("direct", s.directPlayback)
     }
 
     fun settings(o: JSONObject) = AppSettings(
@@ -185,5 +191,6 @@ object Json {
         globalPitchCents = o.optInt("gPitch", 0),
         globalSpeed = o.optDouble("gSpeed", 1.0).toFloat(),
         globalTape = o.optBoolean("gTape", false),
+        directPlayback = o.optBoolean("direct", true),
     )
 }

@@ -48,9 +48,20 @@ newer APK updates the app and keeps your settings.
     whole download engine on the phone, and tapping a failed download shows (and copies) exactly
     what went wrong.
 - Local library with songs, albums, artists and search.
-- **Battery-friendly** – the visualizer runs at 60 fps by default (30/60/120/off in Look), sleeps
-  while nothing plays and drops to 30 fps with Battery Saver; the moving background updates 20
-  times a second and only while the app is on screen; nothing in the UI runs with the screen off.
+- **Battery-friendly**
+  - **Power-saving playback** (on by default, in Sound): when the EQ is off or flat and pitch and
+    speed are original, the phone's audio chip decodes and plays the file by itself (audio
+    offload) and the main processor sleeps between big chunks of audio. Changing the EQ or pitch
+    switches back to LToTS' own sound path instantly. Sound shows whether it's active (the chip
+    has to support the file's format).
+  - the player only wakes when the audio output actually needs more sound, instead of every
+    10 ms;
+  - after 10 minutes paused, the decoder and audio output are released (play resumes exactly
+    where it stopped);
+  - the live spectrum's audio copy is only made while a spectrum is on screen;
+  - the visualizer runs at 60 fps by default (30/60/120/off in Look), sleeps while nothing
+    plays and drops to 30 fps with Battery Saver; the moving background updates 20 times a
+    second and only while the app is on screen; nothing in the UI runs with the screen off.
 
 ## Roadmap
 

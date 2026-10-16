@@ -6,6 +6,8 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
+import androidx.media3.common.TrackSelectionParameters.AudioOffloadPreferences
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
@@ -14,7 +16,9 @@ import androidx.media3.exoplayer.audio.DefaultAudioSink
 import com.ltots.app.data.AppSettings
 import com.ltots.app.data.SongProfile
 import com.ltots.app.data.Store
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -55,6 +59,13 @@ object AudioEngine : SoundSource {
 
     private val _player = MutableStateFlow<ExoPlayer?>(null)
     val player: StateFlow<ExoPlayer?> = _player
+
+    /**
+     * True while the phone's audio chip is decoding and playing the music itself (offload):
+     * nothing to process, so the main processor sleeps between big chunks of audio.
+     */
+    private val _direct = MutableStateFlow(false)
+    val direct: StateFlow<Boolean> = _direct
 
     /** Whether sound is actually coming out (the visualizer sleeps when it isn't). */
     private val _isPlaying = MutableStateFlow(false)
@@ -140,10 +151,14 @@ object AudioEngine : SoundSource {
             .setAudioAttributes(attributes, /* handleAudioFocus = */ true)
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_LOCAL)
+            // Let the playback loop sleep until the audio output actually needs more data,
+            // instead of waking every 10 ms.
+            .experimentalSetDynamicSchedulingEnabled(true)
             .build()
         p.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = onSongChanged(mediaItem)
             override fun onIsPlayingChanged(isPlaying: Boolean) { _isPlaying.value = isPlaying }
+            override fun onTimelineChanged(timeline: Timeline, reason: Int) = updateDirect()
         })
         _player.value = p
         onSongChanged(p.currentMediaItem)
@@ -159,13 +174,18 @@ object AudioEngine : SoundSource {
     ): AudioSink =
         DefaultAudioSink.Builder(context)
             .setAudioProcessorChain(chain)
+            .setExperimentalAudioOffloadListener(object : ExoPlayer.AudioOffloadListener {
+                override fun onOffloadedPlayback(offloaded: Boolean) { _direct.value = offloaded }
+            })
             .apply { if (output != null) setAudioOutputProvider(output) }
             .build()
 
     fun releasePlayer() {
+        directJob?.cancel()
         _player.value?.release()
         _player.value = null
         _isPlaying.value = false
+        _direct.value = false
     }
 
     private fun onSongChanged(item: MediaItem?) {
@@ -177,8 +197,9 @@ object AudioEngine : SoundSource {
             _pitchCents.value = prof?.pitchCents ?: 0
             _speed.value = prof?.speed ?: 1f
             _tape.value = prof?.tape ?: false
+            updateDirect()
             applySpeedToPlayer()
-        }
+        } else updateDirect()
     }
 
     // ---- EQ editing ------------------------------------------------------------------------
@@ -198,6 +219,7 @@ object AudioEngine : SoundSource {
             Store.saveDefaultEq(updated)
         }
         changed()
+        updateDirect(settle = true)
     }
 
     fun makeEqSongSpecific() {
@@ -206,6 +228,7 @@ object AudioEngine : SoundSource {
         _songProfile.value = prof
         Store.saveProfile(key, prof)
         changed()
+        updateDirect()
     }
 
     fun useDefaultEqForSong() {
@@ -214,6 +237,7 @@ object AudioEngine : SoundSource {
         _songProfile.value = prof
         Store.saveProfile(key, prof)
         changed()
+        updateDirect()
     }
 
     // ---- pitch & speed ---------------------------------------------------------------------
@@ -231,6 +255,7 @@ object AudioEngine : SoundSource {
         _pitchCents.value = c
         persist()
         changed()
+        updateDirect(settle = true)
     }
 
     /** Shows a new speed while the slider moves; it's applied by [commit]. */
@@ -243,6 +268,9 @@ object AudioEngine : SoundSource {
     /** Applies the previewed speed (and tape pitch) — call when a slider is released. */
     fun commit() {
         persist()
+        // Leave direct playback before a new speed reaches the player (the audio chip can't
+        // change speed), and only return to it once the speed is back to normal.
+        updateDirect(settle = true)
         applySpeedToPlayer()
         changed()
     }
@@ -318,6 +346,75 @@ object AudioEngine : SoundSource {
             reapplyBitPerfect(forceRebuild = true)
         }
         changed()
+        updateDirect()
+    }
+
+    // ---- direct playback (audio offload) ---------------------------------------------------
+
+    private var directJob: Job? = null
+
+    /** Whether [mediaId] plays exactly as recorded: no EQ change, original pitch and speed. */
+    private fun untouched(mediaId: String?): Boolean {
+        val s = settings.value
+        val prof = mediaId?.let { Store.loadProfile(it) }
+        val eq = prof?.eq ?: defaultEq.value
+        if (!EqMath.isNeutral(eq)) return false
+        val (cents, speed) = if (s.perSongPitchSpeed && mediaId != null) {
+            (prof?.pitchCents ?: 0) to (prof?.speed ?: 1f)
+        } else s.globalPitchCents to s.globalSpeed
+        return cents == 0 && abs(speed - 1f) <= 1e-4f
+    }
+
+    private fun wantsDirect(p: ExoPlayer): Boolean {
+        val s = settings.value
+        if (!s.directPlayback || s.bitPerfectUsb) return false
+        // What the UI shows right now (covers a slider that is still being dragged)...
+        if (_pitchCents.value != 0 || abs(_speed.value - 1f) > 1e-4f) return false
+        if (!EqMath.isNeutral(_songProfile.value?.eq ?: defaultEq.value)) return false
+        // ...and the next song too: with direct playback it's queued on the audio chip ahead
+        // of time, so if it needs processing we switch over before it starts.
+        val next = p.nextMediaItemIndex
+        if (next != C.INDEX_UNSET) {
+            val id = p.getMediaItemAt(next).mediaId.takeIf { it.isNotBlank() }
+            if (!untouched(id)) return false
+        }
+        return true
+    }
+
+    /**
+     * Hands playback to the audio chip whenever the sound path has nothing to do. Leaving is
+     * immediate (so an EQ or pitch change is heard right away); after an edit ([settle]),
+     * coming back waits a moment so dragging a slider through zero doesn't keep switching
+     * back and forth.
+     */
+    private fun updateDirect(settle: Boolean = false) {
+        val p = _player.value ?: return
+        directJob?.cancel()
+        if (!wantsDirect(p)) {
+            setOffload(p, false)
+        } else if (!settle) {
+            setOffload(p, true)
+        } else {
+            directJob = scope.launch {
+                delay(1500)
+                if (wantsDirect(p)) setOffload(p, true)
+            }
+        }
+    }
+
+    private fun setOffload(p: ExoPlayer, on: Boolean) {
+        val mode = if (on) AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_ENABLED else AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_DISABLED
+        val cur = p.trackSelectionParameters
+        if (cur.audioOffloadPreferences.audioOffloadMode == mode) return
+        p.trackSelectionParameters = cur.buildUpon()
+            .setAudioOffloadPreferences(
+                AudioOffloadPreferences.Builder()
+                    .setAudioOffloadMode(mode)
+                    .setIsGaplessSupportRequired(false)
+                    .setIsSpeedChangeSupportRequired(false)
+                    .build()
+            )
+            .build()
     }
 
     private fun reapplyBitPerfect(forceRebuild: Boolean = false) {

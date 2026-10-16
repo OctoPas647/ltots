@@ -175,6 +175,16 @@ object EqMath {
         return peak
     }
 
+    /**
+     * True when this EQ leaves the sound exactly as it is (switched off, or every band flat
+     * and no preamp) — then music can skip the processor entirely.
+     */
+    fun isNeutral(state: EqState): Boolean {
+        if (!state.enabled) return true
+        if (state.preampDb != 0f) return false
+        return state.bands.all { BiquadCoefs.design(it, 48000.0) === BiquadCoefs.IDENTITY }
+    }
+
     /** Overall gain in dB applied before the filters (user preamp + auto headroom). */
     fun inputGainDb(state: EqState, fs: Double = 48000.0): Double {
         if (!state.enabled) return 0.0

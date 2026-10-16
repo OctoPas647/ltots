@@ -2,7 +2,10 @@ package com.ltots.app.playback
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -15,11 +18,31 @@ import com.ltots.app.audio.AudioEngine
 @UnstableApi
 class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
+    private val handler = Handler(Looper.getMainLooper())
+
+    /**
+     * Paused for a long time: let go of the decoder and the audio output (and with them any
+     * reason for the phone to stay busy). The queue and position stay; pressing play picks up
+     * exactly where it stopped.
+     */
+    private val releaseIdle = Runnable {
+        val p = session?.player ?: return@Runnable
+        if (!p.playWhenReady && p.playbackState != Player.STATE_IDLE) p.stop()
+    }
 
     override fun onCreate() {
         super.onCreate()
         AudioEngine.init(this)
         val player = AudioEngine.buildPlayer(this)
+        player.addListener(object : Player.Listener {
+            override fun onEvents(player: Player, events: Player.Events) {
+                if (!events.containsAny(Player.EVENT_PLAY_WHEN_READY_CHANGED, Player.EVENT_PLAYBACK_STATE_CHANGED)) return
+                handler.removeCallbacks(releaseIdle)
+                if (!player.playWhenReady && player.playbackState != Player.STATE_IDLE) {
+                    handler.postDelayed(releaseIdle, IDLE_RELEASE_MS)
+                }
+            }
+        })
         val openApp = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
@@ -50,11 +73,16 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        handler.removeCallbacks(releaseIdle)
         session?.run {
             release()
             session = null
         }
         AudioEngine.releasePlayer()
         super.onDestroy()
+    }
+
+    private companion object {
+        const val IDLE_RELEASE_MS = 10 * 60 * 1000L
     }
 }

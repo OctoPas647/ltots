@@ -40,10 +40,39 @@ class AnalyzerTap {
     val post = FloatArray(size)
 
     private var writeIdx = 0L
+    private var preCursor = 0L
+    private var postCursor = 0L
     @Volatile var published = 0L; private set
     @Volatile private var flushMediaUs = 0L
     @Volatile private var framesSinceFlush = 0L
     @Volatile var sampleRate = 48000; private set
+
+    /**
+     * Whether a live view is on screen. While nobody watches, the audio thread skips filling
+     * the ring entirely (it still keeps time, so the view lines up the moment it reappears).
+     */
+    @Volatile var watching = false; private set
+    private var watchers = 0
+    @Volatile private var clearPending = false
+
+    /** A live view appeared; returns the function to call when it goes away. */
+    fun watch(): () -> Unit {
+        synchronized(this) {
+            if (watchers++ == 0) {
+                clearPending = true // old audio in the ring is stale; start from silence
+                watching = true
+            }
+        }
+        var released = false
+        return {
+            synchronized(this) {
+                if (!released) {
+                    released = true
+                    if (--watchers == 0) watching = false
+                }
+            }
+        }
+    }
 
     private val _info = MutableStateFlow(StreamInfo())
     val info: StateFlow<StreamInfo> = _info
@@ -58,14 +87,29 @@ class AnalyzerTap {
         framesSinceFlush = 0
     }
 
+    /** Audio thread: call before writing a block. */
+    fun prepareWrite() {
+        if (clearPending) {
+            clearPending = false
+            pre.fill(0f)
+            post.fill(0f)
+        }
+        preCursor = writeIdx
+        postCursor = writeIdx
+    }
+
+    fun writePre(v: Float) { pre[(preCursor++ and mask.toLong()).toInt()] = v }
+    fun writePost(v: Float) { post[(postCursor++ and mask.toLong()).toInt()] = v }
+
     fun write(preSample: Float, postSample: Float) {
-        val i = (writeIdx and mask.toLong()).toInt()
-        pre[i] = preSample
-        post[i] = postSample
-        writeIdx++
+        writePre(preSample)
+        writePost(postSample)
     }
 
     fun commit(frames: Int) {
+        writeIdx += frames
+        preCursor = writeIdx
+        postCursor = writeIdx
         framesSinceFlush += frames
         published = writeIdx
     }

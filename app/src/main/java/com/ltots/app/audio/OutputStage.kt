@@ -32,19 +32,39 @@ class OutputStage : BaseAudioProcessor() {
         )
     }
 
+    private var floats = FloatArray(0)
+    private var shorts = ShortArray(0)
+
     override fun queueInput(inputBuffer: ByteBuffer) {
         if (!inputBuffer.hasRemaining()) return
         inputBuffer.order(ByteOrder.nativeOrder())
         val n = inputBuffer.remaining() / 4
-        val out = replaceOutputBuffer(n * if (outInt16) 2 else 4)
-        for (i in 0 until n) {
-            var v = inputBuffer.float.toDouble()
-            if (!v.isFinite()) v = 0.0
-            v = softLimit(v)
-            if (outInt16) out.putShort(toInt16Dithered(v)) else out.putFloat(v.toFloat())
-        }
+        if (floats.size < n) floats = FloatArray(n)
+        val f = floats
+        inputBuffer.asFloatBuffer().get(f, 0, n)
         inputBuffer.position(inputBuffer.limit())
-        out.flip()
+        val out = replaceOutputBuffer(n * if (outInt16) 2 else 4).order(ByteOrder.nativeOrder())
+        if (outInt16) {
+            if (shorts.size < n) shorts = ShortArray(n)
+            val o = shorts
+            for (i in 0 until n) {
+                var v = f[i].toDouble()
+                if (!v.isFinite()) v = 0.0
+                o[i] = toInt16Dithered(softLimit(v))
+            }
+            out.asShortBuffer().put(o, 0, n)
+            out.position(0).limit(n * 2)
+        } else {
+            for (i in 0 until n) {
+                val v = f[i]
+                // Almost every sample is well below the knee: those pass through untouched.
+                if (v > -KNEE_F && v < KNEE_F) continue
+                val d = v.toDouble()
+                f[i] = if (d.isFinite()) softLimit(d).toFloat() else 0f
+            }
+            out.asFloatBuffer().put(f, 0, n)
+            out.position(0).limit(n * 4)
+        }
     }
 
     private fun toInt16Dithered(y: Double): Short {
@@ -57,6 +77,7 @@ class OutputStage : BaseAudioProcessor() {
     companion object {
         private const val KNEE = 0.89 // ≈ -1 dBFS: everything below passes untouched
         private const val CEILING = 0.98 // ≈ -0.2 dBFS: nothing ever goes above this
+        private const val KNEE_F = KNEE.toFloat() // ≤ KNEE, so the shortcut never skips a sample that softLimit would change
 
         fun softLimit(x: Double): Double {
             val a = abs(x)
