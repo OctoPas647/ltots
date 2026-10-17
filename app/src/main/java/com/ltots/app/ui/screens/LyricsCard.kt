@@ -1,5 +1,7 @@
 package com.ltots.app.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.clickable
@@ -70,6 +72,17 @@ fun LyricsCard(player: PlayerUi) {
     var big by rememberSaveable { mutableStateOf(false) }
     val height by animateDpAsState(if (big) 560.dp else 340.dp, label = "lyricsHeight")
 
+    // Pick an .lrc file yourself for this song; it replaces whatever was found automatically.
+    val lrcPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val k = key ?: return@rememberLauncherForActivityResult
+        if (uri != null) {
+            val text = runCatching {
+                context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+            }.getOrNull()
+            if (text != null) Lyrics.import(context, k, text)
+        }
+    }
+
     GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
         Column(Modifier.padding(top = 14.dp, start = 16.dp, end = 16.dp, bottom = 12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -77,6 +90,7 @@ fun LyricsCard(player: PlayerUi) {
                 if (state is LyricsState.Found && !state.doc.synced.isNullOrEmpty()) {
                     Pill(if (big) "Smaller" else "Bigger", false, { big = !big })
                 }
+                Pill("Import .lrc", false, { lrcPicker.launch(arrayOf("text/*", "application/octet-stream")) })
             }
             when (state) {
                 is LyricsState.Found -> {

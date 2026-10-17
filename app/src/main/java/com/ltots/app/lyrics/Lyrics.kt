@@ -38,6 +38,7 @@ object Lyrics {
     /** (song key, state) for the song most recently asked about by the UI. */
     val current: StateFlow<Pair<String, LyricsState>?> = _current
     var api = LrcLib()
+    private val netease = NetEase()
 
     const val RETRY_AFTER_MS = 14L * 24 * 3600 * 1000
 
@@ -82,12 +83,27 @@ object Lyrics {
     /** Looks [q] up online and saves the result. Throws [LrcLib.NetworkError] when offline. */
     suspend fun fetch(q: SongQuery): LyricsDoc? = lock.withLock {
         (saved(q.key) as? LyricsDoc)?.let { return it }
-        val hit = api.find(q)
-        val doc = hit?.let { (c, asWhat) ->
-            LyricsDoc(
+        var doc: LyricsDoc? = null
+        // LRCLIB first: exact lookups, then search. A synced result is preferred.
+        val hit = runCatching { api.find(q) }.getOrNull()
+        if (hit != null) {
+            val (c, asWhat) = hit
+            doc = LyricsDoc(
                 synced = c.synced?.let { Lrc.parse(it) }?.takeIf { it.isNotEmpty() },
                 plain = c.plain, instrumental = c.instrumental, source = "LRCLIB", matchedAs = asWhat,
             ).takeIf { !it.isEmpty }
+        }
+        // If LRCLIB only had plain (or nothing), try NetEase for a synced version.
+        if (doc?.synced == null) {
+            val ne = runCatching { netease.find(q) }.getOrNull()
+            val neSynced = ne?.first?.synced?.takeIf { it.isNotBlank() }
+            if (neSynced != null) {
+                doc = LyricsDoc(
+                    synced = Lrc.parse(neSynced).takeIf { it.isNotEmpty() },
+                    plain = ne.first.plain, instrumental = ne.first.instrumental,
+                    source = "NetEase", matchedAs = ne.second,
+                ).takeIf { !it.isEmpty } ?: doc
+            }
         }
         save(q.key, doc)
         doc
@@ -112,6 +128,18 @@ object Lyrics {
             }
             if (_current.value?.first == q.key) _current.value = q.key to st
         }
+    }
+
+    /**
+     * Use an .lrc file the user picked for [key]: parse it and save it as the song's lyrics,
+     * replacing whatever was found automatically. Returns false if no timed lines were found.
+     */
+    fun import(context: Context, key: String, lrcText: String): Boolean {
+        val lines = Lrc.parse(lrcText).takeIf { it.isNotEmpty() } ?: return false
+        val doc = LyricsDoc(synced = lines, plain = null, source = "Imported .lrc")
+        save(key, doc)
+        if (_current.value?.first == key) _current.value = key to LyricsState.Found(doc)
+        return true
     }
 
     /** Forget the saved result for [key] and search again. */
