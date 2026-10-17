@@ -73,7 +73,7 @@ class FreeLossless(private val base: String = "https://archive.org") {
                 val name = f.optString("name")
                 if (!name.endsWith(".flac", true)) continue
                 val length = parseLength(f.optString("length")) ?: continue
-                val want = meta.durationSec.takeIf { it > 0 } ?: return@find null
+                val want = meta.durationSec?.takeIf { it > 0 }?.toDouble() ?: return@find null
                 if (kotlin.math.abs(length - want) > 4.0) continue
                 val fileTitle = f.optString("title").ifBlank { itemTitle }
                 val tScore = com.ltots.app.lyrics.SongMatch.similarity(title, fileTitle)

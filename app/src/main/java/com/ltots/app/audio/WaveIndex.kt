@@ -43,7 +43,7 @@ class Wave(val colRate: Int, val durationMs: Long, val lo: ByteArray, val hi: By
             var c1 = Math.floor(a + perOut).toLong()
             if (c1 <= c0) c1 = c0 + 1
             var mn = 0; var mx = 0
-            val c = max(c0, 0L)
+            var c = max(c0, 0L)
             val end = min(c1, columns.toLong())
             while (c < end) {
                 val ci = c.toInt()
