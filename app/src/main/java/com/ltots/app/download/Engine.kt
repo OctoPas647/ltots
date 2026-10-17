@@ -1,6 +1,7 @@
 package com.ltots.app.download
 
 import android.content.Context
+import android.util.Log
 import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 import kotlinx.coroutines.Dispatchers
@@ -22,12 +23,8 @@ data class EngineState(
     val error: String? = null,
 )
 
-/**
- * yt-dlp (with Python and ffmpeg) running on the phone — the same engine Seal uses.
- * The app ships a current yt-dlp and can update it in place when YouTube changes something.
- */
 object Engine {
-    /** yt-dlp version bundled in res/raw/ytdlp. Bump when replacing that file. */
+    private const val TAG = "LToTSEngine"
     const val BUNDLED_YTDLP = "2026.08.19"
     private const val WEEK = 7L * 24 * 3600_000L
 
@@ -46,33 +43,69 @@ object Engine {
         _state.value = _state.value.copy(version = p.optString("installed").ifBlank { null }, lastCheck = p.optLong("lastCheck"))
     }
 
-    /** Unpacks Python/ffmpeg on first use (a few seconds) and installs the bundled yt-dlp. */
+    private fun describeFailure(step: String, e: Throwable): String {
+        Log.e(TAG, "$step failed", e)
+        val message = e.message?.take(300) ?: "unknown error"
+        return "$step failed (${e.javaClass.simpleName}): $message"
+    }
+
+    private fun initEngine() {
+        runCatching { YoutubeDL.init(app) }.onFailure {
+            throw IllegalStateException(describeFailure("yt-dlp initialization", it), it)
+        }
+        runCatching { FFmpeg.init(app) }.onFailure {
+            throw IllegalStateException(describeFailure("FFmpeg initialization", it), it)
+        }
+    }
+
+    private fun clearEngineRuntime() {
+        runCatching {
+            File(app.noBackupFilesDir, YoutubeDL.baseName).deleteRecursively()
+        }.onFailure {
+            Log.w(TAG, "Could not clear cached download-engine runtime", it)
+        }
+    }
+
     suspend fun ensureReady(): Boolean = mutex.withLock {
         if (_state.value.ready) return true
         _state.value = _state.value.copy(preparing = true, error = null, message = "Preparing the download engine…")
+
         val ok = withContext(Dispatchers.IO) {
             runCatching {
                 val prefs = readPrefs()
                 val installed = prefs.optString("installed").ifBlank { null }
                 val binary = File(app.noBackupFilesDir, "${YoutubeDL.baseName}/${YoutubeDL.ytdlpDirName}/${YoutubeDL.ytdlpBin}")
-                // A newer app version may bundle a newer yt-dlp than the one on disk.
                 if (installed == null || installed < BUNDLED_YTDLP) binary.delete()
-                YoutubeDL.init(app)
-                FFmpeg.init(app)
+                initEngine()
+                val now = if (installed == null || installed < BUNDLED_YTDLP) BUNDLED_YTDLP else installed
+                prefs.put("installed", now)
+                writePrefs(prefs)
+                _state.value = _state.value.copy(version = now)
+            }.recoverCatching { firstFailure ->
+                Log.e(TAG, "Download-engine startup failed; clearing cached runtime and retrying once", firstFailure)
+                clearEngineRuntime()
+                initEngine()
+                val prefs = readPrefs()
+                val installed = prefs.optString("installed").ifBlank { null }
                 val now = if (installed == null || installed < BUNDLED_YTDLP) BUNDLED_YTDLP else installed
                 prefs.put("installed", now)
                 writePrefs(prefs)
                 _state.value = _state.value.copy(version = now)
             }
         }
+
         _state.value = _state.value.copy(
-            ready = ok.isSuccess, preparing = false, message = null,
-            error = ok.exceptionOrNull()?.let { "The download engine couldn't start: ${it.message?.take(200)}" },
+            ready = ok.isSuccess,
+            preparing = false,
+            message = null,
+            error = ok.exceptionOrNull()?.let { failure ->
+                Log.e(TAG, "Download engine could not start", failure)
+                "The download engine couldn't start: ${failure.message?.take(500) ?: failure.javaClass.name}"
+            },
         )
         ok.isSuccess
     }
 
-    /** Fetches the newest yt-dlp from its GitHub releases. Returns a message for the user. */
     suspend fun update(): String {
         if (!ensureReady()) return _state.value.error ?: "Engine not ready"
         _state.value = _state.value.copy(updating = true, error = null)
@@ -91,13 +124,14 @@ object Engine {
         )
         writePrefs(prefs)
         _state.value = _state.value.copy(
-            updating = false, version = prefs.optString("installed").ifBlank { null },
-            lastCheck = prefs.optLong("lastCheck"), message = msg,
+            updating = false,
+            version = prefs.optString("installed").ifBlank { null },
+            lastCheck = prefs.optLong("lastCheck"),
+            message = msg,
         )
         return msg
     }
 
-    /** Quietly checks for a newer yt-dlp once a week. */
     suspend fun autoUpdateIfDue() {
         if (System.currentTimeMillis() - readPrefs().optLong("lastCheck") < WEEK) return
         update()
@@ -105,10 +139,6 @@ object Engine {
 
     fun clearMessage() { _state.value = _state.value.copy(message = null) }
 
-    /**
-     * Checks the whole engine on the phone: starts Python, runs yt-dlp, and asks YouTube for a
-     * well-known song's audio (without downloading it). Returns a report the user can copy.
-     */
     suspend fun selfTest(): String {
         val head = "LToTS engine test · Android ${android.os.Build.VERSION.RELEASE} (${android.os.Build.MODEL}) · ABI ${android.os.Build.SUPPORTED_ABIS.firstOrNull()}\n"
         if (!ensureReady()) return head + "FAILED to start: ${_state.value.error}"
