@@ -228,14 +228,14 @@ private fun PitchSpeedCard() {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 SectionTitle("Pitch & speed", Modifier.weight(1f))
                 Pill("Tape", tape, { AudioEngine.setTape(!tape) })
-                Spacer(Modifier.width(8.dp))
-                Pill("Reset", false, { AudioEngine.resetPitchSpeed() })
             }
 
             // Pitch — heard live while dragging (in tape mode it's applied on release).
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Pitch", color = pal.textDim, modifier = Modifier.weight(1f))
                 Text(pitchLabel(cents), color = pal.text, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.width(8.dp))
+                Pill("Reset", false, { AudioEngine.setPitch(0); if (tape) AudioEngine.commit() })
             }
             Slider(
                 value = (cents / 100f).coerceIn(-12f, 12f),
@@ -260,6 +260,8 @@ private fun PitchSpeedCard() {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Speed", color = pal.textDim, modifier = Modifier.weight(1f))
                 Text("%.2f×".format(Locale.ROOT, speed), color = pal.text, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.width(8.dp))
+                Pill("Reset", false, { AudioEngine.previewSpeed(1f); AudioEngine.commit() })
             }
             Slider(
                 value = speed.coerceIn(0.5f, 2f),
