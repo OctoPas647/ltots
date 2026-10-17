@@ -70,6 +70,7 @@ import com.ltots.app.ui.components.formatTime
 import com.ltots.app.ui.components.rememberLiveVisual
 import com.ltots.app.ui.glass.GlassCircleButton
 import com.ltots.app.ui.glass.GlassPanel
+import com.ltots.app.ui.glass.glass
 import com.ltots.app.ui.theme.LocalPalette
 import java.util.Locale
 import kotlin.math.abs
@@ -161,7 +162,17 @@ fun NowPlayingScreen(player: PlayerUi, artwork: Bitmap?, onOpenEq: () -> Unit, o
             GlassCircleButton({ player.controller?.seekToPrevious() }, Modifier.size(56.dp)) {
                 Icon(Icons.Rounded.SkipPrevious, "Previous", tint = pal.text, modifier = Modifier.size(30.dp))
             }
-            GlassCircleButton({ player.togglePlay() }, Modifier.size(78.dp), highlighted = true) {
+            // Play/pause: the button itself takes the live AMOLED Cover accent from the song.
+            Box(
+                Modifier.size(78.dp)
+                    .glass(CircleShape, strength = 0.7f, tint = pal.accent, tintBoost = 0.45f)
+                    .clip(CircleShape)
+                    .clickable(
+                        remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                        indication = androidx.compose.material3.ripple(),
+                    ) { player.togglePlay() },
+                contentAlignment = Alignment.Center,
+            ) {
                 Icon(if (player.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, "Play/pause", tint = pal.onAccent, modifier = Modifier.size(42.dp))
             }
             GlassCircleButton({ player.controller?.seekToNext() }, Modifier.size(56.dp)) {
