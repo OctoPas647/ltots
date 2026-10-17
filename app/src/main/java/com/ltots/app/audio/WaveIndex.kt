@@ -8,8 +8,10 @@ import android.media.MediaFormat
 import android.net.Uri
 import android.os.Process
 import android.util.LruCache
+import com.ltots.app.data.AppVisibility
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.withContext
@@ -23,22 +25,14 @@ import java.io.DataOutputStream
 import java.io.File
 import java.nio.ByteOrder
 import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
-/**
- * A song's whole waveform, worked out once (like indexing): the lowest and highest point of the
- * sound for every 10 ms. Drawing the scrolling wave is then just reading the slice at the
- * player's position — no live audio analysis, and always exactly in step with the song.
- */
 class Wave(val colRate: Int, val durationMs: Long, val lo: ByteArray, val hi: ByteArray) {
     val columns: Int get() = lo.size
 
-    /**
-     * Fills [outMin]/[outMax] (values -1..1, oldest first) with the [spanMs] of sound that ends
-     * at [endMs]. Columns before the song's start or after its end are silent.
-     */
     fun fill(endMs: Long, spanMs: Long, outMin: FloatArray, outMax: FloatArray) {
         val n = outMin.size
         val startCol = (endMs - spanMs) * colRate / 1000.0
@@ -49,7 +43,7 @@ class Wave(val colRate: Int, val durationMs: Long, val lo: ByteArray, val hi: By
             var c1 = Math.floor(a + perOut).toLong()
             if (c1 <= c0) c1 = c0 + 1
             var mn = 0; var mx = 0
-            var c = max(c0, 0L)
+            val c = max(c0, 0L)
             val end = min(c1, columns.toLong())
             while (c < end) {
                 val ci = c.toInt()
@@ -63,23 +57,19 @@ class Wave(val colRate: Int, val durationMs: Long, val lo: ByteArray, val hi: By
     }
 }
 
-/** Turns decoded audio into [Wave] columns as it streams past (unit-tested on its own). */
 class WaveBuilder(private val sampleRate: Int, private val colRate: Int = WaveIndex.COL_RATE) {
     private var lo = ByteArray(1024)
     private var hi = ByteArray(1024)
     private var cols = 0
-    private var framesInCol = 0
     private var curMin = 0f
     private var curMax = 0f
     private var colStart = 0L
     private var frames = 0L
 
-    /** Feed one mono sample (-1..1). */
     fun add(v: Float) {
         if (v < curMin) curMin = v
         if (v > curMax) curMax = v
         frames++
-        // Column boundaries from the running frame count, so they never drift.
         val colEnd = (cols + 1).toLong() * sampleRate / colRate
         if (frames >= colEnd) push()
     }
@@ -101,16 +91,14 @@ class WaveBuilder(private val sampleRate: Int, private val colRate: Int = WaveIn
 }
 
 object WaveIndex {
-    /** Columns per second (one every 10 ms). */
     const val COL_RATE = 100
-    private const val MAGIC = 0x4C545756 // "LTWV"
+    private const val MAGIC = 0x4C545756
     private const val VERSION = 1
 
     private lateinit var root: File
     private val memory = LruCache<String, Wave>(6)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
     private val buildLock = Mutex()
-    /** Decoding runs on its own low-priority thread so it never competes with playback or the UI. */
     private val decodeThread = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
         Thread({
             runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND) }
@@ -118,13 +106,24 @@ object WaveIndex {
         }, "ltots-wave-index").apply { isDaemon = true }
     }.asCoroutineDispatcher()
     private val pending = HashSet<String>()
+    private val jobs = ConcurrentHashMap<String, Job>()
 
-    /** Bumped whenever a new wave is ready (so the live view can pick it up). */
     private val _ready = MutableStateFlow(0)
     val ready: StateFlow<Int> = _ready
 
     fun init(context: Context) {
         root = File(context.filesDir, "ltots/waves").apply { mkdirs() }
+        scope.launch {
+            AppVisibility.foreground.collect { visible ->
+                if (!visible) cancelPending()
+            }
+        }
+    }
+
+    private fun cancelPending() {
+        synchronized(pending) { pending.clear() }
+        jobs.values.forEach { it.cancel() }
+        jobs.clear()
     }
 
     private fun key(uri: Uri): String =
@@ -134,10 +133,8 @@ object WaveIndex {
 
     fun has(uri: Uri): Boolean = memory.get(uri.toString()) != null || file(uri).exists()
 
-    /** The wave from memory only (instant; safe to call every frame). */
     fun peek(uri: Uri): Wave? = memory.get(uri.toString())
 
-    /** The wave from memory or disk, or null if it hasn't been made yet. */
     fun load(uri: Uri): Wave? {
         memory.get(uri.toString())?.let { return it }
         val f = file(uri)
@@ -168,35 +165,36 @@ object WaveIndex {
         tmp.renameTo(f)
     }
 
-    /**
-     * Makes sure these songs' waves exist, in order, one at a time in the background (the song
-     * you're on first). Already-made waves are only loaded into memory.
-     */
     fun request(context: Context, uris: List<Uri>) {
+        if (!AppVisibility.foreground.value) return
         val app = context.applicationContext
         for (u in uris) {
+            if (!AppVisibility.foreground.value) return
             synchronized(pending) { if (!pending.add(u.toString())) continue }
-            scope.launch {
+            val job = scope.launch {
                 try {
+                    if (!AppVisibility.foreground.value) return@launch
                     if (load(u) == null) build(app, u)
                     _ready.value++
                 } finally {
                     synchronized(pending) { pending.remove(u.toString()) }
+                    jobs.remove(u.toString())
                 }
             }
+            jobs[u.toString()] = job
         }
     }
 
-    /** Decodes [uri] once and saves its wave. Returns null if the file can't be decoded. */
     suspend fun build(context: Context, uri: Uri): Wave? = buildLock.withLock {
+        if (!AppVisibility.foreground.value) return null
         load(uri)?.let { return it }
         val w = withContext(decodeThread) { runCatching { decode(context, uri) }.getOrNull() } ?: return null
+        if (!AppVisibility.foreground.value) return null
         save(uri, w)
         memory.put(uri.toString(), w)
         w
     }
 
-    /** Plain Android decoder loop: file → PCM → [WaveBuilder]. */
     private fun decode(context: Context, uri: Uri): Wave? {
         val ex = MediaExtractor()
         var codec: MediaCodec? = null
@@ -209,7 +207,6 @@ object WaveIndex {
             val fmt = ex.getTrackFormat(track)
             val mime = fmt.getString(MediaFormat.KEY_MIME)!!
             codec = MediaCodec.createDecoderByType(mime)
-            // Not real-time: let the decoder run as fast as it can in the background.
             runCatching { fmt.setInteger(MediaFormat.KEY_PRIORITY, 1) }
             codec.configure(fmt, null, null, 0)
             codec.start()
@@ -223,6 +220,7 @@ object WaveIndex {
             var outputDone = false
             var idle = 0
             while (!outputDone) {
+                if (!AppVisibility.foreground.value) return null
                 if (!inputDone) {
                     val i = codec.dequeueInputBuffer(10_000)
                     if (i >= 0) {
@@ -237,7 +235,7 @@ object WaveIndex {
                         }
                     }
                 }
-                val o = codec.dequeueOutputBuffer(info, 10_000)
+                val o = codec.dequeueOutputBuffer(10_000)
                 when {
                     o == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                         val of = codec.outputFormat
@@ -272,17 +270,16 @@ object WaveIndex {
                         codec.releaseOutputBuffer(o, false)
                         if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) outputDone = true
                     }
-                    else -> if (inputDone && ++idle > 300) outputDone = true // decoder stuck: give up on the tail
+                    else -> if (inputDone && ++idle > 300) outputDone = true
                 }
             }
             return builder?.finish()
         } finally {
             runCatching { codec?.stop() }
             runCatching { codec?.release() }
-            runCatching { ex.release() }
+            ex.release()
         }
     }
 
-    /** How many of [uris] already have a wave (for the status in Sound). */
     fun countReady(uris: List<Uri>): Int = uris.count { has(it) }
 }
