@@ -256,6 +256,36 @@ private fun PitchSpeedCard() {
             }
 
             Spacer(Modifier.height(14.dp))
+            // Stem pitch — early version. Mids moves the overall pitch for now; independent
+            // Bass / Treble bands arrive with the three-band engine.
+            var stemsOpen by remember { mutableStateOf(false) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                SectionTitle("Stem pitch", Modifier.weight(1f))
+                Pill(if (stemsOpen) "Hide" else "AI / normal", false, { stemsOpen = !stemsOpen })
+            }
+            if (stemsOpen) {
+                Text(
+                    "Early version: Mids moves the overall pitch. Independent Bass and Treble arrive with the three-band engine.",
+                    color = pal.textFaint, style = MaterialTheme.typography.bodySmall,
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Mids", color = pal.textDim, modifier = Modifier.weight(1f))
+                    Text(pitchLabel(cents), color = pal.text, fontWeight = FontWeight.SemiBold)
+                }
+                Slider(
+                    value = (cents / 100f).coerceIn(-12f, 12f),
+                    onValueChange = { v -> AudioEngine.setPitch(v.roundToInt() * 100) },
+                    steps = 23,
+                    valueRange = -12f..12f,
+                    colors = sliderColors,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Pill("Vocal lift", false, { AudioEngine.setPitch(200) })
+                    Pill("Reset", false, { AudioEngine.setPitch(0) })
+                }
+            }
+
+            Spacer(Modifier.height(14.dp))
             // Speed — previewed while dragging, applied on release (no stutter while you drag).
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Speed", color = pal.textDim, modifier = Modifier.weight(1f))
