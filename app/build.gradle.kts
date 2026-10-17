@@ -67,8 +67,11 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
+            // R8 was renaming/removing a class required by yt-dlp initialization,
+            // causing NoClassDefFoundError: kl0 in release installs. Keep release
+            // builds unshrunk until the exact keep rule is identified.
+            isMinifyEnabled = false
+            isShrinkResources = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = if (hasReleaseKey) signingConfigs.getByName("release")
             else signingConfigs.getByName("debug")
@@ -117,8 +120,8 @@ android {
             // Robolectric (Android 16 sandbox) needs these on JDK 21.
             test.jvmArgs(
                 "--add-exports=java.base/jdk.internal.access=ALL-UNNAMED",
-                "--add-opens=java.base/jdk.internal.access=ALL-UNNAMED",
                 "--add-opens=java.base/java.io=ALL-UNNAMED",
+                "--add-opens=java.base/java.io.IOException=ALL-UNNAMED",
             )
         }
     }
@@ -164,13 +167,12 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     // UI tests on the desktop JVM: Robolectric runs the real Android/Compose code, Roborazzi
-    // captures screenshots of each screen.
+    // captures screenshots from the app.
     testImplementation("org.robolectric:robolectric:4.17")
     // Media3's own Robolectric helpers: run the real ExoPlayer + audio output in tests.
     testImplementation("androidx.media3:media3-test-utils:$media3")
     testImplementation("androidx.media3:media3-test-utils-robolectric:$media3")
     testImplementation("io.github.takahirom.roborazzi:roborazzi:1.76.0")
-    testImplementation(composeBom)
     testImplementation("androidx.compose.ui:ui-test-junit4")
     testImplementation("androidx.test:core:1.7.0")
     testImplementation("androidx.test.ext:junit:1.3.0")
