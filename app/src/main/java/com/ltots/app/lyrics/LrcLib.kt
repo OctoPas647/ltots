@@ -29,7 +29,7 @@ class LrcLib(private val base: String = "https://lrclib.net/api") {
     private fun fetchOnce(url: String): String? {
         val c = (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = 10_000; readTimeout = 15_000
-            setRequestProperty("User-Agent", "LToTS (https://github.com/OctoPas647/ltots)")
+            setRequestProperty("User-Agent", "LToTS/1.0 (https://github.com/OctoPas647/ltots)")
             setRequestProperty("Accept", "application/json")
         }
         try {
@@ -81,33 +81,58 @@ class LrcLib(private val base: String = "https://lrclib.net/api") {
     }
 
     /**
-     * Finds lyrics for [q]: exact lookups first (fast, one request), then searches, trying each
-     * reading of the tags. Returns null when nothing trustworthy turns up.
+     * Finds lyrics for [q]: exact lookups first, then searches. A synced result is preferred;
+     * plain lyrics are used only when no trustworthy synced version is available.
      */
     fun find(q: SongQuery): Pair<Candidate, String>? {
         val secs = (q.durationMs / 1000).takeIf { it > 0 }
         val tries = SongMatch.interpretations(q)
         var reached = false
         var lastError: NetworkError? = null
+        var best: Pair<Candidate, String>? = null
+        var bestScore = 0.0
+
         fun <T> attempt(block: () -> T): T? = try {
             block().also { reached = true }
         } catch (e: NetworkError) {
             lastError = e; null
         }
+
+        fun consider(c: Candidate?, artist: String?, title: String) {
+            if (c == null) return
+            val score = SongMatch.score(q, artist, title, c)
+            if (score <= 0.0) return
+            val currentIsSynced = best?.first?.synced != null
+            val candidateIsSynced = c.synced != null
+            val shouldReplace = best == null ||
+                (candidateIsSynced && !currentIsSynced) ||
+                (candidateIsSynced == currentIsSynced && score > bestScore)
+            if (shouldReplace) {
+                best = c to "$artist — $title"
+                bestScore = score
+            }
+        }
+
         for ((artist, title) in tries) {
             if (artist == null) continue
-            val c = attempt { get(artist, title, q.album, secs) } ?: attempt { get(artist, title, null, secs) }
-            if (c != null && SongMatch.score(q, artist, title, c) > 0) return c to "$artist — $title"
+            val exact = attempt { get(artist, title, q.album, secs) }
+            consider(exact, artist, title)
+            if (exact?.synced != null) return best
+
+            val exactWithoutAlbum = attempt { get(artist, title, null, secs) }
+            consider(exactWithoutAlbum, artist, title)
+            if (exactWithoutAlbum?.synced != null) return best
         }
+
         for ((artist, title) in tries.take(3)) {
-            // The service sometimes refuses a search under load; once it has answered us at all,
-            // that only means "not found this time".
             val results = attempt { search(artist, title) } ?: emptyList()
-            val best = SongMatch.best(q, artist, title, results)
-            if (best != null) return best to "${best.artist} — ${best.title}"
+            val searchBest = SongMatch.best(q, artist, title, results)
+            consider(searchBest, artist, title)
+            if (searchBest?.synced != null) return best
         }
+
         // Never got through at all: report it, so the song is tried again later.
         if (!reached) throw lastError ?: NetworkError("LRCLIB unreachable")
-        return null
+        return best
     }
 }
