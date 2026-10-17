@@ -184,6 +184,8 @@ fun NowPlayingScreen(player: PlayerUi, artwork: Bitmap?, onOpenEq: () -> Unit, o
         }
 
         Spacer(Modifier.height(8.dp))
+        LyricsCard(player)
+        Spacer(Modifier.height(12.dp))
         PitchSpeedCard()
         Spacer(Modifier.height(12.dp))
         EqShortcut(onOpenEq)

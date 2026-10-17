@@ -71,6 +71,13 @@ fun rememberLiveVisual(wave: Boolean = true): LiveVisual {
     // Everything below runs only while the app is visible. Screen off (or app in the
     // background): the loop is cancelled and the audio thread stops copying audio for it, so
     // nothing to do with the visualizer runs at all — like YouTube Music.
+    // The wave comes from a waveform made once per song (like indexing): ask for the playing
+    // song's and the next one's while this screen is open; they're ready in a moment.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val songUri by AudioEngine.songUri.collectAsState()
+    WhileOnScreen(wave, songUri) {
+        if (wave && songUri != null) com.ltots.app.audio.WaveIndex.request(context, AudioEngine.upcomingUris())
+    }
     WhileOnScreen(lv, fps, ghost, wave) {
         if (fps <= 0) {
             lv.frame = SpectrumFrame(lv.analyzer.bands); lv.tick++
@@ -92,11 +99,19 @@ private suspend fun runVisual(lv: LiveVisual, fps: Int, ghost: Boolean, wave: Bo
         var last = 0L
         var lastEq: com.ltots.app.audio.EqState? = null
         var eqNeutral = false
+        // The pre-made wave of the playing song, if it's ready.
+        fun indexed(): com.ltots.app.audio.Wave? =
+            if (!wave) null else AudioEngine.songUri.value?.let { com.ltots.app.audio.WaveIndex.peek(it) }
         while (true) {
-            val live = AudioEngine.isPlaying.value && !AudioEngine.direct.value
-            if (!live && lv.frame.isAtRest()) {
-                // Nothing moving: no frames at all until music flows through LToTS again.
-                combine(AudioEngine.isPlaying, AudioEngine.direct) { p, d -> p && !d }.first { it }
+            val playing = AudioEngine.isPlaying.value
+            val live = playing && !AudioEngine.direct.value
+            // The pre-made wave also moves while the audio chip plays the song directly.
+            val waveMoving = playing && indexed() != null
+            if (!live && !waveMoving && lv.frame.isAtRest()) {
+                // Nothing moving: no frames at all until music plays again.
+                combine(AudioEngine.isPlaying, AudioEngine.direct, com.ltots.app.audio.WaveIndex.ready) { p, d, _ ->
+                    p && (!d || indexed() != null)
+                }.first { it }
                 last = 0L
             }
             // Wait out the rest of this frame's slot without asking for display frames.
@@ -109,11 +124,22 @@ private suspend fun runVisual(lv: LiveVisual, fps: Int, ghost: Boolean, wave: Bo
             if (eq !== lastEq) { lastEq = eq; eqNeutral = EqMath.isNeutral(eq) }
             val pre = ghost && !eqNeutral
             lv.preMirrorsPost = eqNeutral
+            val posMs = p?.currentPosition ?: 0L
+            val w = indexed()
             lv.frame = lv.analyzer.update(
-                (p?.currentPosition ?: 0L) * 1000L,
+                posMs * 1000L,
                 AudioEngine.isPlaying.value && !AudioEngine.direct.value,
-                pre = pre, wave = wave,
+                pre = pre,
+                // Only measure the wave live while the song's pre-made one isn't ready yet.
+                wave = wave && w == null,
             )
+            if (w != null) {
+                val f = lv.frame
+                w.fill(posMs, (lv.analyzer.waveSeconds * 1000).toLong(), f.waveMin, f.waveMax)
+                var peak = 0f
+                for (i in f.waveMax.size - 8 until f.waveMax.size) peak = maxOf(peak, -f.waveMin[i], f.waveMax[i])
+                f.peak = peak
+            }
             lv.tick++
         }
 }

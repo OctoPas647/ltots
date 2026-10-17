@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,16 +13,17 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -121,16 +123,52 @@ fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit, sub:
             if (sub != null) Text(sub, color = pal.textFaint, style = androidx.compose.material3.MaterialTheme.typography.bodySmall)
         }
         Spacer(Modifier.width(12.dp))
-        Switch(
-            checked, onChange,
-            colors = SwitchDefaults.colors(
-                checkedTrackColor = pal.accent, checkedThumbColor = pal.onAccent,
-                uncheckedTrackColor = pal.text.copy(alpha = 0.12f), uncheckedThumbColor = pal.text.copy(alpha = 0.7f),
-                uncheckedBorderColor = Color.Transparent,
+        LSwitch(checked, onChange)
+    }
+}
+
+/**
+ * The app's on/off switch. The dot is the same size on and off — only its position and colour
+ * change (Material's switch grows the dot when it's on, which looked inconsistent).
+ */
+@Composable
+fun LSwitch(checked: Boolean, onChange: (Boolean) -> Unit, modifier: Modifier = Modifier) {
+    val pal = LocalPalette.current
+    val pos by androidx.compose.animation.core.animateFloatAsState(
+        if (checked) 1f else 0f, androidx.compose.animation.core.tween(160), label = "switch",
+    )
+    val track = androidx.compose.ui.graphics.lerp(pal.text.copy(alpha = 0.12f), pal.accent, pos)
+    val thumb = androidx.compose.ui.graphics.lerp(pal.text.copy(alpha = 0.7f), pal.onAccent, pos)
+    val border = pal.text.copy(alpha = 0.18f * (1f - pos))
+    Box(
+        modifier
+            .size(width = SwitchW, height = SwitchH)
+            .clip(RoundedCornerShape(50))
+            .background(track)
+            .border(1.dp, border, RoundedCornerShape(50))
+            .toggleable(
+                value = checked,
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                indication = androidx.compose.material3.ripple(bounded = false, radius = 22.dp),
+                role = androidx.compose.ui.semantics.Role.Switch,
+                onValueChange = onChange,
             ),
+    ) {
+        val travel = SwitchW - SwitchH
+        Box(
+            Modifier
+                .padding(SwitchPad)
+                .offset(x = travel * pos)
+                .size(SwitchH - SwitchPad * 2)
+                .clip(CircleShape)
+                .background(thumb)
         )
     }
 }
+
+private val SwitchW = 52.dp
+private val SwitchH = 32.dp
+private val SwitchPad = 5.dp
 
 /** Small pill-shaped choice chip. */
 @Composable

@@ -19,7 +19,15 @@ data class SongProfile(
     val isEmpty get() = eq == null && pitchCents == null && speed == null && tape == null
 }
 
-data class EqPreset(val name: String, val eq: EqState, val builtIn: Boolean = false)
+data class EqPreset(
+    val name: String,
+    val eq: EqState,
+    val builtIn: Boolean = false,
+    /** Group shown in the EQ tab (built-in presets only). */
+    val category: String = "",
+    /** One line about what it does, shown when it's picked. */
+    val hint: String = "",
+)
 
 enum class SpectrumStyle(val label: String) { BARS("Bars"), CURVE("Curve"), MIRROR("Mirror") }
 

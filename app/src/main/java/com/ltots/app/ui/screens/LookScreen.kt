@@ -74,16 +74,23 @@ fun LookScreen() {
             Column(Modifier.padding(vertical = 16.dp)) {
                 SectionTitle("Themes", Modifier.padding(horizontal = 16.dp))
                 Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    ThemeState.presets.forEach { (name, t) ->
-                        val on = cfg.copy(hideNavBar = t.hideNavBar, hideStatusBar = t.hideStatusBar, dynamicColors = t.dynamicColors) == t
-                        Column(Modifier.clip(RoundedCornerShape(16.dp)).clickable { ThemeState.applyPreset(t) }.padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    ThemeState.presets.forEach { p ->
+                        val t = p.config
+                        val on = ThemeState.isActive(p, cfg)
+                        Column(Modifier.clip(RoundedCornerShape(16.dp)).clickable { ThemeState.applyPreset(p) }.padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                             Box(
                                 Modifier.size(64.dp).clip(RoundedCornerShape(16.dp)).background(
-                                    Brush.linearGradient(listOf(t.gradientA.toColor(), t.accent.toColor(), t.gradientB.toColor()))
-                                ).border(if (on) 2.dp else 1.dp, if (on) pal.text else pal.text.copy(alpha = 0.15f), RoundedCornerShape(16.dp))
-                            )
+                                    if (p.dynamic == true) {
+                                        // Black with a ring of cover-like colours.
+                                        Brush.sweepGradient(listOf(Color(0xFFFF5C7A), Color(0xFFFFC14D), Color(0xFF6CFFB0), Color(0xFF3FD5FF), Color(0xFFB07CFF), Color(0xFFFF5C7A)))
+                                    } else Brush.linearGradient(listOf(t.gradientA.toColor(), t.accent.toColor(), t.gradientB.toColor()))
+                                ).border(if (on) 2.dp else 1.dp, if (on) pal.text else pal.text.copy(alpha = 0.15f), RoundedCornerShape(16.dp)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (p.dynamic == true) Box(Modifier.size(44.dp).clip(RoundedCornerShape(11.dp)).background(Color.Black))
+                            }
                             Text(
-                                name, color = if (on) pal.text else pal.textDim, style = MaterialTheme.typography.bodySmall,
+                                p.name, color = if (on) pal.text else pal.textDim, style = MaterialTheme.typography.bodySmall,
                                 fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, modifier = Modifier.padding(top = 4.dp),
                             )
                         }
@@ -122,11 +129,13 @@ fun LookScreen() {
         GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
             Column(Modifier.padding(16.dp)) {
                 SectionTitle("Background")
-                SwitchRow(
-                    "Pure black (AMOLED)", cfg.pureBlack, { on -> set { it.copy(pureBlack = on, darkMode = if (on) true else it.darkMode) } },
-                    sub = "True black background — black pixels switch off, saving battery.",
-                )
-                if (!cfg.pureBlack) {
+                if (cfg.pureBlack) {
+                    Text(
+                        "The AMOLED themes keep the background pure black, so black pixels stay switched off and save battery. " +
+                            "Pick another theme above for colours, motion and album-art glow.",
+                        color = pal.textDim, style = MaterialTheme.typography.bodySmall,
+                    )
+                } else {
                     SwitchRow("Dark mode", cfg.darkMode, { on -> set { it.copy(darkMode = on) } })
                     SwitchRow("Moving colours", cfg.animateBackground, { on -> set { it.copy(animateBackground = on) } })
                     if (cfg.animateBackground) {

@@ -109,30 +109,65 @@ object Store {
         }.toString()
     }
 
+    /** Groups of built-in presets, in the order the EQ tab shows them. */
+    val presetCategories = listOf("Basics", "Genres", "Voice & places", "Precise")
+
     val builtInPresets: List<EqPreset> by lazy {
+        // Graphic-EQ shapes on the 10 standard bands (31 Hz … 16 kHz).
         fun shaped(vararg gains: Float): EqState {
             val bands = EqDefaults.tenBand().mapIndexed { i, b -> b.copy(gainDb = gains.getOrElse(i) { 0f }) }
             return EqState(bands = bands)
         }
+        fun b(type: FilterType, f: Float, g: Float = 0f, q: Float = 0.71f) = EqBand(EqDefaults.newId(), type, f, g, q)
+        fun p(cat: String, name: String, hint: String, eq: EqState) = EqPreset(name, eq, builtIn = true, category = cat, hint = hint)
+        val basics = "Basics"; val genres = "Genres"; val places = "Voice & places"; val precise = "Precise"
         listOf(
-            EqPreset("Flat", EqState(), builtIn = true),
-            EqPreset("Bass boost", shaped(6f, 5f, 3.5f, 1.5f, 0f, 0f, 0f, 0f, 0f, 0f), builtIn = true),
-            EqPreset("Warm", shaped(3f, 3f, 2f, 1f, 0f, -0.5f, -1f, -1.5f, -2f, -2.5f), builtIn = true),
-            EqPreset("Vocal", shaped(-2f, -1.5f, -1f, 0f, 1.5f, 3f, 3f, 1.5f, 0f, -1f), builtIn = true),
-            EqPreset("Bright", shaped(0f, 0f, 0f, 0f, 0f, 0.5f, 1.5f, 3f, 4f, 4.5f), builtIn = true),
-            EqPreset("V-shape", shaped(5f, 4f, 2f, 0f, -2f, -2f, 0f, 2f, 4f, 5f), builtIn = true),
-            EqPreset(
-                "Smooth shelves",
-                EqState(
-                    bands = listOf(
-                        EqBand(EqDefaults.newId(), FilterType.HIGH_PASS, 18f, q = 0.71f),
-                        EqBand(EqDefaults.newId(), FilterType.LOW_SHELF, 105f, 3f, 0.7f),
-                        EqBand(EqDefaults.newId(), FilterType.PEAK, 3200f, -1.5f, 1.4f),
-                        EqBand(EqDefaults.newId(), FilterType.HIGH_SHELF, 9000f, 1.5f, 0.7f),
-                    )
-                ),
-                builtIn = true,
-            ),
+            // ---- basics (the original presets keep their names and shapes) ----
+            p(basics, "Flat", "No change — the song exactly as it was mixed.", EqState()),
+            p(basics, "Bass boost", "More low end, mids and highs untouched.", shaped(6f, 5f, 3.5f, 1.5f, 0f, 0f, 0f, 0f, 0f, 0f)),
+            p(basics, "Bass reducer", "Less boom; good for bass-heavy earbuds.", shaped(-6f, -5f, -3.5f, -1.5f, 0f, 0f, 0f, 0f, 0f, 0f)),
+            p(basics, "Bright", "More sparkle and detail up top.", shaped(0f, 0f, 0f, 0f, 0f, 0.5f, 1.5f, 3f, 4f, 4.5f)),
+            p(basics, "Treble reducer", "Softer highs; tames harsh or sibilant recordings.", shaped(0f, 0f, 0f, 0f, 0f, -0.5f, -1.5f, -3f, -4.5f, -5.5f)),
+            p(basics, "Warm", "Fuller lows, gently rolled-off highs.", shaped(3f, 3f, 2f, 1f, 0f, -0.5f, -1f, -1.5f, -2f, -2.5f)),
+            p(basics, "V-shape", "Punchy lows and crisp highs, mids pulled back.", shaped(5f, 4f, 2f, 0f, -2f, -2f, 0f, 2f, 4f, 5f)),
+            p(basics, "Loudness", "Keeps lows and highs present at low volume.", shaped(5f, 4f, 2f, 0f, -1f, -1f, 0f, 1.5f, 3f, 3.5f)),
+            // ---- genres ----
+            p(genres, "Rock", "Driving low end and bite on guitars and cymbals.", shaped(4f, 3f, 1.5f, -0.5f, -1.5f, -0.5f, 1.5f, 3f, 3.5f, 3.5f)),
+            p(genres, "Pop", "Forward vocals and upper bass, smooth top.", shaped(-1f, 0f, 1.5f, 2.5f, 3f, 2f, 0.5f, -0.5f, -0.5f, -1f)),
+            p(genres, "Hip-hop", "Deep 808s with clear vocals on top.", shaped(5f, 4.5f, 2.5f, 1f, -0.5f, -1f, 0.5f, 1f, 1.5f, 2f)),
+            p(genres, "R&B", "Rich, smooth bass and silky highs.", shaped(4f, 5f, 3f, 0f, -1.5f, -0.5f, 1f, 1.5f, 2f, 2.5f)),
+            p(genres, "Electronic", "Sub-bass weight and sharp highs.", shaped(5f, 4f, 1.5f, 0f, -1.5f, 0f, 1f, 2.5f, 4f, 4f)),
+            p(genres, "Dance", "Kick-drum punch and open highs.", shaped(4.5f, 5f, 2.5f, 0f, 0f, -1f, -1f, 0f, 2.5f, 3f)),
+            p(genres, "Metal", "Tight lows, scooped low-mids, aggressive presence.", shaped(4f, 3f, 0f, -1.5f, -2f, 0f, 2f, 3.5f, 3f, 2f)),
+            p(genres, "Jazz", "Warm double bass, natural horns and cymbals.", shaped(3f, 2f, 1f, 1.5f, -1f, -1f, 0f, 1f, 2f, 3f)),
+            p(genres, "Classical", "Wide and natural, a little extra air.", shaped(3f, 2.5f, 1.5f, 0.5f, 0f, 0f, 0f, 1.5f, 2.5f, 3f)),
+            p(genres, "Acoustic", "Body on guitars and voices, clear strings.", shaped(3f, 3f, 2f, 0.5f, 1f, 1f, 2f, 2.5f, 2f, 1.5f)),
+            p(genres, "Piano", "Fuller middle register and clear attack.", shaped(1f, 0.5f, 0f, 1.5f, 2f, 1f, 2.5f, 3f, 2f, 1.5f)),
+            p(genres, "Latin", "Percussion snap and bright brass.", shaped(2f, 1f, 0f, 0f, -1f, -1f, -1f, 0f, 2.5f, 3.5f)),
+            p(genres, "Lo-fi", "Dusty, warm and dark — tape-like.", shaped(2f, 2.5f, 2f, 1f, 0f, -1f, -2f, -3.5f, -5f, -6f)),
+            // ---- voice & places ----
+            p(places, "Vocal", "Brings singers forward.", shaped(-2f, -1.5f, -1f, 0f, 1.5f, 3f, 3f, 1.5f, 0f, -1f)),
+            p(places, "Podcast", "Clear speech, less rumble and hiss.", EqState(bands = listOf(
+                b(FilterType.HIGH_PASS, 80f), b(FilterType.PEAK, 250f, -2f, 1f), b(FilterType.PEAK, 3000f, 3f, 0.9f), b(FilterType.HIGH_SHELF, 10000f, -2f),
+            ))),
+            p(places, "Late night", "Less boom and sharpness so you can listen quietly.", shaped(-3f, -2f, -1f, 0f, 0.5f, 1f, 1f, 0f, -1f, -2f)),
+            p(places, "Phone speaker", "Skips bass the speaker can't play; clearer mids.", shaped(-8f, -6f, -2f, 1f, 2f, 2f, 1.5f, 1f, 0f, 0f)),
+            p(places, "In the car", "Cuts the road rumble, lifts the vocals.", shaped(-2f, 0f, 1f, 0f, -1f, 1f, 2f, 2f, 1f, 0f)),
+            p(places, "Workout", "Big beat and energy.", shaped(5f, 4f, 2f, 0f, -1f, 0f, 1f, 2f, 3f, 3f)),
+            p(places, "Focus", "Calm and even, nothing jumps out.", shaped(1f, 1f, 0.5f, 0f, 0f, -0.5f, -1.5f, -2f, -2f, -2f)),
+            // ---- precise (parametric) ----
+            p(precise, "Smooth shelves", "Gentle low and high shelves with a dip at 3 kHz.", EqState(bands = listOf(
+                b(FilterType.HIGH_PASS, 18f), b(FilterType.LOW_SHELF, 105f, 3f, 0.7f), b(FilterType.PEAK, 3200f, -1.5f, 1.4f), b(FilterType.HIGH_SHELF, 9000f, 1.5f, 0.7f),
+            ))),
+            p(precise, "Deep sub-bass", "A shelf under 60 Hz: weight you feel, mids untouched.", EqState(bands = listOf(
+                b(FilterType.HIGH_PASS, 18f), b(FilterType.LOW_SHELF, 60f, 6f, 0.7f),
+            ))),
+            p(precise, "Air", "A high shelf from 11 kHz for openness.", EqState(bands = listOf(b(FilterType.HIGH_SHELF, 11000f, 4f, 0.7f)))),
+            p(precise, "Clarity", "Less muddiness at 250 Hz, more presence at 3 kHz.", EqState(bands = listOf(
+                b(FilterType.PEAK, 250f, -2.5f, 1f), b(FilterType.PEAK, 3000f, 2f, 1f), b(FilterType.HIGH_SHELF, 10000f, 1.5f, 0.7f),
+            ))),
+            p(precise, "De-ess", "Narrow cut at 7 kHz for harsh 's' sounds.", EqState(bands = listOf(b(FilterType.PEAK, 7000f, -4f, 4f)))),
+            p(precise, "Rumble filter", "Removes inaudible sub-sonic energy below 30 Hz.", EqState(bands = listOf(b(FilterType.HIGH_PASS, 30f, q = 0.71f)))),
         )
     }
 }

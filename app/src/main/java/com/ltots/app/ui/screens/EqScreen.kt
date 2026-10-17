@@ -1,5 +1,12 @@
 package com.ltots.app.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
+import com.ltots.app.audio.EqTone
+import com.ltots.app.audio.ToneRegion
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -28,8 +35,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -91,8 +96,30 @@ fun EqScreen(player: PlayerUi) {
         if (eq.bands.none { it.id == selectedId }) selectedId = null
     }
 
-    fun edit(t: (EqState) -> EqState) = AudioEngine.updateEq(t)
+    // Undo: remembers the EQ before each change (a slider drag counts as one change).
+    val history = remember { androidx.compose.runtime.mutableStateListOf<EqState>() }
+    var lastPush by remember { mutableStateOf(0L) }
+    LaunchedEffect(songKey, profile?.eq != null) { history.clear() }
+    fun edit(t: (EqState) -> EqState) {
+        val now = System.currentTimeMillis()
+        if (now - lastPush > 700) {
+            history.add(AudioEngine.effectiveEq.value)
+            if (history.size > 40) history.removeAt(0)
+        }
+        lastPush = now
+        AudioEngine.updateEq(t)
+    }
+    fun undo() {
+        val prev = history.removeLastOrNull() ?: return
+        lastPush = 0L
+        AudioEngine.updateEq { prev }
+        selectedId = null
+    }
     fun editBand(id: Long, t: (EqBand) -> EqBand) = edit { s -> s.copy(bands = s.bands.map { if (it.id == id) t(it) else it }) }
+
+    var advanced by rememberSaveable { mutableStateOf(false) }
+    // Tapping a dot on the graph opens the detailed controls for it.
+    LaunchedEffect(selectedId) { if (selectedId != null) advanced = true }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp)) {
         // Header
@@ -104,10 +131,7 @@ fun EqScreen(player: PlayerUi) {
                     color = pal.textDim, style = MaterialTheme.typography.bodySmall, maxLines = 1,
                 )
             }
-            Switch(
-                eq.enabled, { on -> edit { it.copy(enabled = on) } },
-                colors = SwitchDefaults.colors(checkedTrackColor = pal.accent, checkedThumbColor = pal.onAccent),
-            )
+            com.ltots.app.ui.components.LSwitch(eq.enabled, { on -> edit { it.copy(enabled = on) } })
         }
 
         // Scope: default EQ vs this song's own EQ
@@ -122,11 +146,28 @@ fun EqScreen(player: PlayerUi) {
             )
         }
 
+        // 1. The easy part: pick a sound.
         Spacer(Modifier.height(12.dp))
+        PresetsCard(eq, onApply = { p ->
+            // Fresh ids so the processor rebuilds cleanly; picking a preset also switches the EQ on.
+            edit { cur -> p.eq.copy(enabled = true, bands = p.eq.bands.map { it.copy(id = EqDefaults.newId()) }) }
+            selectedId = null
+        })
 
-        // Graph over the live spectrum + waveform. The moving parts sit on top of the glass
-        // rather than inside it: the glass (blur, refraction) is then drawn once and left alone,
-        // instead of being re-rendered with every frame of the spectrum.
+        // 2. Then simple tone controls.
+        Spacer(Modifier.height(12.dp))
+        QuickToneCard(
+            eq,
+            onSet = { r, v -> edit { EqTone.set(it, r, v) } },
+            canUndo = history.isNotEmpty(),
+            onUndo = ::undo,
+            onFlat = { edit { EqTone.flatten(it) }; selectedId = null },
+        )
+
+        // 3. The curve itself, over the live spectrum + waveform. The moving parts sit on top of
+        // the glass rather than inside it: the glass (blur, refraction) is then drawn once and
+        // left alone, instead of being re-rendered with every frame of the spectrum.
+        Spacer(Modifier.height(12.dp))
         val panelShape = glassShape()
         Box(Modifier.fillMaxWidth().height(320.dp)) {
             GlassPanel(Modifier.matchParentSize(), shape = panelShape, tintBoost = 0.02f) {}
@@ -154,29 +195,75 @@ fun EqScreen(player: PlayerUi) {
             modifier = Modifier.fillMaxWidth().padding(top = 6.dp), textAlign = TextAlign.Center,
         )
 
+        // 4. Everything for going deep, folded away until wanted.
         Spacer(Modifier.height(12.dp))
-        BandStrip(eq, selectedId, onSelect = { selectedId = it }, onCountChange = { n -> edit { setBandCount(it, n) } }, onRespace = { edit { respace(it) } })
+        GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
+            Row(
+                Modifier.fillMaxWidth().clickable { advanced = !advanced }.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Fine-tune", color = pal.text, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Bands, filter types, exact frequency / gain / width, preamp and headroom",
+                        color = pal.textDim, style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Icon(
+                    if (advanced) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                    if (advanced) "Hide fine-tune" else "Show fine-tune", tint = pal.text,
+                )
+            }
+        }
+        AnimatedVisibility(advanced) {
+            Column {
+                Spacer(Modifier.height(12.dp))
+                BandStrip(eq, selectedId, onSelect = { selectedId = it }, onCountChange = { n -> edit { setBandCount(it, n) } }, onRespace = { edit { respace(it) } })
 
-        if (selected != null) {
-            Spacer(Modifier.height(12.dp))
-            BandEditor(
-                band = selected,
-                onChange = { nb -> editBand(selected.id) { nb } },
-                onDelete = { edit { s -> s.copy(bands = s.bands.filterNot { it.id == selected.id }) }; selectedId = null },
-            )
+                if (selected != null) {
+                    Spacer(Modifier.height(12.dp))
+                    BandEditor(
+                        band = selected,
+                        onChange = { nb -> editBand(selected.id) { nb } },
+                        onDelete = { edit { s -> s.copy(bands = s.bands.filterNot { it.id == selected.id }) }; selectedId = null },
+                    )
+                }
+
+                Spacer(Modifier.height(12.dp))
+                LevelCard(eq) { edit(it) }
+            }
         }
 
-        Spacer(Modifier.height(12.dp))
-        LevelCard(eq) { edit(it) }
-
-        Spacer(Modifier.height(12.dp))
-        PresetsCard(eq, onApply = { p ->
-            // Fresh ids so the processor rebuilds cleanly.
-            edit { cur -> p.eq.copy(enabled = cur.enabled, bands = p.eq.bands.map { it.copy(id = EqDefaults.newId()) }) }
-            selectedId = null
-        })
-
         Spacer(Modifier.height(BottomChrome.calculateBottomPadding() - 80.dp))
+    }
+}
+
+@Composable
+private fun QuickToneCard(
+    eq: EqState,
+    onSet: (ToneRegion, Float) -> Unit,
+    canUndo: Boolean,
+    onUndo: () -> Unit,
+    onFlat: () -> Unit,
+) {
+    val pal = LocalPalette.current
+    GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                SectionTitle("Quick tone", Modifier.weight(1f))
+                Pill("Undo", false, { if (canUndo) onUndo() }, modifier = Modifier.alpha(if (canUndo) 1f else 0.4f))
+                Spacer(Modifier.width(8.dp))
+                Pill("Flatten", false, onFlat)
+            }
+            ToneRegion.entries.forEach { r ->
+                val level = remember(eq, r) { EqTone.level(eq, r) }
+                LabeledSlider(r.label, level, { v -> onSet(r, Math.round(v * 2f) / 2f) }, -EqTone.RANGE..EqTone.RANGE, formatDb(level))
+            }
+            Text(
+                "Moves every band in that range together, on top of whatever preset or shape you have.",
+                color = pal.textFaint, style = MaterialTheme.typography.bodySmall,
+            )
+        }
     }
 }
 
@@ -374,19 +461,51 @@ private fun PresetsCard(eq: EqState, onApply: (EqPreset) -> Unit) {
     var userPresets by remember { mutableStateOf(Store.loadUserPresets()) }
     var showSave by rememberSaveable { mutableStateOf(false) }
     var toDelete by remember { mutableStateOf<EqPreset?>(null) }
+    val all = remember(userPresets) { Store.builtInPresets + userPresets }
+    val active = remember(eq, all) { all.firstOrNull { EqTone.sameShape(it.eq, eq) } }
+    val tabs = remember(userPresets) { Store.presetCategories + if (userPresets.isNotEmpty()) listOf(MINE) else emptyList() }
+    // Opens on the group of the sound that's playing now.
+    var tab by rememberSaveable { mutableStateOf(active?.let { if (it.builtIn) it.category else MINE } ?: Store.presetCategories.first()) }
+    if (tab !in tabs) tab = tabs.first()
 
     GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                SectionTitle("Presets", Modifier.weight(1f))
+                SectionTitle("Sound presets", Modifier.weight(1f))
                 Pill("Save current", true, { showSave = true })
             }
-            Spacer(Modifier.height(4.dp))
-            FlowPills {
-                Store.builtInPresets.forEach { p -> Pill(p.name, false, { onApply(p) }) }
-                userPresets.forEach { p -> Pill("★ " + p.name, false, { onApply(p) }, onLongClick = { toDelete = p }) }
+            // What's active right now, in plain words.
+            Text(
+                when {
+                    !eq.enabled -> "EQ is off — pick a preset to switch it on."
+                    active != null -> active.name + if (active.hint.isNotEmpty()) " · ${active.hint}" else ""
+                    else -> "Custom sound — save it to keep it."
+                },
+                color = pal.textDim, style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(start = 4.dp, bottom = 10.dp),
+            )
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                tabs.forEach { t ->
+                    val on = t == tab
+                    Text(
+                        t, color = if (on) pal.text else pal.textFaint,
+                        fontWeight = if (on) FontWeight.Bold else FontWeight.Medium,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable { tab = t }
+                            .background(if (on) pal.text.copy(alpha = 0.08f) else Color.Transparent)
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                    )
+                }
             }
-            if (userPresets.isNotEmpty()) Text(
+            Spacer(Modifier.height(8.dp))
+            FlowPills {
+                if (tab == MINE) {
+                    userPresets.forEach { p -> Pill("★ " + p.name, p == active, { onApply(p) }, onLongClick = { toDelete = p }) }
+                } else {
+                    Store.builtInPresets.filter { it.category == tab }.forEach { p -> Pill(p.name, p == active, { onApply(p) }) }
+                }
+            }
+            if (tab == MINE) Text(
                 "Long-press one of your presets to delete it.",
                 color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp),
             )
@@ -410,6 +529,7 @@ private fun PresetsCard(eq: EqState, onApply: (EqPreset) -> Unit) {
                     val n = name.trim().ifEmpty { "My preset ${userPresets.size + 1}" }
                     userPresets = userPresets.filterNot { it.name == n } + EqPreset(n, eq)
                     Store.saveUserPresets(userPresets)
+                    tab = MINE
                     showSave = false
                 }) { Text("Save") }
             },
@@ -440,3 +560,5 @@ fun FlowPills(content: @Composable () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) { content() }
 }
+
+private const val MINE = "Mine"

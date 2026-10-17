@@ -152,6 +152,9 @@ dependencies {
     implementation("io.github.kyant0:backdrop:2.0.1")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
+    // Background jobs that wait for the right moment (charging / online): waveform indexing and
+    // lyrics lookup for the whole library.
+    implementation("androidx.work:work-runtime-ktx:2.11.2")
     implementation("com.google.guava:guava:33.7.2-android")
 
     // yt-dlp + Python + ffmpeg for Android (the engine Seal uses).
@@ -171,6 +174,7 @@ dependencies {
     testImplementation("androidx.compose.ui:ui-test-junit4")
     testImplementation("androidx.test:core:1.7.0")
     testImplementation("androidx.test.ext:junit:1.3.0")
+    testImplementation("androidx.work:work-testing:2.11.2")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
     testImplementation("org.json:json:20260814")
 }

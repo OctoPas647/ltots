@@ -51,6 +51,8 @@ class AppUiTest {
     private val service = object : ExternalResource() {
         var svc: org.robolectric.android.controller.ServiceController<PlaybackService>? = null
         override fun before() {
+            // No real lyrics lookups from UI tests (the lyrics card then shows "offline").
+            com.ltots.app.lyrics.Lyrics.api = com.ltots.app.lyrics.LrcLib("http://127.0.0.1:9/api")
             val app = ApplicationProvider.getApplicationContext<Application>()
             val ctl = Robolectric.buildService(PlaybackService::class.java).create()
             svc = ctl
@@ -78,6 +80,13 @@ class AppUiTest {
         rule.waitForIdle()
     }
 
+    /** On the EQ screen, state changes need the main looper drained before they show. */
+    private fun settle() {
+        idle(300)
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+        idle(300)
+    }
+
     private fun tab(label: String) {
         rule.onAllNodesWithText(label).first().performClick()
         idle(1200)
@@ -96,7 +105,21 @@ class AppUiTest {
         rule.onNodeWithText("Equalizer").assertIsDisplayed()
         shot("03_eq")
         val before = AudioEngine.effectiveEq.value.bands.size
-        rule.onNodeWithContentDescription("More bands").performScrollTo().performClick()
+        // Presets come first; bands live under "Fine-tune".
+        rule.onNodeWithText("Genres").performSemanticsAction(SemanticsActions.OnClick)
+        settle()
+        rule.onNodeWithText("Rock").performSemanticsAction(SemanticsActions.OnClick)
+        settle()
+        assertTrue(com.ltots.app.audio.EqTone.sameShape(AudioEngine.effectiveEq.value, com.ltots.app.data.Store.builtInPresets.first { it.name == "Rock" }.eq))
+        shot("03a_eq_rock")
+        rule.onNodeWithText("Basics").performSemanticsAction(SemanticsActions.OnClick)
+        settle()
+        rule.onNodeWithText("Flat").performSemanticsAction(SemanticsActions.OnClick)
+        settle()
+        assertTrue(EqMathCheck.neutral())
+        rule.onNodeWithText("Fine-tune").performSemanticsAction(SemanticsActions.OnClick)
+        settle()
+        rule.onNodeWithContentDescription("More bands").performSemanticsAction(SemanticsActions.OnClick)
         idle(300)
         org.robolectric.shadows.ShadowLooper.idleMainLooper()
         idle(300)
@@ -110,8 +133,14 @@ class AppUiTest {
         shot("04_get")
 
         tab("Look")
+        rule.onNodeWithText("AMOLED Cover").performClick()
+        idle(1000)
+        assertTrue(com.ltots.app.ui.theme.ThemeState.config.value.dynamicColors)
+        assertTrue(com.ltots.app.ui.theme.ThemeState.config.value.pureBlack)
+        shot("05b_look_amoled_cover")
         rule.onNodeWithText("AMOLED").performClick()
         idle(1000)
+        assertTrue(!com.ltots.app.ui.theme.ThemeState.config.value.dynamicColors)
         shot("05_look_amoled")
         // New visualizer refresh-rate choice (clicked via its accessibility action; the screen
         // is long). All four options must fit across the screen.
@@ -169,8 +198,10 @@ class AppUiTest {
         shot("08_pitch_up")
 
         // Speed slider (0.5…2): drag right; applied to the player on release.
+        // (Set through the slider's accessibility action — the same path as a drag release — because
+        // scrolling a long page under Robolectric's paused clock can stall.)
         rule.onAllNodes(hasProgressBarRangeInfo(androidx.compose.ui.semantics.ProgressBarRangeInfo(1f, 0.5f..2f)))[0]
-            .performScrollTo().performTouchInput { swipeRight(startX = centerX, endX = centerX + width / 6f) }
+            .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetProgress) { it(1.25f) }
         idle(400)
         val s = AudioEngine.speed.value
         assertTrue("speed changed: $s", s > 1f)
@@ -178,7 +209,7 @@ class AppUiTest {
         assertEquals(1f, player.playbackParameters.pitch)
 
         // Reset brings everything back.
-        rule.onNodeWithText("Reset").performScrollTo().performClick()
+        rule.onNodeWithText("Reset").performSemanticsAction(SemanticsActions.OnClick)
         idle(300)
         assertEquals(0, AudioEngine.pitchCents.value)
         assertEquals(1f, player.playbackParameters.speed)
@@ -187,3 +218,7 @@ class AppUiTest {
 }
 
 private fun SemanticsNodeInteractionCollection.first() = this[0]
+
+private object EqMathCheck {
+    fun neutral() = com.ltots.app.audio.EqMath.isNeutral(AudioEngine.effectiveEq.value)
+}

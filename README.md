@@ -14,10 +14,23 @@ newer APK updates the app and keeps your settings.
 
 ## What's in phase 1
 
+- **Easy-first EQ** – 33 presets in four groups (Basics, Genres, Voice & places, Precise) with a
+  one-line description of each, the active preset highlighted, **Quick tone** sliders (Bass / Mids /
+  Treble) that work on top of any shape, Undo and Flatten; save your own presets ("Mine").
+  Everything below stays one tap away under **Fine-tune**.
 - **Parametric EQ** – any number of bands (1–64); every band has an exact frequency, gain, width (Q)
   and type (peak, low/high shelf, low/high cut). Drag the dots on the curve or type exact values.
 - **Live view** – the spectrum after the EQ, a faint outline of the sound before it, and a scrolling
-  waveform, all synced to what you're hearing.
+  waveform. The waveform is **pre-made for every song** (decoded once, like an index: one point per
+  10 ms) and drawn from the player's position, so it's exactly in sync and costs nothing to show —
+  it even keeps moving in power-saving playback.
+- **Lyrics** – found automatically for every song on the phone (LRCLIB, a free database of
+  time-synced lyrics; matched by title, artist and length, with "Artist - Title" file names and
+  "(Official Video)"-style clutter handled) and shown under the player like Spotify: the sung line
+  is highlighted and followed, tap any line to jump there. Saved once, then they work offline.
+- **Library preparation** – waveforms for the whole library are made while the phone charges,
+  lyrics are fetched whenever you're online; the playing song is always done on the spot. Status
+  and "Prepare now" in Sound.
 - **Per-song EQ** – give any song its own EQ; it loads automatically whenever that song plays.
 - **Pitch & speed** – independent (or linked "tape" mode), remembered per song, powered by the
   Rubber Band R3 engine (studio-grade). Pitch changes are heard live while dragging; speed is
@@ -29,8 +42,9 @@ newer APK updates the app and keeps your settings.
   instead of LDAC, and offers **bit-perfect USB output** (Android 14+) for USB DACs.
 - **Liquid glass UI** – real refraction and blur; colours, blur, refraction, tint, rim light, corner
   roundness, background motion, album-art glow and visualizer style are all adjustable.
-- **AMOLED theme** (default on new installs) – pure black with an electric-cyan accent; "Pure black"
-  can also be switched on for any theme.
+- **AMOLED themes** – **AMOLED** (default on new installs): pure black with an electric-cyan accent;
+  **AMOLED Cover**: the same pure black, with buttons, sliders and everything you can touch coloured
+  from the current song's cover.
 - **Full screen** – the navigation bar is hidden inside the app (swipe up from the bottom edge to
   bring it back); the status bar can be hidden too.
 - **Dynamic colours** – the accent and background glow follow the average colour of the
@@ -70,7 +84,7 @@ newer APK updates the app and keeps your settings.
 ## Roadmap
 
 - **Phase 2** – YouTube Music streaming (play without downloading) and syncing your own library.
-- **Phase 3** – Search by lyrics: a lyrics database plus an on-device AI model for half-remembered
+- **Phase 3** – Search by lyrics: the saved lyrics plus an on-device AI model for half-remembered
   lines (runs only while searching).
 
 ## Getting the best sound

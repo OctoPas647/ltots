@@ -19,6 +19,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -138,6 +140,9 @@ fun SoundScreen() {
         }
 
         Spacer(Modifier.height(12.dp))
+        LibraryPrepCard()
+
+        Spacer(Modifier.height(12.dp))
         GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.06f) {
             Column(Modifier.padding(16.dp)) {
                 SectionTitle("Visualizer detail")
@@ -155,6 +160,49 @@ fun SoundScreen() {
             color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 4.dp),
         )
         Spacer(Modifier.height(BottomChrome.calculateBottomPadding() - 80.dp))
+    }
+}
+
+/** Waveforms and lyrics prepared for the whole library, like an index. */
+@Composable
+private fun LibraryPrepCard() {
+    val pal = LocalPalette.current
+    val context = LocalContext.current
+    val running by remember { com.ltots.app.prep.LibraryPrep.running(context) }.collectAsState(false)
+    var status by remember { androidx.compose.runtime.mutableStateOf<Triple<Int, Int, Int>?>(null) }
+    // Counted when the screen opens and every few seconds while a pass is running.
+    com.ltots.app.ui.WhileOnScreen(running) {
+        while (true) {
+            status = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                if (!com.ltots.app.prep.LibraryPrep.hasAudioPermission(context)) return@withContext null
+                val tracks = com.ltots.app.data.LocalLibrary.load(context)
+                Triple(
+                    tracks.size,
+                    com.ltots.app.audio.WaveIndex.countReady(tracks.map { it.uri }),
+                    com.ltots.app.lyrics.Lyrics.countFound(tracks.map { it.profileKey }),
+                )
+            }
+            if (!running) break
+            kotlinx.coroutines.delay(4000)
+        }
+    }
+    GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.06f) {
+        Column(Modifier.padding(16.dp)) {
+            SectionTitle("Library preparation")
+            val st = status
+            if (st != null) {
+                PathRow("Waveforms ready", "${st.second} of ${st.first}")
+                PathRow("Lyrics found", "${st.third} of ${st.first}")
+            }
+            Text(
+                "Every song's waveform is worked out once, so the EQ wave is drawn from it in perfect sync instead of " +
+                    "being analysed live. This runs by itself while the phone is charging; lyrics are looked up whenever " +
+                    "you're online. The song you're playing is always done on the spot." +
+                    if (running) " Preparing now…" else "",
+                color = pal.textDim, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp, bottom = 10.dp),
+            )
+            Pill("Prepare now", false, { com.ltots.app.prep.LibraryPrep.runNow(context) })
+        }
     }
 }
 

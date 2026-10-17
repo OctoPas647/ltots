@@ -44,9 +44,19 @@ object ThemeState {
         if (saved == null) Store.saveTheme(_config.value)
     }
 
-    /** Switch to a preset look without touching the system-bar choices. */
-    fun applyPreset(t: ThemeConfig) = update { cur ->
-        t.copy(hideNavBar = cur.hideNavBar, hideStatusBar = cur.hideStatusBar, dynamicColors = cur.dynamicColors)
+    /**
+     * Switch to a preset look without touching the system-bar choices. Cover colours stay as
+     * they were, except for the two AMOLED themes, which are defined by them (off / on).
+     */
+    fun applyPreset(p: ThemePreset) = update { cur ->
+        p.config.copy(hideNavBar = cur.hideNavBar, hideStatusBar = cur.hideStatusBar, dynamicColors = p.dynamic ?: cur.dynamicColors)
+    }
+
+    /** Whether [cfg] is currently showing preset [p]. */
+    fun isActive(p: ThemePreset, cfg: ThemeConfig): Boolean {
+        val t = p.config
+        if (cfg.copy(hideNavBar = t.hideNavBar, hideStatusBar = t.hideStatusBar, dynamicColors = t.dynamicColors) != t) return false
+        return p.dynamic == null || p.dynamic == cfg.dynamicColors
     }
 
     fun update(transform: (ThemeConfig) -> ThemeConfig) {
@@ -55,19 +65,25 @@ object ThemeState {
         Store.saveTheme(t)
     }
 
-    fun reset() = applyPreset(amoled)
-
-    val presets: List<Pair<String, ThemeConfig>> = listOf(
-        "AMOLED" to amoled,
-        "Aurora" to ThemeConfig(),
-        "Sunset" to ThemeConfig(accent = 0xFFFF8A5C, gradientA = 0xFF4A1230, gradientB = 0xFF6B2A10, gradientC = 0xFF2B0F4D),
-        "Ocean" to ThemeConfig(accent = 0xFF3FD5FF, gradientA = 0xFF04263F, gradientB = 0xFF06435A, gradientC = 0xFF0C1C4A),
-        "Forest" to ThemeConfig(accent = 0xFF6CFFB0, gradientA = 0xFF07301F, gradientB = 0xFF12403A, gradientC = 0xFF1D2A10),
-        "Neon" to ThemeConfig(accent = 0xFFFF3DCB, gradientA = 0xFF1A0640, gradientB = 0xFF00334D, gradientC = 0xFF3D0033, refraction = 0.85f, chromaticAberration = true),
-        "Mono" to ThemeConfig(accent = 0xFFE6E6E6, gradientA = 0xFF1A1A1A, gradientB = 0xFF2A2A2A, gradientC = 0xFF101010, glassTint = 0.1f),
-        "Daylight" to ThemeConfig(accent = 0xFF5B3DF5, gradientA = 0xFFE4DCFF, gradientB = 0xFFCFEFFF, gradientC = 0xFFFFDDEE, darkMode = false, glassTint = 0.35f),
+    val presets: List<ThemePreset> = listOf(
+        ThemePreset("AMOLED", amoled, dynamic = false),
+        // Same pure black, but buttons, sliders and everything you can touch take their colour
+        // from the current song's cover (cyan while nothing is playing).
+        ThemePreset("AMOLED Cover", amoled, dynamic = true),
+        ThemePreset("Aurora", ThemeConfig()),
+        ThemePreset("Sunset", ThemeConfig(accent = 0xFFFF8A5C, gradientA = 0xFF4A1230, gradientB = 0xFF6B2A10, gradientC = 0xFF2B0F4D)),
+        ThemePreset("Ocean", ThemeConfig(accent = 0xFF3FD5FF, gradientA = 0xFF04263F, gradientB = 0xFF06435A, gradientC = 0xFF0C1C4A)),
+        ThemePreset("Forest", ThemeConfig(accent = 0xFF6CFFB0, gradientA = 0xFF07301F, gradientB = 0xFF12403A, gradientC = 0xFF1D2A10)),
+        ThemePreset("Neon", ThemeConfig(accent = 0xFFFF3DCB, gradientA = 0xFF1A0640, gradientB = 0xFF00334D, gradientC = 0xFF3D0033, refraction = 0.85f, chromaticAberration = true)),
+        ThemePreset("Mono", ThemeConfig(accent = 0xFFE6E6E6, gradientA = 0xFF1A1A1A, gradientB = 0xFF2A2A2A, gradientC = 0xFF101010, glassTint = 0.1f)),
+        ThemePreset("Daylight", ThemeConfig(accent = 0xFF5B3DF5, gradientA = 0xFFE4DCFF, gradientB = 0xFFCFEFFF, gradientC = 0xFFFFDDEE, darkMode = false, glassTint = 0.35f)),
     )
+
+    fun reset() = applyPreset(presets.first())
 }
+
+/** A ready-made look. [dynamic] = cover colours on/off for this theme; null leaves them as they are. */
+data class ThemePreset(val name: String, val config: ThemeConfig, val dynamic: Boolean? = null)
 
 /** Colors derived from the user's theme, used everywhere in the UI. */
 data class Palette(

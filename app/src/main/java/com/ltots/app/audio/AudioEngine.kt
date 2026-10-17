@@ -80,6 +80,10 @@ object AudioEngine : SoundSource {
     private val _songKey = MutableStateFlow<String?>(null)
     val songKey: StateFlow<String?> = _songKey
 
+    /** File of the song that's playing (for its pre-made waveform and lyrics). */
+    private val _songUri = MutableStateFlow<android.net.Uri?>(null)
+    val songUri: StateFlow<android.net.Uri?> = _songUri
+
     private val _songProfile = MutableStateFlow<SongProfile?>(null)
     val songProfile: StateFlow<SongProfile?> = _songProfile
 
@@ -188,9 +192,19 @@ object AudioEngine : SoundSource {
         _direct.value = false
     }
 
+    private fun uriOf(item: MediaItem?): android.net.Uri? = item?.localConfiguration?.uri ?: item?.requestMetadata?.mediaUri
+
+    /** The playing song's file and the next one in the queue. */
+    fun upcomingUris(): List<android.net.Uri> {
+        val p = _player.value ?: return listOfNotNull(_songUri.value)
+        val next = p.nextMediaItemIndex.takeIf { it != C.INDEX_UNSET }?.let { uriOf(p.getMediaItemAt(it)) }
+        return listOfNotNull(uriOf(p.currentMediaItem), next)
+    }
+
     private fun onSongChanged(item: MediaItem?) {
         val key = item?.mediaId?.takeIf { it.isNotBlank() }
         _songKey.value = key
+        _songUri.value = uriOf(item)
         val prof = key?.let { Store.loadProfile(it) }
         _songProfile.value = prof
         if (settings.value.perSongPitchSpeed) {
