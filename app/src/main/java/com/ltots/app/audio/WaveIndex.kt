@@ -235,7 +235,7 @@ object WaveIndex {
                         }
                     }
                 }
-                val o = codec.dequeueOutputBuffer(10_000)
+                val o = codec.dequeueOutputBuffer(info, 10_000)
                 when {
                     o == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                         val of = codec.outputFormat
