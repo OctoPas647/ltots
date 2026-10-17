@@ -20,11 +20,12 @@ import java.util.Collections
 
 /**
  * One song, start to finish:
- *  1. look up the official metadata (album, track number, year) and the full-size cover,
+ *  1. look for a legal free lossless FLAC on the Internet Archive that clearly matches;
+ *  2. otherwise, look up the official metadata (album, track number, year) and the full-size cover,
  *     and swap a music video for its official-audio release when there is one;
- *  2. let yt-dlp fetch YouTube's best audio stream and keep it exactly as sent (no re-encode);
- *  3. let yt-dlp write the tags and embed the cover;
- *  4. save it to Music/LToTS/Artist/Album/ through MediaStore so every app can see it.
+ *  3. let yt-dlp fetch YouTube's best audio stream and keep it exactly as sent (no re-encode);
+ *  4. let yt-dlp write the tags and embed the cover;
+ *  5. save it to Music/LToTS/Artist/Album/ through MediaStore so every app can see it.
  */
 class Downloader(private val context: Context) {
 
@@ -85,12 +86,25 @@ class Downloader(private val context: Context) {
     // ---- 2–4. download, tag, save ----------------------------------------------------------
 
     /**
-     * Downloads one song. YouTube Music's address is tried first; if YouTube refuses it there,
-     * the same video is fetched through the regular YouTube address (a different set of
-     * YouTube clients), which often gets past temporary blocks.
+     * Downloads one song. A matching free lossless FLAC on the Internet Archive is tried first;
+     * otherwise YouTube Music's address is tried, and if YouTube refuses it there, the same video
+     * is fetched through the regular YouTube address (a different set of YouTube clients), which
+     * often gets past temporary blocks.
      * [processId] names the yt-dlp process so the download can be cancelled.
      */
     fun download(processId: String, meta: TrackMeta, onProgress: (Float, String?) -> Unit): Result {
+        // Free lossless first: only a close title/artist/length match is accepted.
+        runCatching { FreeLossless().find(meta) }.getOrNull()?.let { hit ->
+            try {
+                return downloadLossless(hit, "$processId-lossless", meta, onProgress)
+            } catch (e: YoutubeDL.CanceledException) {
+                throw e
+            } catch (e: InterruptedException) {
+                throw e
+            } catch (e: Throwable) {
+                // No luck with the free lossless copy — use YouTube instead.
+            }
+        }
         val urls = listOf(
             "https://music.youtube.com/watch?v=${meta.videoId}",
             "https://www.youtube.com/watch?v=${meta.videoId}",
@@ -113,6 +127,26 @@ class Downloader(private val context: Context) {
         }
         val msg = last?.message ?: "Download failed"
         throw Failure(msg, log.toString().takeLast(12_000), last)
+    }
+
+    /** Saves a free lossless FLAC found on the Internet Archive. */
+    private fun downloadLossless(hit: FreeLossless.Hit, pid: String, meta: TrackMeta, onProgress: (Float, String?) -> Unit): Result {
+        val work = File(context.cacheDir, "dl/$pid").apply { deleteRecursively(); mkdirs() }
+        try {
+            onProgress(0.1f, "downloading free lossless")
+            val bytes = java.net.URL(hit.fileUrl).openStream().use { it.readBytes() }
+            val file = File(work, "audio.${hit.extension}")
+            file.writeBytes(bytes)
+            val m = meta.copy(
+                title = hit.title.ifBlank { meta.title },
+                artist = hit.creator.ifBlank { meta.artist },
+            )
+            onProgress(0.9f, "saving")
+            val uri = saveToMusic(file, m)
+            return Result(uri, m, "FLAC · Internet Archive · free lossless")
+        } finally {
+            work.deleteRecursively()
+        }
     }
 
     private class StepFailure(message: String) : Exception(message)
