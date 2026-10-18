@@ -250,6 +250,11 @@ fun DownloadsScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
         }
 
         Spacer(Modifier.height(10.dp))
+        if (loaded == null) {
+            Intro()
+            Spacer(Modifier.height(10.dp))
+        }
+
         GlassPanel(Modifier.fillMaxWidth().weight(1f), tintBoost = 0.06f) {
             when (val l = loaded) {
                 null -> HomeContent(player, onOpenPlayer, onToast = { toast = it })
@@ -468,8 +473,6 @@ private fun HomeContent(player: PlayerUi, onOpenPlayer: () -> Unit, onToast: (St
     val history = tasks.filter { it.state.finished }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 12.dp)) {
-        if (tasks.isEmpty() && synced.isEmpty()) item("intro") { Intro() }
-
         if (active.isNotEmpty()) {
             item("qh") {
                 Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
