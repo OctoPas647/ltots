@@ -133,10 +133,11 @@ fun EqGraph(
                             if (pastSlop) {
                                 val g = GraphGeometry(size.width.toFloat(), size.height.toFloat(), padPx)
                                 val cur = curEq.bands.firstOrNull { it.id == b.id } ?: break
-                                val p = start + moved
-                                val f = com.ltots.app.audio.EqDefaults.roundFreq(g.f(p.x))
-                                val gain = if (cur.type.usesGain) (Math.round(g.db(p.y) * 10f) / 10f) else cur.gainDb
-                                curMove(cur.id, f, gain)
+                                // Up/down only: the frequency is changed with the slider under the graph.
+                                if (cur.type.usesGain) {
+                                    val p = start + moved
+                                    curMove(cur.id, cur.freqHz, Math.round(g.db(p.y) * 10f) / 10f)
+                                }
                             }
                         }
                     } finally {

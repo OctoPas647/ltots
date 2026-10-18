@@ -168,7 +168,7 @@ fun EqScreen(player: PlayerUi) {
             )
         }
         Text(
-            "Drag a knob to move it · tap a knob to select it · double-tap empty space to add a band",
+            "Drag a knob up or down for gain · tap it to set its frequency below · double-tap empty space to add a band",
             color = pal.textFaint, style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.fillMaxWidth().padding(top = 6.dp), textAlign = TextAlign.Center,
         )

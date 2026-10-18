@@ -1,7 +1,5 @@
 package com.ltots.app.ui.theme
 
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
@@ -109,16 +107,14 @@ fun Color.toArgbLong(): Long = (toArgb().toLong() and 0xFFFFFFFFL)
 fun LToTSTheme(content: @Composable () -> Unit) {
     val saved by ThemeState.config.collectAsState()
     val cover by DynamicColor.colors.collectAsState()
-    // With dynamic colours on, the accent (and the background glow) follow the song's cover,
-    // fading smoothly from one song to the next.
+    // With dynamic colours on, the accent (and the background glow) follow the song's cover.
+    // They switch at once, in step with the cover: no fade, which lagged behind the song and
+    // re-drew the whole app on every frame of the fade.
     val dyn = saved.dynamicColors && cover != null
-    val spec = tween<Color>(900)
-    val accentAnim by animateColorAsState(
-        if (dyn) Color(if (saved.darkMode) cover!!.accentDark else cover!!.accentLight) else saved.accent.toColor(), spec, label = "accent",
-    )
-    val gA by animateColorAsState(if (dyn) Color(cover!!.glowTop) else saved.gradientA.toColor(), spec, label = "gA")
-    val gB by animateColorAsState(if (dyn) Color(cover!!.glowMid) else saved.gradientB.toColor(), spec, label = "gB")
-    val gC by animateColorAsState(if (dyn) Color(cover!!.glowBottom) else saved.gradientC.toColor(), spec, label = "gC")
+    val accentAnim = if (dyn) Color(if (saved.darkMode) cover!!.accentDark else cover!!.accentLight) else saved.accent.toColor()
+    val gA = if (dyn) Color(cover!!.glowTop) else saved.gradientA.toColor()
+    val gB = if (dyn) Color(cover!!.glowMid) else saved.gradientB.toColor()
+    val gC = if (dyn) Color(cover!!.glowBottom) else saved.gradientC.toColor()
     val cfg = if (!saved.dynamicColors) saved else saved.copy(
         accent = accentAnim.toArgbLong(),
         gradientA = if (saved.pureBlack) saved.gradientA else gA.toArgbLong(),
