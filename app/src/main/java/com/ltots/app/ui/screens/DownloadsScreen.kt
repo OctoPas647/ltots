@@ -84,7 +84,7 @@ import com.ltots.app.download.DownloadTask
 import com.ltots.app.download.Engine
 import com.ltots.app.download.SyncedPlaylist
 import com.ltots.app.download.TaskState
-import com.ltots.app.ui.BottomChrome
+import com.ltots.app.ui.bottomChrome
 import com.ltots.app.ui.Inbox
 import com.ltots.app.ui.PlayerUi
 import com.ltots.app.ui.components.NetImage
@@ -267,7 +267,7 @@ fun DownloadsScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
                 is Loaded.Art -> ArtistContent(l.a, onOpen = ::open)
             }
         }
-        Spacer(Modifier.height(BottomChrome.calculateBottomPadding()))
+        Spacer(Modifier.height(bottomChrome()))
     }
 }
 

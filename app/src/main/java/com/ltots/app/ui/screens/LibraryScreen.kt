@@ -69,7 +69,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.ltots.app.data.LocalLibrary
 import com.ltots.app.data.Track
-import com.ltots.app.ui.BottomChrome
+import com.ltots.app.ui.bottomChrome
 import com.ltots.app.ui.PlayerUi
 import com.ltots.app.ui.components.Logo
 import com.ltots.app.ui.components.Pill
@@ -197,7 +197,7 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
                 ) { openGroup = it }
             }
         }
-        Spacer(Modifier.height(BottomChrome.calculateBottomPadding()))
+        Spacer(Modifier.height(bottomChrome()))
     }
 }
 

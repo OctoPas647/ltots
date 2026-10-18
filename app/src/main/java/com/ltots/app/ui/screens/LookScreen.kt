@@ -37,7 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.ltots.app.data.SpectrumStyle
 import com.ltots.app.data.ThemeConfig
-import com.ltots.app.ui.BottomChrome
+import com.ltots.app.ui.bottomChrome
 import com.ltots.app.ui.components.LabeledSlider
 import com.ltots.app.ui.components.Pill
 import com.ltots.app.ui.components.SectionTitle
@@ -191,7 +191,7 @@ fun LookScreen() {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
             Pill("Reset look to default (AMOLED)", false, { ThemeState.reset() })
         }
-        Spacer(Modifier.height(BottomChrome.calculateBottomPadding() - 80.dp))
+        Spacer(Modifier.height(bottomChrome()))
     }
 }
 

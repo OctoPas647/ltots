@@ -62,7 +62,7 @@ import androidx.compose.ui.unit.dp
 import androidx.media3.common.Player
 import com.ltots.app.audio.AudioEngine
 import com.ltots.app.audio.OutputDevice
-import com.ltots.app.ui.BottomChrome
+import com.ltots.app.ui.bottomChrome
 import com.ltots.app.ui.PlayerUi
 import com.ltots.app.ui.components.LiveSpectrum
 import com.ltots.app.ui.components.Pill
@@ -201,7 +201,7 @@ fun NowPlayingScreen(player: PlayerUi, artwork: Bitmap?, onOpenEq: () -> Unit, o
         PitchSpeedCard()
         Spacer(Modifier.height(12.dp))
         EqShortcut(onOpenEq)
-        Spacer(Modifier.height(BottomChrome.calculateBottomPadding() - 70.dp))
+        Spacer(Modifier.height(bottomChrome()))
     }
 }
 

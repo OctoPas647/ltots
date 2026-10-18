@@ -66,7 +66,7 @@ import com.ltots.app.audio.EqState
 import com.ltots.app.audio.FilterType
 import com.ltots.app.data.EqPreset
 import com.ltots.app.data.Store
-import com.ltots.app.ui.BottomChrome
+import com.ltots.app.ui.bottomChrome
 import com.ltots.app.ui.PlayerUi
 import com.ltots.app.ui.components.LabeledSlider
 import com.ltots.app.ui.components.LiveSpectrum
@@ -234,7 +234,7 @@ fun EqScreen(player: PlayerUi) {
             }
         }
 
-        Spacer(Modifier.height(BottomChrome.calculateBottomPadding() - 80.dp))
+        Spacer(Modifier.height(bottomChrome()))
     }
 }
 

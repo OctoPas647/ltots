@@ -29,7 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.ltots.app.audio.AudioEngine
 import com.ltots.app.audio.OutputDevice
-import com.ltots.app.ui.BottomChrome
+import com.ltots.app.ui.bottomChrome
 import com.ltots.app.ui.components.Pill
 import com.ltots.app.ui.components.SectionTitle
 import com.ltots.app.ui.components.SwitchRow
@@ -159,7 +159,7 @@ fun SoundScreen() {
             "LToTS ${appVersion(context)} · phase 1 (local music). YouTube Music sync, downloads and lyrics search are coming in the next phases.",
             color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 4.dp),
         )
-        Spacer(Modifier.height(BottomChrome.calculateBottomPadding() - 80.dp))
+        Spacer(Modifier.height(bottomChrome()))
     }
 }
 

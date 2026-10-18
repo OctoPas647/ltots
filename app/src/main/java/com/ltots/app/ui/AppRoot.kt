@@ -63,6 +63,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.ui.unit.Dp
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.ltots.app.playback.PlayerConnection
@@ -86,8 +90,15 @@ enum class Tab(val label: String, val icon: ImageVector) {
     SOUND("Sound", Icons.Rounded.Headphones),
 }
 
-/** Space the floating nav (and mini player) take at the bottom; screens pad their content by this. */
-val BottomChrome = PaddingValues(bottom = 168.dp)
+/**
+ * Space the floating nav, the mini player (when shown) and the system navigation bar take at the
+ * bottom, plus a little extra room; screens end their scrolling content with this much space.
+ */
+val LocalBottomChrome = compositionLocalOf { 200.dp }
+
+/** Bottom space a screen should leave so its last item can scroll clear of the bars. */
+@Composable
+fun bottomChrome(): Dp = LocalBottomChrome.current
 
 @Composable
 fun AppRoot() {
@@ -113,7 +124,12 @@ fun AppRoot() {
         // Everything glass refracts this layer.
         AppBackground(artwork, Modifier.fillMaxSize().layerBackdrop(backdrop))
 
-        CompositionLocalProvider(LocalBackdrop provides backdrop) {
+        // nav bar 68 + its padding 10+10, mini player 64 + gap 10, system bar, and 32 extra.
+        val miniShown = player.hasMedia && tab != Tab.PLAYER
+        val sysBar = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+        val chrome = sysBar + 88.dp + (if (miniShown) 74.dp else 0.dp) + 32.dp
+
+        CompositionLocalProvider(LocalBackdrop provides backdrop, LocalBottomChrome provides chrome) {
             Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars.union(WindowInsets.displayCutout.only(WindowInsetsSides.Top)))) {
                 Crossfade(tab, label = "tab") { t ->
                     when (t) {
