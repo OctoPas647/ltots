@@ -121,7 +121,6 @@ android {
             test.jvmArgs(
                 "--add-exports=java.base/jdk.internal.access=ALL-UNNAMED",
                 "--add-opens=java.base/java.io=ALL-UNNAMED",
-                "--add-opens=java.base/java.io.IOException=ALL-UNNAMED",
             )
         }
     }

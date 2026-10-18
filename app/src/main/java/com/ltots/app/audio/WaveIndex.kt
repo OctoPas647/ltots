@@ -92,6 +92,8 @@ class WaveBuilder(private val sampleRate: Int, private val colRate: Int = WaveIn
 
 object WaveIndex {
     const val COL_RATE = 100
+    /** Give up decoding past ~3 hours of 48 kHz stereo float audio. */
+    private const val MAX_DECODED_BYTES = 4_200_000_000L
     private const val MAGIC = 0x4C545756
     private const val VERSION = 1
 
@@ -219,6 +221,7 @@ object WaveIndex {
             var inputDone = false
             var outputDone = false
             var idle = 0
+            var decoded = 0L
             while (!outputDone) {
                 if (!AppVisibility.foreground.value) return null
                 if (!inputDone) {
@@ -268,6 +271,9 @@ object WaveIndex {
                             }
                         }
                         codec.releaseOutputBuffer(o, false)
+                        // Safety: a broken file that never ends would grow the waveform forever.
+                        decoded += info.size
+                        if (decoded > MAX_DECODED_BYTES) return null
                         if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) outputDone = true
                     }
                     else -> if (inputDone && ++idle > 300) outputDone = true
