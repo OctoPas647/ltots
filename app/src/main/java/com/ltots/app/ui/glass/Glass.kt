@@ -26,6 +26,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.preferredFrameRate
 import androidx.compose.ui.layout.ContentScale
@@ -85,7 +88,7 @@ fun Modifier.glass(
             effects = {},
             highlight = { if (cfg.rimLight > 0.01f) Highlight.Default.copy(alpha = cfg.rimLight) else null },
             shadow = { Shadow(radius = 20.dp, color = Color.Black.copy(alpha = if (pal.dark) 0.22f else 0.08f)) },
-            onDrawSurface = { drawRect(Color.Black); drawRect(surface) },
+            onDrawSurface = { drawRect(Color.Black); drawRect(surface); if (cfg.chromaticAberration) prismRim(shape, strength) },
         )
     }
     return this.drawBackdrop(
@@ -94,7 +97,8 @@ fun Modifier.glass(
         effects = {
             vibrancy()
             blur((cfg.blurDp * strength).dp.toPx())
-            val r = cfg.refraction * strength
+            // Prism edges bend the edge harder, so the library's colour split is clearly visible.
+            val r = cfg.refraction * strength * (if (cfg.chromaticAberration) 1.8f else 1f)
             if (r > 0.01f) {
                 val minSide = size.minDimension
                 lens(
@@ -107,8 +111,32 @@ fun Modifier.glass(
         },
         highlight = { if (cfg.rimLight > 0.01f) Highlight.Default.copy(alpha = cfg.rimLight) else null },
         shadow = { Shadow(radius = 20.dp, color = Color.Black.copy(alpha = if (pal.dark) 0.22f else 0.08f)) },
-        onDrawSurface = { drawRect(surface) },
+        onDrawSurface = { drawRect(surface); if (cfg.chromaticAberration) prismRim(shape, strength) },
     )
+}
+
+private val prismColors = listOf(
+    Color(0xFFFF3B30), Color(0xFFFF9500), Color(0xFFFFEA00), Color(0xFF34C759),
+    Color(0xFF00E5FF), Color(0xFF3D5AFE), Color(0xFFD500F9), Color(0xFFFF3B30),
+)
+
+/**
+ * "Prism edges": a rainbow split along the glass edge — a red fringe pushed one way, a cyan
+ * fringe the other, and a spectrum sweeping round the rim. Drawn by us (not the backdrop), so it
+ * shows on every theme, including AMOLED where there is nothing behind the glass to split.
+ */
+private fun DrawScope.prismRim(shape: Shape, strength: Float) {
+    val outline = shape.createOutline(size, layoutDirection, this)
+    val k = strength.coerceIn(0.5f, 1f)
+    val w = 1.6.dp.toPx() * k
+    val o = 1.4.dp.toPx() * k
+    // Split fringes: red/orange to the top-left, cyan/blue to the bottom-right.
+    translate(-o, -o) { drawOutline(outline, Color(0xFFFF2D55).copy(alpha = 0.75f), style = Stroke(w * 2f)) }
+    translate(o, o) { drawOutline(outline, Color(0xFF00E5FF).copy(alpha = 0.75f), style = Stroke(w * 2f)) }
+    // Spectrum round the rim, plus a soft inner glow of the same colours.
+    val sweep = Brush.sweepGradient(prismColors, center)
+    drawOutline(outline, sweep, alpha = 0.9f, style = Stroke(w * 2f))
+    drawOutline(outline, sweep, alpha = 0.25f, style = Stroke(w * 7f))
 }
 
 /** A glass panel with content. */
@@ -135,7 +163,7 @@ fun GlassCircleButton(
     val pal = LocalPalette.current
     Box(
         modifier
-            .glass(CircleShape, strength = 0.7f, tint = if (highlighted) pal.accent else null, tintBoost = if (highlighted) 0.45f else 0f)
+            .glass(CircleShape, strength = 0.7f, tint = if (highlighted) pal.accent else null, tintBoost = if (highlighted) 1f else 0f)
             .clip(CircleShape)
             .clickable(remember { MutableInteractionSource() }, indication = androidx.compose.material3.ripple(), onClick = onClick),
         contentAlignment = Alignment.Center,

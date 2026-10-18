@@ -183,7 +183,7 @@ private fun MiniPlayer(player: PlayerUi, artwork: android.graphics.Bitmap?, onOp
                 Text(player.artist, color = pal.textDim, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             IconButton(onClick = { player.togglePlay() }) {
-                Icon(if (player.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, "Play/pause", tint = pal.text, modifier = Modifier.size(30.dp))
+                Icon(if (player.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, "Play/pause", tint = pal.accent, modifier = Modifier.size(30.dp))
             }
             IconButton(onClick = { player.controller?.seekToNext() }) {
                 Icon(Icons.Rounded.SkipNext, "Next", tint = pal.text)

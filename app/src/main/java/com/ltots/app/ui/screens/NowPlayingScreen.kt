@@ -163,10 +163,10 @@ fun NowPlayingScreen(player: PlayerUi, artwork: Bitmap?, onOpenEq: () -> Unit, o
             GlassCircleButton({ player.controller?.seekToPrevious() }, Modifier.size(56.dp)) {
                 Icon(Icons.Rounded.SkipPrevious, "Previous", tint = pal.text, modifier = Modifier.size(30.dp))
             }
-            // Play/pause: the button itself takes the live AMOLED Cover accent from the song.
+            // Play/pause: a solid button in the live accent, so with cover colours it takes the song's colour.
             Box(
                 Modifier.size(78.dp)
-                    .glass(CircleShape, strength = 0.7f, tint = pal.accent, tintBoost = 0.45f)
+                    .glass(CircleShape, strength = 0.7f, tint = pal.accent, tintBoost = 1f)
                     .clip(CircleShape)
                     .clickable(
                         remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
