@@ -106,7 +106,7 @@ class AppUiTest {
         rule.onNodeWithText("Equalizer").assertIsDisplayed()
         shot("03_eq")
         val before = AudioEngine.effectiveEq.value.bands.size
-        // Presets come first; bands live under "Fine-tune".
+        // The EQ graph comes first; bands live under "Fine-tune", presets below.
         rule.onNodeWithText("Genres").performSemanticsAction(SemanticsActions.OnClick)
         settle()
         rule.onNodeWithText("Rock").performSemanticsAction(SemanticsActions.OnClick)
@@ -118,8 +118,8 @@ class AppUiTest {
         rule.onNodeWithText("Flat").performSemanticsAction(SemanticsActions.OnClick)
         settle()
         assertTrue(EqMathCheck.neutral())
-        rule.onNodeWithText("Fine-tune").performSemanticsAction(SemanticsActions.OnClick)
-        settle()
+        // Fine-tune is always open now (a main part of the EQ tab).
+        rule.onNodeWithText("Fine-tune").assertExists()
         rule.onNodeWithContentDescription("More bands").performSemanticsAction(SemanticsActions.OnClick)
         idle(300)
         org.robolectric.shadows.ShadowLooper.idleMainLooper()
