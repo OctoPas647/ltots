@@ -117,10 +117,6 @@ fun EqScreen(player: PlayerUi) {
     }
     fun editBand(id: Long, t: (EqBand) -> EqBand) = edit { s -> s.copy(bands = s.bands.map { if (it.id == id) t(it) else it }) }
 
-    var advanced by rememberSaveable { mutableStateOf(false) }
-    // Tapping a dot on the graph opens the detailed controls for it.
-    LaunchedEffect(selectedId) { if (selectedId != null) advanced = true }
-
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp)) {
         // Header
         Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -146,30 +142,12 @@ fun EqScreen(player: PlayerUi) {
             )
         }
 
-        // 1. The easy part: pick a sound.
-        Spacer(Modifier.height(12.dp))
-        PresetsCard(eq, onApply = { p ->
-            // Fresh ids so the processor rebuilds cleanly; picking a preset also switches the EQ on.
-            edit { cur -> p.eq.copy(enabled = true, bands = p.eq.bands.map { it.copy(id = EqDefaults.newId()) }) }
-            selectedId = null
-        })
-
-        // 2. Then simple tone controls.
-        Spacer(Modifier.height(12.dp))
-        QuickToneCard(
-            eq,
-            onSet = { r, v -> edit { EqTone.set(it, r, v) } },
-            canUndo = history.isNotEmpty(),
-            onUndo = ::undo,
-            onFlat = { edit { EqTone.flatten(it) }; selectedId = null },
-        )
-
-        // 3. The curve itself, over the live spectrum + waveform. The moving parts sit on top of
-        // the glass rather than inside it: the glass (blur, refraction) is then drawn once and
-        // left alone, instead of being re-rendered with every frame of the spectrum.
+        // 1. The EQ itself, first: the curve over the live spectrum + waveform. The moving parts
+        // sit on top of the glass rather than inside it: the glass (blur, refraction) is then
+        // drawn once and left alone, instead of being re-rendered with every frame of the spectrum.
         Spacer(Modifier.height(12.dp))
         val panelShape = glassShape()
-        Box(Modifier.fillMaxWidth().height(320.dp)) {
+        Box(Modifier.fillMaxWidth().height(340.dp)) {
             GlassPanel(Modifier.matchParentSize(), shape = panelShape, tintBoost = 0.02f) {}
             Box(Modifier.matchParentSize().clip(panelShape)) {
                 LiveSpectrum(visual, Modifier.fillMaxSize().padding(bottom = 18.dp))
@@ -190,49 +168,57 @@ fun EqScreen(player: PlayerUi) {
             )
         }
         Text(
-            "Drag a dot to move it · tap to select · double-tap empty space to add a band",
+            "Drag a knob to move it · tap a knob to select it · double-tap empty space to add a band",
             color = pal.textFaint, style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.fillMaxWidth().padding(top = 6.dp), textAlign = TextAlign.Center,
         )
 
-        // 4. Everything for going deep, folded away until wanted.
+        // 2. The selected knob's controls, right under the graph: frequency, gain and width sliders.
         Spacer(Modifier.height(12.dp))
-        GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
-            Row(
-                Modifier.fillMaxWidth().clickable { advanced = !advanced }.padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("Fine-tune", color = pal.text, style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "Bands, filter types, exact frequency / gain / width, preamp and headroom",
-                        color = pal.textDim, style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                Icon(
-                    if (advanced) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                    if (advanced) "Hide fine-tune" else "Show fine-tune", tint = pal.text,
+        if (selected != null) {
+            BandEditor(
+                band = selected,
+                onChange = { nb -> editBand(selected.id) { nb } },
+                onDelete = { edit { s -> s.copy(bands = s.bands.filterNot { it.id == selected.id }) }; selectedId = null },
+            )
+        } else {
+            GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
+                Text(
+                    "Tap a knob on the graph (or a band below) to set its frequency, gain and width with sliders.",
+                    color = pal.textDim, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp),
                 )
             }
         }
-        AnimatedVisibility(advanced) {
-            Column {
-                Spacer(Modifier.height(12.dp))
-                BandStrip(eq, selectedId, onSelect = { selectedId = it }, onCountChange = { n -> edit { setBandCount(it, n) } }, onRespace = { edit { respace(it) } })
 
-                if (selected != null) {
-                    Spacer(Modifier.height(12.dp))
-                    BandEditor(
-                        band = selected,
-                        onChange = { nb -> editBand(selected.id) { nb } },
-                        onDelete = { edit { s -> s.copy(bands = s.bands.filterNot { it.id == selected.id }) }; selectedId = null },
-                    )
-                }
+        // 3. Fine-tune: always open, a main part of the page.
+        Spacer(Modifier.height(20.dp))
+        Text("Fine-tune", style = MaterialTheme.typography.titleLarge, color = pal.text)
+        Text(
+            "Bands, filter types, exact frequency / gain / width, preamp and headroom",
+            color = pal.textDim, style = MaterialTheme.typography.bodySmall,
+        )
+        Spacer(Modifier.height(10.dp))
+        BandStrip(eq, selectedId, onSelect = { selectedId = it }, onCountChange = { n -> edit { setBandCount(it, n) } }, onRespace = { edit { respace(it) } })
+        Spacer(Modifier.height(12.dp))
+        LevelCard(eq) { edit(it) }
 
-                Spacer(Modifier.height(12.dp))
-                LevelCard(eq) { edit(it) }
-            }
-        }
+        // 4. Quick ways to a sound: presets and simple tone controls.
+        Spacer(Modifier.height(20.dp))
+        Text("Presets & tone", style = MaterialTheme.typography.titleLarge, color = pal.text)
+        Spacer(Modifier.height(10.dp))
+        PresetsCard(eq, onApply = { p ->
+            // Fresh ids so the processor rebuilds cleanly; picking a preset also switches the EQ on.
+            edit { cur -> p.eq.copy(enabled = true, bands = p.eq.bands.map { it.copy(id = EqDefaults.newId()) }) }
+            selectedId = null
+        })
+        Spacer(Modifier.height(12.dp))
+        QuickToneCard(
+            eq,
+            onSet = { r, v -> edit { EqTone.set(it, r, v) } },
+            canUndo = history.isNotEmpty(),
+            onUndo = ::undo,
+            onFlat = { edit { EqTone.flatten(it) }; selectedId = null },
+        )
 
         Spacer(Modifier.height(bottomChrome()))
     }

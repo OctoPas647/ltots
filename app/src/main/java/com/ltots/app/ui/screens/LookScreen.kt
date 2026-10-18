@@ -122,6 +122,7 @@ fun LookScreen() {
                 LabeledSlider("Rim light", cfg.rimLight, { v -> set { it.copy(rimLight = v) } }, 0f..1f, pct(cfg.rimLight))
                 LabeledSlider("Corner roundness", cfg.cornerDp, { v -> set { it.copy(cornerDp = v) } }, 4f..44f, "%.0f dp".format(Locale.ROOT, cfg.cornerDp))
                 SwitchRow("Prism edges", cfg.chromaticAberration, { on -> set { it.copy(chromaticAberration = on) } }, sub = "Rainbow colour split along every glass edge, like light through a prism.")
+                LabeledSlider("Cover opacity", cfg.coverOpacity, { v -> set { it.copy(coverOpacity = v) } }, 0.1f..1f, pct(cfg.coverOpacity))
             }
         }
 

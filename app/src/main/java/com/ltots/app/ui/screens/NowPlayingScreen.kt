@@ -50,6 +50,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
@@ -116,10 +117,13 @@ fun NowPlayingScreen(player: PlayerUi, artwork: Bitmap?, onOpenEq: () -> Unit, o
         }
 
         // Artwork with the live spectrum glowing behind it
+        val coverAlpha = com.ltots.app.ui.theme.LocalThemeConfig.current.coverOpacity
         Box(Modifier.fillMaxWidth().aspectRatio(1f), contentAlignment = Alignment.Center) {
             LiveSpectrum(visual, Modifier.fillMaxSize().padding(top = 40.dp), showWave = false, intensity = 0.8f)
             Box(
                 Modifier.fillMaxWidth(0.82f).aspectRatio(1f)
+                    // Cover opacity (Look tab): lower lets the live spectrum behind show through.
+                    .graphicsLayer { alpha = coverAlpha }
                     .shadow(28.dp, RoundedCornerShape(28.dp), ambientColor = pal.accent, spotColor = pal.accent)
                     .clip(RoundedCornerShape(28.dp)).background(pal.text.copy(alpha = 0.08f)),
                 contentAlignment = Alignment.Center,

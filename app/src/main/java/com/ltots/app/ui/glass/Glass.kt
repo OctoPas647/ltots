@@ -28,6 +28,9 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.addOutline
 import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.preferredFrameRate
@@ -97,8 +100,7 @@ fun Modifier.glass(
         effects = {
             vibrancy()
             blur((cfg.blurDp * strength).dp.toPx())
-            // Prism edges bend the edge harder, so the library's colour split is clearly visible.
-            val r = cfg.refraction * strength * (if (cfg.chromaticAberration) 1.8f else 1f)
+            val r = cfg.refraction * strength
             if (r > 0.01f) {
                 val minSide = size.minDimension
                 lens(
@@ -130,13 +132,16 @@ private fun DrawScope.prismRim(shape: Shape, strength: Float) {
     val k = strength.coerceIn(0.5f, 1f)
     val w = 1.6.dp.toPx() * k
     val o = 1.4.dp.toPx() * k
-    // Split fringes: red/orange to the top-left, cyan/blue to the bottom-right.
-    translate(-o, -o) { drawOutline(outline, Color(0xFFFF2D55).copy(alpha = 0.75f), style = Stroke(w * 2f)) }
-    translate(o, o) { drawOutline(outline, Color(0xFF00E5FF).copy(alpha = 0.75f), style = Stroke(w * 2f)) }
-    // Spectrum round the rim, plus a soft inner glow of the same colours.
-    val sweep = Brush.sweepGradient(prismColors, center)
-    drawOutline(outline, sweep, alpha = 0.9f, style = Stroke(w * 2f))
-    drawOutline(outline, sweep, alpha = 0.25f, style = Stroke(w * 7f))
+    // Everything stays inside the glass's own rounded shape, so the corners are never touched.
+    clipPath(Path().apply { addOutline(outline) }) {
+        // Split fringes: red to the top-left, cyan to the bottom-right (inside the edge only).
+        translate(o, o) { drawOutline(outline, Color(0xFFFF2D55).copy(alpha = 0.75f), style = Stroke(w * 2f)) }
+        translate(-o, -o) { drawOutline(outline, Color(0xFF00E5FF).copy(alpha = 0.75f), style = Stroke(w * 2f)) }
+        // Spectrum round the rim, plus a soft inner glow of the same colours.
+        val sweep = Brush.sweepGradient(prismColors, center)
+        drawOutline(outline, sweep, alpha = 0.9f, style = Stroke(w * 2f))
+        drawOutline(outline, sweep, alpha = 0.25f, style = Stroke(w * 7f))
+    }
 }
 
 /** A glass panel with content. */

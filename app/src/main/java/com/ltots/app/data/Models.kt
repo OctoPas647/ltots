@@ -44,6 +44,8 @@ data class ThemeConfig(
     /** Edge refraction strength of the glass, 0..1. */
     val refraction: Float = 0.55f,
     val chromaticAberration: Boolean = false,
+    /** How solid the song's cover is on the Playing tab, 0.1..1 (lower shows the spectrum behind it). */
+    val coverOpacity: Float = 1f,
     /** Tint over the glass, 0..1 (how frosted it looks). */
     val glassTint: Float = 0.14f,
     /** Brightness of the specular rim light, 0..1. */
@@ -144,7 +146,7 @@ object Json {
         put("accent", t.accent); put("gA", t.gradientA); put("gB", t.gradientB); put("gC", t.gradientC)
         put("anim", t.animateBackground); put("animSpeed", t.animationSpeed.toDouble())
         put("art", t.artworkBackground); put("blur", t.blurDp.toDouble())
-        put("refr", t.refraction.toDouble()); put("chroma", t.chromaticAberration)
+        put("refr", t.refraction.toDouble()); put("chroma", t.chromaticAberration); put("coverAlpha", t.coverOpacity.toDouble())
         put("tint", t.glassTint.toDouble()); put("rim", t.rimLight.toDouble())
         put("corner", t.cornerDp.toDouble()); put("dark", t.darkMode)
         put("specStyle", t.spectrumStyle.name); put("specOpacity", t.spectrumOpacity.toDouble())
@@ -166,6 +168,7 @@ object Json {
             blurDp = o.optDouble("blur", d.blurDp.toDouble()).toFloat(),
             refraction = o.optDouble("refr", d.refraction.toDouble()).toFloat(),
             chromaticAberration = o.optBoolean("chroma", d.chromaticAberration),
+            coverOpacity = o.optDouble("coverAlpha", d.coverOpacity.toDouble()).toFloat().coerceIn(0.1f, 1f),
             glassTint = o.optDouble("tint", d.glassTint.toDouble()).toFloat(),
             rimLight = o.optDouble("rim", d.rimLight.toDouble()).toFloat(),
             cornerDp = o.optDouble("corner", d.cornerDp.toDouble()).toFloat(),

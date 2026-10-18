@@ -1,7 +1,8 @@
 package com.ltots.app.ui.screens
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -18,6 +19,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
@@ -84,7 +86,7 @@ fun EqGraph(
     }
 
     val padPx = with(androidx.compose.ui.platform.LocalDensity.current) { 16.dp.toPx() }
-    val hitPx = with(androidx.compose.ui.platform.LocalDensity.current) { 34.dp.toPx() }
+    val hitPx = with(androidx.compose.ui.platform.LocalDensity.current) { 28.dp.toPx() }
 
     fun handlePos(g: GraphGeometry, b: EqBand): Offset =
         Offset(g.x(b.freqHz), if (b.type.usesGain) g.y(b.gainDb) else g.y(0f))
@@ -96,39 +98,51 @@ fun EqGraph(
 
     Canvas(
         modifier
+            // Double-tap on empty space adds a band. (Single taps on empty space do nothing.)
             .pointerInput(Unit) {
                 detectTapGestures(
-                    onTap = { p ->
-                        val g = GraphGeometry(size.width.toFloat(), size.height.toFloat(), padPx)
-                        curSelect(nearest(g, p)?.id)
-                    },
                     onDoubleTap = { p ->
                         val g = GraphGeometry(size.width.toFloat(), size.height.toFloat(), padPx)
                         if (nearest(g, p) == null) curAdd(g.f(p.x), g.db(p.y))
                     },
                 )
             }
+            // Knobs: only a touch that starts ON a knob grabs it. A touch on empty space is left
+            // alone, so it scrolls the page like any background. The knob moves with the finger
+            // (relative to where it was), and only once the finger has really moved, so a tap
+            // just selects it without nudging it.
             .pointerInput(Unit) {
-                detectDragGestures(
-                    onDragStart = { p ->
-                        val g = GraphGeometry(size.width.toFloat(), size.height.toFloat(), padPx)
-                        val b = nearest(g, p)
-                        dragging = b?.id ?: -1L
-                        if (b != null) curSelect(b.id)
-                    },
-                    onDragEnd = { dragging = -1L },
-                    onDragCancel = { dragging = -1L },
-                    onDrag = { change, _ ->
-                        if (dragging >= 0) {
-                            change.consume()
-                            val g = GraphGeometry(size.width.toFloat(), size.height.toFloat(), padPx)
-                            val b = curEq.bands.firstOrNull { it.id == dragging } ?: return@detectDragGestures
-                            val f = com.ltots.app.audio.EqDefaults.roundFreq(g.f(change.position.x))
-                            val gain = if (b.type.usesGain) (Math.round(g.db(change.position.y) * 10f) / 10f) else b.gainDb
-                            curMove(b.id, f, gain)
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val g0 = GraphGeometry(size.width.toFloat(), size.height.toFloat(), padPx)
+                    val b = nearest(g0, down.position) ?: return@awaitEachGesture
+                    down.consume()
+                    curSelect(b.id)
+                    dragging = b.id
+                    val start = handlePos(g0, b)
+                    var moved = Offset.Zero
+                    var pastSlop = false
+                    try {
+                        while (true) {
+                            val ev = awaitPointerEvent()
+                            val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!c.pressed) { c.consume(); break }
+                            moved += c.positionChange()
+                            c.consume()
+                            if (!pastSlop && moved.getDistance() > viewConfiguration.touchSlop) pastSlop = true
+                            if (pastSlop) {
+                                val g = GraphGeometry(size.width.toFloat(), size.height.toFloat(), padPx)
+                                val cur = curEq.bands.firstOrNull { it.id == b.id } ?: break
+                                val p = start + moved
+                                val f = com.ltots.app.audio.EqDefaults.roundFreq(g.f(p.x))
+                                val gain = if (cur.type.usesGain) (Math.round(g.db(p.y) * 10f) / 10f) else cur.gainDb
+                                curMove(cur.id, f, gain)
+                            }
                         }
-                    },
-                )
+                    } finally {
+                        dragging = -1L
+                    }
+                }
             }
     ) {
         val g = GraphGeometry(size.width, size.height, padPx)
