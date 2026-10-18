@@ -1,0 +1,52 @@
+LToTS — Get tab UI change
+
+Goal:
+On the Get tab, the intro text ("Download from YouTube Music" and its bullet points) should be displayed directly on the page background, not inside the large rounded GlassPanel.
+
+File to edit:
+app/src/main/java/com/ltots/app/ui/screens/DownloadsScreen.kt
+
+Changes:
+
+1. In the DownloadsScreen composable, immediately before the main content GlassPanel, add:
+
+if (loaded == null) {
+    Intro()
+    Spacer(Modifier.height(10.dp))
+}
+
+The existing code currently looks like:
+
+GlassPanel(Modifier.fillMaxWidth().weight(1f), tintBoost = 0.06f) {
+    when (val l = loaded) {
+        null -> HomeContent(player, onOpenPlayer, onToast = { toast = it })
+        ...
+    }
+}
+
+It should become:
+
+if (loaded == null) {
+    Intro()
+    Spacer(Modifier.height(10.dp))
+}
+
+GlassPanel(Modifier.fillMaxWidth().weight(1f), tintBoost = 0.06f) {
+    when (val l = loaded) {
+        null -> HomeContent(player, onOpenPlayer, onToast = { toast = it })
+        ...
+    }
+}
+
+2. In the HomeContent composable, remove this line so the intro is no longer rendered inside the glass panel:
+
+if (tasks.isEmpty() && synced.isEmpty()) item("intro") { Intro() }
+
+3. Keep the search/paste field, search results, album pages, playlist pages, artist pages, loading state, and error state inside the existing GlassPanel.
+
+4. Do not change any download, YouTube Music, playback, or engine logic.
+
+Expected result:
+- When the Get tab first opens, "Download from YouTube Music" and the bullet-point instructions appear directly on the page.
+- The large rounded glass panel should no longer contain the intro text.
+- Everything else in the Get tab should continue working exactly as before.
