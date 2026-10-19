@@ -70,6 +70,8 @@ fun glassShape(cornerDp: Dp? = null): RoundedCornerShape {
  *
  * @param strength scales blur/refraction (use < 1 for small controls).
  * @param tintBoost extra tint for panels that need more contrast behind text.
+ * @param refract false: no bending at the edges (for shapes that aren't rounded rectangles, such
+ *   as an icon's outline, where the lens would look wrong).
  */
 @Composable
 fun Modifier.glass(
@@ -77,6 +79,7 @@ fun Modifier.glass(
     strength: Float = 1f,
     tintBoost: Float = 0f,
     tint: Color? = null,
+    refract: Boolean = true,
 ): Modifier {
     val backdrop = LocalBackdrop.current
     val overContent = LocalGlassOverContent.current
@@ -109,7 +112,7 @@ fun Modifier.glass(
             // the black is painted directly; it looks exactly the same (rim light and shadow stay).
             plainBlack = cfg.pureBlack && !bendsPage,
             blurDp = if (withBlur) cfg.blurDp * strength else 0f,
-            refraction = cfg.refraction * strength,
+            refraction = if (refract) cfg.refraction * strength else 0f,
             rimLight = cfg.rimLight,
             shadowAlpha = if (pal.dark) 0.22f else 0.08f,
         )

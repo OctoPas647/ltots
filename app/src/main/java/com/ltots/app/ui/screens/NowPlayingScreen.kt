@@ -119,39 +119,18 @@ fun NowPlayingScreen(player: PlayerUi, artwork: Bitmap?, onOpenEq: () -> Unit, o
         }
 
         // Artwork with the live spectrum: wrapped around a smaller cover, or rising behind the
-        // full-size one (Look tab > Visualizer).
+        // full-size one (Look tab > Visualizer). Icon mode: an icon's outline in the cover's place.
         val lookCfg = com.ltots.app.ui.theme.LocalThemeConfig.current
-        val coverAlpha = lookCfg.coverOpacity
-        val wrap = lookCfg.spectrumAroundCover
-        val coverFraction = if (wrap) COVER_WRAPPED else COVER_FULL
-        val coverCorner = if (wrap) 24.dp else 28.dp
-        Box(Modifier.fillMaxWidth().aspectRatio(1f), contentAlignment = Alignment.Center) {
-            if (wrap) CoverSpectrum(visual, coverFraction, coverCorner, Modifier.fillMaxSize(), intensity = 0.9f)
-            else LiveSpectrum(
-                visual,
-                // A little space on the side the spectrum grows towards (below: at the top; above: at
-                // the bottom). Top & bottom use the whole height, half each.
-                Modifier.fillMaxSize().padding(
-                    top = if (lookCfg.behindLayout == com.ltots.app.data.BehindLayout.BELOW) 40.dp else 0.dp,
-                    bottom = if (lookCfg.behindLayout == com.ltots.app.data.BehindLayout.ABOVE ||
-                        lookCfg.behindLayout == com.ltots.app.data.BehindLayout.ABOVE_FLIPPED) 40.dp else 0.dp,
-                ),
-                showWave = false, intensity = 0.8f, from = lookCfg.behindLayout,
+        val icon = if (lookCfg.iconMode) com.ltots.app.ui.components.rememberIconLoad(lookCfg) else com.ltots.app.ui.components.IconLoad.None
+        when (icon) {
+            is com.ltots.app.ui.components.IconLoad.Ready -> com.ltots.app.ui.components.IconSpectrum(
+                visual, icon.shape, artwork, playing = player.isPlaying,
+                modifier = Modifier.fillMaxWidth().aspectRatio(1f),
             )
-            Box(
-                Modifier.fillMaxWidth(coverFraction).aspectRatio(1f)
-                    // Cover opacity (Look tab): lower lets the live spectrum behind show through.
-                    .graphicsLayer { alpha = coverAlpha }
-                    .shadow(28.dp, RoundedCornerShape(coverCorner), ambientColor = pal.accent, spotColor = pal.accent)
-                    .clip(RoundedCornerShape(coverCorner)).background(pal.text.copy(alpha = 0.08f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (artwork != null) {
-                    Image(remember(artwork) { artwork.asImageBitmap() }, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                } else {
-                    Icon(Icons.Rounded.MusicNote, null, tint = pal.textFaint, modifier = Modifier.size(72.dp))
-                }
-            }
+            // Still working the icon out (a moment, once): keep its place empty.
+            com.ltots.app.ui.components.IconLoad.Loading -> Spacer(Modifier.fillMaxWidth().aspectRatio(1f))
+            // No icon (or it can't be read): the cover with the visualizer, as usual.
+            com.ltots.app.ui.components.IconLoad.None -> CoverWithSpectrum(visual, artwork)
         }
 
         Spacer(Modifier.height(18.dp))
@@ -227,6 +206,48 @@ fun NowPlayingScreen(player: PlayerUi, artwork: Bitmap?, onOpenEq: () -> Unit, o
         Spacer(Modifier.height(12.dp))
         EqShortcut(onOpenEq)
         Spacer(Modifier.height(bottomChrome()))
+    }
+}
+
+/**
+ * The song's cover with the live spectrum: wrapped around a smaller cover, or rising behind the
+ * full-size one (Look tab > Visualizer).
+ */
+@Composable
+private fun CoverWithSpectrum(visual: com.ltots.app.ui.components.LiveVisual, artwork: Bitmap?) {
+    val pal = LocalPalette.current
+    val lookCfg = com.ltots.app.ui.theme.LocalThemeConfig.current
+    val coverAlpha = lookCfg.coverOpacity
+    val wrap = lookCfg.spectrumAroundCover
+    val coverFraction = if (wrap) COVER_WRAPPED else COVER_FULL
+    val coverCorner = if (wrap) 24.dp else 28.dp
+    Box(Modifier.fillMaxWidth().aspectRatio(1f), contentAlignment = Alignment.Center) {
+        if (wrap) CoverSpectrum(visual, coverFraction, coverCorner, Modifier.fillMaxSize(), intensity = 0.9f)
+        else LiveSpectrum(
+            visual,
+            // A little space on the side the spectrum grows towards (below: at the top; above: at
+            // the bottom). Top & bottom use the whole height, half each.
+            Modifier.fillMaxSize().padding(
+                top = if (lookCfg.behindLayout == com.ltots.app.data.BehindLayout.BELOW) 40.dp else 0.dp,
+                bottom = if (lookCfg.behindLayout == com.ltots.app.data.BehindLayout.ABOVE ||
+                    lookCfg.behindLayout == com.ltots.app.data.BehindLayout.ABOVE_FLIPPED) 40.dp else 0.dp,
+            ),
+            showWave = false, intensity = 0.8f, from = lookCfg.behindLayout,
+        )
+        Box(
+            Modifier.fillMaxWidth(coverFraction).aspectRatio(1f)
+                // Cover opacity (Look tab): lower lets the live spectrum behind show through.
+                .graphicsLayer { alpha = coverAlpha }
+                .shadow(28.dp, RoundedCornerShape(coverCorner), ambientColor = pal.accent, spotColor = pal.accent)
+                .clip(RoundedCornerShape(coverCorner)).background(pal.text.copy(alpha = 0.08f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (artwork != null) {
+                Image(remember(artwork) { artwork.asImageBitmap() }, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            } else {
+                Icon(Icons.Rounded.MusicNote, null, tint = pal.textFaint, modifier = Modifier.size(72.dp))
+            }
+        }
     }
 }
 
