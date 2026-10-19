@@ -38,12 +38,8 @@ class CoverRing(
     val cornerRadius: Float,
     val gap: Float,
     /** Number of points around the ring. */
-    val count: Int,
-) {
-    val x = FloatArray(count)
-    val y = FloatArray(count)
-    val nx = FloatArray(count)
-    val ny = FloatArray(count)
+    count: Int,
+) : SpectrumOutline(count) {
     /** Spacing between neighbouring points along the ring. */
     val spacing: Float
     /** The longest a bar can be before it leaves the drawing area. */
@@ -94,21 +90,10 @@ class CoverRing(
      * The spectrum level for ring point [k]. [layout]: one loop (bass at the top, clockwise to
      * the treble), or mirrored left/right with the bass at the bottom (or, flipped, at the top).
      */
-    fun levelAt(k: Int, levels: FloatArray, layout: RingLayout = RingLayout.LOOP): Float {
-        val n = levels.size
-        if (n == 0) return 0f
-        val u = (k + 0.5f) / count // 0 at the top centre, going clockwise
-        val d = if (u <= 0.5f) u * 2 else (1 - u) * 2 // 0 at the top, 1 at the bottom
-        val f = when (layout) {
-            RingLayout.LOOP -> u * (n - 1)
-            RingLayout.MIRRORED -> (1 - d) * (n - 1)
-            RingLayout.MIRRORED_FLIPPED -> d * (n - 1)
-        }
-        val i = f.toInt().coerceIn(0, n - 1)
-        val j = min(i + 1, n - 1)
-        val w = f - i
-        return levels[i] * (1 - w) + levels[j] * w
-    }
+    override fun levelAt(k: Int, levels: FloatArray, layout: RingLayout): Float =
+        levelAlong((k + 0.5f) / count, levels, layout) // 0 at the top centre, going clockwise
+
+    override fun reachOut(k: Int): Float = maxLength
 
     fun matches(size: Float, coverSide: Float, cornerRadius: Float, gap: Float, count: Int) =
         this.size == size && this.coverSide == coverSide && this.cornerRadius == cornerRadius && this.gap == gap && this.count == count
@@ -170,18 +155,10 @@ fun DrawScope.drawRing(
         0f to color, (inner / outer).coerceIn(0f, 1f) to color, 1f to color.copy(alpha = color.alpha * 0.25f),
         center = c, radius = outer * 1.42f,
     )
-    val n = ring.count
     path.reset()
     if (ghost || style == SpectrumStyle.CURVE) {
         // A smooth closed outline, "level" away from the cover all the way round.
-        fun qx(k: Int) = ring.x[k] + ring.nx[k] * ring.levelAt(k, levels, layout) * ring.maxLength
-        fun qy(k: Int) = ring.y[k] + ring.ny[k] * ring.levelAt(k, levels, layout) * ring.maxLength
-        path.moveTo((qx(n - 1) + qx(0)) / 2, (qy(n - 1) + qy(0)) / 2)
-        for (k in 0 until n) {
-            val nk = (k + 1) % n
-            path.quadraticTo(qx(k), qy(k), (qx(k) + qx(nk)) / 2, (qy(k) + qy(nk)) / 2)
-        }
-        path.close()
+        path.addOutlineCurve(ring, levels, layout)
         if (ghost) {
             drawPath(path, color, style = Stroke(width = 1.5.dp.toPx()))
         } else {
@@ -195,15 +172,7 @@ fun DrawScope.drawRing(
     }
     // Bars: one stroke per point, straight out from the cover. Mirror: centred on a ring halfway
     // out, so they pulse both ways.
-    val mid = style == SpectrumStyle.MIRROR
-    for (k in 0 until n) {
-        val len = max(ring.levelAt(k, levels, layout) * ring.maxLength, 1f)
-        val from = if (mid) ring.maxLength / 2 - len / 2 else 0f
-        val x0 = ring.x[k] + ring.nx[k] * from
-        val y0 = ring.y[k] + ring.ny[k] * from
-        path.moveTo(x0, y0)
-        path.lineTo(x0 + ring.nx[k] * len, y0 + ring.ny[k] * len)
-    }
+    path.addOutlineStrokes(ring, levels, layout, mirror = style == SpectrumStyle.MIRROR)
     val width = (ring.spacing * 0.55f).coerceIn(1.5f, 6.dp.toPx())
     drawPath(path, brush, style = Stroke(width = width, cap = StrokeCap.Round))
 }
