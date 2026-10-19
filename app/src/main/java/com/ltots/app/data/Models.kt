@@ -49,7 +49,31 @@ enum class BehindLayout(val label: String) {
     ABOVE("From above"),
     /** Hanging down from the top, bass on the right. */
     ABOVE_FLIPPED("From above, flipped"),
+    /** From below and from above at once; the top is a mirror image of the bottom (bass on the left on both). */
+    BOTH_MIRRORED("Top & bottom, mirrored"),
+    /** From below and from above at once; the top is the bottom turned round (bass on the right at the top). */
+    BOTH("Top & bottom, not mirrored"),
+    ;
+
+    /** True when the spectrum shows at the top and the bottom at the same time. */
+    val both: Boolean get() = this == BOTH_MIRRORED || this == BOTH
 }
+
+/** How much of the heavy visual work (glass, motion, visualizer rate) the app does. */
+enum class Effects(val label: String) {
+    /** Everything: the bars bend the page under them, real blur on every panel, all at full rate. */
+    FULL("Full"),
+    /**
+     * Lighter: the bars bend the background instead of the whole page, panels bend without the
+     * blur (the background is soft anyway), moving colours and visualizer at up to 60 fps.
+     */
+    BALANCED("Balanced"),
+    /** Lightest: frosted panels with no blur or bending, still background, visualizer up to 30 fps. */
+    LIGHT("Light"),
+}
+
+/** The Smoothness setting: let the app measure this phone (Automatic), or pick a level. */
+enum class EffectsMode(val label: String) { AUTO("Automatic"), FULL("Full"), BALANCED("Balanced"), LIGHT("Light") }
 
 /**
  * A colour as hue (0..360), saturation and brightness (0..1). Kept next to the colour itself so
@@ -131,6 +155,8 @@ data class ThemeConfig(
     val analyzerBands: Int = 96,
     /** Run the app at the screen's highest refresh rate (120 Hz) instead of letting the phone pick. */
     val maxRefresh: Boolean = true,
+    /** Smoothness: how much glass and motion to draw (Automatic adapts to how fast this phone is). */
+    val effects: EffectsMode = EffectsMode.AUTO,
     /** AMOLED: pure #000 background — no colour blobs or artwork glow, so black pixels stay off. */
     val pureBlack: Boolean = false,
     /** Hide Android's navigation bar inside the app (swipe up from the bottom edge to reveal it). */
@@ -236,6 +262,7 @@ object Json {
         t.glowHsv?.let { put("gHsv", hsvJson(it)) }
         put("bands", t.analyzerBands); put("maxHz", t.maxRefresh); put("wrap", t.spectrumAroundCover)
         put("ring", t.ringLayout.name); put("behind", t.behindLayout.name)
+        put("fx", t.effects.name)
     }
 
     private fun hsvJson(h: Hsv) = JSONArray().put(h.h.toDouble()).put(h.s.toDouble()).put(h.v.toDouble())
@@ -270,6 +297,7 @@ object Json {
             spectrumAroundCover = o.optBoolean("wrap", d.spectrumAroundCover),
             ringLayout = runCatching { RingLayout.valueOf(o.optString("ring")) }.getOrDefault(d.ringLayout),
             behindLayout = runCatching { BehindLayout.valueOf(o.optString("behind")) }.getOrDefault(d.behindLayout),
+            effects = runCatching { EffectsMode.valueOf(o.optString("fx")) }.getOrDefault(d.effects),
             accentHsv = hsvOf(o.optJSONArray("aHsv")),
             glowHsv = hsvOf(o.optJSONArray("gHsv")),
             pureBlack = o.optBoolean("black", d.pureBlack),

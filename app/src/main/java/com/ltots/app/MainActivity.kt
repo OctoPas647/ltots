@@ -30,6 +30,7 @@ class MainActivity : ComponentActivity() {
         PlayerConnection.connect(this)
         handleIntent(intent)
         applySystemBars()
+        com.ltots.app.ui.Smoothness.init()
         setContent {
             val cfg by ThemeState.config.collectAsState()
             LaunchedEffect(cfg.hideNavBar, cfg.hideStatusBar, cfg.darkMode) {
@@ -39,6 +40,21 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(cfg.maxRefresh) { applyRefreshRate(cfg.maxRefresh) }
             LToTSTheme { AppRoot() }
         }
+    }
+
+    // Smoothness > Automatic: frame timings are only watched while the app is in front.
+    private var stopWatching: (() -> Unit)? = null
+
+    override fun onResume() {
+        super.onResume()
+        stopWatching?.invoke()
+        stopWatching = com.ltots.app.ui.Smoothness.watch(this)
+    }
+
+    override fun onPause() {
+        stopWatching?.invoke()
+        stopWatching = null
+        super.onPause()
     }
 
     override fun onNewIntent(intent: android.content.Intent) {

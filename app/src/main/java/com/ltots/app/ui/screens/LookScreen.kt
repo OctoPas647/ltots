@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import com.ltots.app.data.SpectrumStyle
 import com.ltots.app.data.Hsv
 import com.ltots.app.data.BehindLayout
+import com.ltots.app.data.Effects
 import com.ltots.app.data.RingLayout
 import com.ltots.app.data.ThemeConfig
 import com.ltots.app.ui.bottomChrome
@@ -128,10 +129,17 @@ fun LookScreen() {
                 SectionTitle("Glass")
                 // Blur and Refraction bend what's behind the glass: the page scrolling under the bars
                 // at the bottom (every theme), and the moving colours behind the panels.
-                LabeledSlider("Blur", cfg.blurDp, { v -> set { it.copy(blurDp = v) } }, 0f..60f, "%.0f dp".format(Locale.ROOT, cfg.blurDp))
-                LabeledSlider("Refraction", cfg.refraction, { v -> set { it.copy(refraction = v) } }, 0f..1f, pct(cfg.refraction))
+                // Smoothness turns these down on phones that can't keep up (grayed out then).
+                val level = com.ltots.app.ui.rememberEffects()
+                LabeledSlider("Blur", cfg.blurDp, { v -> set { it.copy(blurDp = v) } }, 0f..60f, "%.0f dp".format(Locale.ROOT, cfg.blurDp),
+                    enabled = level == Effects.FULL)
+                LabeledSlider("Refraction", cfg.refraction, { v -> set { it.copy(refraction = v) } }, 0f..1f, pct(cfg.refraction),
+                    enabled = level != Effects.LIGHT)
                 Text(
-                    if (cfg.pureBlack) "Blur and Refraction show on the bars at the bottom, bending the page as it scrolls under them. The panels sit on pure black, which looks the same bent or not."
+                    if (level == Effects.LIGHT) "Smoothness is on Light (under Screen): the glass is plain frosted, without blur or bending, so these two are off for now."
+                    else if (level == Effects.BALANCED) "Smoothness is on Balanced (under Screen): the glass bends without blurring, so Blur is off for now." +
+                        (if (cfg.pureBlack) " On the AMOLED themes the bars sit on pure black too." else "")
+                    else if (cfg.pureBlack) "Blur and Refraction show on the bars at the bottom, bending the page as it scrolls under them. The panels sit on pure black, which looks the same bent or not."
                     else "Blur and Refraction bend what's behind the glass: the moving colours under the panels, and the page scrolling under the bars at the bottom.",
                     color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 8.dp),
                 )
@@ -149,17 +157,32 @@ fun LookScreen() {
                 if (cfg.pureBlack) {
                     Text(
                         "The AMOLED themes keep the background pure black, so black pixels stay switched off and save battery. " +
-                            "Pick another theme above for colours, motion and album-art glow.",
-                        color = pal.textDim, style = MaterialTheme.typography.bodySmall,
+                            "These are grayed out: pick another theme above to use colours, motion and album-art glow.",
+                        color = pal.textDim, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 6.dp),
                     )
-                } else {
-                    SwitchRow("Dark mode", cfg.darkMode, { on -> set { it.copy(darkMode = on) } })
-                    SwitchRow("Moving colours", cfg.animateBackground, { on -> set { it.copy(animateBackground = on) } })
-                    if (cfg.animateBackground) {
-                        LabeledSlider("Motion speed", cfg.animationSpeed, { v -> set { it.copy(animationSpeed = v) } }, 0.1f..3f, "%.1f×".format(Locale.ROOT, cfg.animationSpeed))
-                    }
-                    SwitchRow("Album art glow", cfg.artworkBackground, { on -> set { it.copy(artworkBackground = on) } }, sub = "Melts the current song's cover into the background.")
                 }
+                // Grayed out on the AMOLED themes (nothing to move or tint on pure black).
+                val bg = !cfg.pureBlack
+                SwitchRow("Dark mode", cfg.darkMode || !bg, { on -> set { it.copy(darkMode = on) } }, enabled = bg)
+                val saver by com.ltots.app.ui.rememberBatterySaver()
+                val effects = com.ltots.app.ui.rememberEffects()
+                SwitchRow(
+                    "Moving colours", cfg.animateBackground && bg, { on -> set { it.copy(animateBackground = on) } }, enabled = bg,
+                    sub = when {
+                        !bg -> "Off on the AMOLED themes: nothing moves on pure black."
+                        cfg.animateBackground && saver -> "Paused while the phone's Battery Saver is on."
+                        cfg.animateBackground && effects == com.ltots.app.data.Effects.LIGHT -> "Paused by Smoothness: Light (below, under Screen)."
+                        else -> "The colours behind the glass drift around, and the album-art glow with them."
+                    },
+                )
+                LabeledSlider(
+                    "Motion speed", cfg.animationSpeed, { v -> set { it.copy(animationSpeed = v) } }, 0.1f..3f,
+                    "%.1f×".format(Locale.ROOT, cfg.animationSpeed), enabled = bg && cfg.animateBackground,
+                )
+                SwitchRow(
+                    "Album art glow", cfg.artworkBackground && bg, { on -> set { it.copy(artworkBackground = on) } }, enabled = bg,
+                    sub = "Melts the current song's cover into the background.",
+                )
             }
         }
 
@@ -172,6 +195,7 @@ fun LookScreen() {
                     sub = "Runs LToTS at your screen's top refresh rate (120 Hz) so scrolling and animations are as smooth as they can be. " +
                         "Off lets the phone choose, which may be 60 Hz to save a little battery.",
                 )
+                SmoothnessSetting(cfg.effects) { m -> set { it.copy(effects = m) } }
                 SwitchRow(
                     "Hide navigation bar", cfg.hideNavBar, { on -> set { it.copy(hideNavBar = on) } },
                     sub = "Swipe up from the bottom edge to bring it back for a moment.",
@@ -210,6 +234,8 @@ fun LookScreen() {
                         BehindLayout.BELOW -> "Rises from below the full-size cover, bass on the left."
                         BehindLayout.ABOVE -> "Hangs down from above the full-size cover, bass on the left."
                         BehindLayout.ABOVE_FLIPPED -> "Hangs down from above the full-size cover, bass on the right."
+                        BehindLayout.BOTH_MIRRORED -> "Rises from below and hangs from above at once. The top is a mirror image of the bottom: bass on the left on both."
+                        BehindLayout.BOTH -> "Rises from below and hangs from above at once, not mirrored: the top is the bottom turned round, bass on the right."
                     },
                     color = LocalPalette.current.textFaint, style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(top = 6.dp, bottom = 10.dp),
@@ -249,13 +275,44 @@ fun LookScreen() {
 
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-            Pill("Reset look to default (AMOLED)", false, { ThemeState.reset() })
+            Pill("Reset this look to default", false, { ThemeState.reset() })
         }
         Spacer(Modifier.height(bottomChrome()))
     }
 }
 
 private fun pct(v: Float) = "%.0f%%".format(Locale.ROOT, v * 100)
+
+/**
+ * Smoothness: how much glass and motion the app draws. Automatic measures this phone while you
+ * use the app and steps down by itself if frames keep running late.
+ */
+@Composable
+private fun SmoothnessSetting(mode: com.ltots.app.data.EffectsMode, onPick: (com.ltots.app.data.EffectsMode) -> Unit) {
+    val pal = LocalPalette.current
+    val auto by com.ltots.app.ui.Smoothness.auto.collectAsState()
+    Spacer(Modifier.height(6.dp))
+    Text("Smoothness", color = pal.textDim, style = MaterialTheme.typography.bodyMedium)
+    Spacer(Modifier.height(6.dp))
+    FlowPills {
+        com.ltots.app.data.EffectsMode.entries.forEach { m -> Pill(m.label, mode == m, { onPick(m) }) }
+    }
+    val now = com.ltots.app.ui.Smoothness.effective(mode, auto)
+    Text(
+        (if (mode == com.ltots.app.data.EffectsMode.AUTO) "Automatic: now ${auto.label} on this phone. It watches how fast the screen keeps up and turns effects down by itself if the app stutters. " else "") +
+            when (now) {
+                Effects.FULL -> "Full: real blur everywhere, and the bars at the bottom bend the page scrolling under them."
+                Effects.BALANCED -> "Balanced: the bars bend the background instead of the page, panels bend without blur, motion and visualizer at up to 60 fps."
+                Effects.LIGHT -> "Light: plain frosted panels with no blur or bending, still background, visualizer at up to 30 fps. The smoothest on any phone."
+            },
+        color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp),
+    )
+    if (mode == com.ltots.app.data.EffectsMode.AUTO && auto != Effects.FULL) {
+        Spacer(Modifier.height(6.dp))
+        Pill("Measure again from Full", false, { com.ltots.app.ui.Smoothness.recheck() })
+    }
+    Spacer(Modifier.height(8.dp))
+}
 
 @Composable
 private fun ColorCard(cfg: ThemeConfig, set: ((ThemeConfig) -> ThemeConfig) -> Unit) {
@@ -386,13 +443,13 @@ private fun LookProfiles(cfg: ThemeConfig) {
                 ProfileRow(
                     name = customName(i),
                     status = when {
-                        inUse -> "In use"
-                        look == null -> "Empty · starts as a copy of this look"
-                        else -> "Saved look · tap to switch"
+                        inUse -> "In use · " + ThemeState.themeName(cfg)
+                        look == null -> "Empty · starts as the default look"
+                        else -> ThemeState.themeName(look) + " · tap to switch"
                     },
                     active = inUse,
                     onClick = { ThemeState.selectProfile(i); open = false },
-                    leading = { LookDot(look ?: cfg) },
+                    leading = { LookDot(if (inUse) cfg else look ?: ThemeState.defaultLook) },
                     trailing = if (inUse) ({ Icon(Icons.Rounded.Check, null, tint = pal.accent) }) else null,
                 )
             }

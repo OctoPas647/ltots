@@ -129,10 +129,12 @@ fun NowPlayingScreen(player: PlayerUi, artwork: Bitmap?, onOpenEq: () -> Unit, o
             if (wrap) CoverSpectrum(visual, coverFraction, coverCorner, Modifier.fillMaxSize(), intensity = 0.9f)
             else LiveSpectrum(
                 visual,
-                // A little space on the side the spectrum grows from (below: at the top; above: at the bottom).
+                // A little space on the side the spectrum grows towards (below: at the top; above: at
+                // the bottom). Top & bottom use the whole height, half each.
                 Modifier.fillMaxSize().padding(
                     top = if (lookCfg.behindLayout == com.ltots.app.data.BehindLayout.BELOW) 40.dp else 0.dp,
-                    bottom = if (lookCfg.behindLayout == com.ltots.app.data.BehindLayout.BELOW) 0.dp else 40.dp,
+                    bottom = if (lookCfg.behindLayout == com.ltots.app.data.BehindLayout.ABOVE ||
+                        lookCfg.behindLayout == com.ltots.app.data.BehindLayout.ABOVE_FLIPPED) 40.dp else 0.dp,
                 ),
                 showWave = false, intensity = 0.8f, from = lookCfg.behindLayout,
             )

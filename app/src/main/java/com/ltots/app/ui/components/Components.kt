@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
@@ -90,6 +91,12 @@ fun LabeledSlider(
     steps: Int = 0,
     /** False shows the slider grayed out: it's there, but can't be changed right now. */
     enabled: Boolean = true,
+    /**
+     * Shows a small reset button next to the value (faded while the value is already at its
+     * default, [isDefault]); tapping it calls this.
+     */
+    onReset: (() -> Unit)? = null,
+    isDefault: Boolean = false,
 ) {
     val pal = LocalPalette.current
     Column(modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.38f)) {
@@ -97,6 +104,21 @@ fun LabeledSlider(
             Text(label, color = pal.textDim, style = androidx.compose.material3.MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.weight(1f))
             Text(valueText, color = pal.text, fontWeight = FontWeight.SemiBold, style = androidx.compose.material3.MaterialTheme.typography.bodyMedium)
+            if (onReset != null) {
+                Spacer(Modifier.width(6.dp))
+                Box(
+                    Modifier.size(30.dp).clip(CircleShape)
+                        .background(pal.text.copy(alpha = if (isDefault) 0.04f else 0.10f))
+                        .clickable(enabled = enabled && !isDefault, onClick = onReset)
+                        .alpha(if (isDefault) 0.4f else 1f),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    androidx.compose.material3.Icon(
+                        androidx.compose.material.icons.Icons.Rounded.RestartAlt, "Reset $label",
+                        tint = pal.text, modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
         }
         Slider(
             value = value.coerceIn(range.start, range.endInclusive),
@@ -122,10 +144,19 @@ fun LabeledSlider(
 }
 
 @Composable
-fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit, sub: String? = null, modifier: Modifier = Modifier) {
+fun SwitchRow(
+    label: String,
+    checked: Boolean,
+    onChange: (Boolean) -> Unit,
+    sub: String? = null,
+    modifier: Modifier = Modifier,
+    /** Off: shown grayed out and can't be changed (it doesn't apply right now). */
+    enabled: Boolean = true,
+) {
     val pal = LocalPalette.current
     Row(
-        modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { onChange(!checked) }.padding(vertical = 6.dp),
+        modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.38f).clip(RoundedCornerShape(12.dp))
+            .clickable(enabled = enabled) { onChange(!checked) }.padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -133,7 +164,7 @@ fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit, sub:
             if (sub != null) Text(sub, color = pal.textFaint, style = androidx.compose.material3.MaterialTheme.typography.bodySmall)
         }
         Spacer(Modifier.width(12.dp))
-        LSwitch(checked, onChange)
+        LSwitch(checked, onChange, enabled = enabled)
     }
 }
 
@@ -142,7 +173,7 @@ fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit, sub:
  * change (Material's switch grows the dot when it's on, which looked inconsistent).
  */
 @Composable
-fun LSwitch(checked: Boolean, onChange: (Boolean) -> Unit, modifier: Modifier = Modifier) {
+fun LSwitch(checked: Boolean, onChange: (Boolean) -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true) {
     val pal = LocalPalette.current
     val pos by androidx.compose.animation.core.animateFloatAsState(
         if (checked) 1f else 0f, androidx.compose.animation.core.tween(160), label = "switch",
@@ -158,6 +189,7 @@ fun LSwitch(checked: Boolean, onChange: (Boolean) -> Unit, modifier: Modifier = 
             .border(1.dp, border, RoundedCornerShape(50))
             .toggleable(
                 value = checked,
+                enabled = enabled,
                 interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                 indication = androidx.compose.material3.ripple(bounded = false, radius = 22.dp),
                 role = androidx.compose.ui.semantics.Role.Switch,

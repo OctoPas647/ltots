@@ -249,7 +249,7 @@ fun EqScreen(player: PlayerUi) {
             onResetTo10 = { edit { respace(it, EqDefaults.DEFAULT_BANDS) }; selectedId = null },
         )
         Spacer(Modifier.height(12.dp))
-        LevelCard(eq) { edit(drag = true, t = it) }
+        LevelCard(eq, onResetPreamp = { edit { it.copy(preampDb = 0f) } }) { edit(drag = true, t = it) }
 
         // 4. Quick ways to a sound: presets and simple tone controls.
         Spacer(Modifier.height(20.dp))
@@ -478,7 +478,7 @@ private fun NumberRow(label: String, value: Float, unit: String, fmt: (Float) ->
 }
 
 @Composable
-private fun LevelCard(eq: EqState, edit: ((EqState) -> EqState) -> Unit) {
+private fun LevelCard(eq: EqState, onResetPreamp: () -> Unit, edit: ((EqState) -> EqState) -> Unit) {
     val pal = LocalPalette.current
     val settings by AudioEngine.settings.collectAsState()
     val boost = remember(eq) { EqMath.peakBoostDb(eq).toFloat() }
@@ -486,7 +486,11 @@ private fun LevelCard(eq: EqState, edit: ((EqState) -> EqState) -> Unit) {
     GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
         Column(Modifier.padding(16.dp)) {
             SectionTitle("Level & headroom")
-            LabeledSlider("Preamp", eq.preampDb, { v -> edit { it.copy(preampDb = Math.round(v * 10f) / 10f) } }, -24f..12f, formatDb(eq.preampDb))
+            LabeledSlider(
+                "Preamp", eq.preampDb, { v -> edit { it.copy(preampDb = Math.round(v * 10f) / 10f) } }, -24f..12f, formatDb(eq.preampDb),
+                // Back to 0 dB in one tap (one undo step).
+                onReset = onResetPreamp, isDefault = eq.preampDb == 0f,
+            )
             SwitchRow(
                 "Automatic headroom", eq.autoHeadroom, { on -> edit { it.copy(autoHeadroom = on) } },
                 sub = "Lowers the level by the curve's biggest boost (${formatDb(boost)}) so boosts never clip.",

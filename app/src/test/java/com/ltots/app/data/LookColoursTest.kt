@@ -48,7 +48,10 @@ class LookColoursTest {
     }
 
     @Test fun lookSettingsSurviveSaving() {
-        val t = ThemeConfig(accentHsv = Hsv(200f, 0.4f, 0.02f), glowHsv = Hsv(10f, 1f, 0.5f), analyzerBands = 160, visualizerFps = 60, maxRefresh = false)
+        val t = ThemeConfig(
+            accentHsv = Hsv(200f, 0.4f, 0.02f), glowHsv = Hsv(10f, 1f, 0.5f), analyzerBands = 160, visualizerFps = 60, maxRefresh = false,
+            behindLayout = BehindLayout.BOTH_MIRRORED, effects = EffectsMode.BALANCED,
+        )
         assertEquals(t, Json.theme(JSONObject(Json.theme(t).toString())))
     }
 
@@ -68,7 +71,10 @@ class LookColoursTest {
 
 class ThemePresetTest {
     @Test fun themesKeepYourOwnLookSettings() {
-        val mine = ThemeState.amoled.copy(visualizerFps = 60, analyzerBands = 160, cornerDp = 12f, coverOpacity = 0.5f, maxRefresh = false, hideStatusBar = true)
+        val mine = ThemeState.amoled.copy(
+            visualizerFps = 60, analyzerBands = 160, cornerDp = 12f, coverOpacity = 0.5f, maxRefresh = false, hideStatusBar = true,
+            effects = EffectsMode.LIGHT,
+        )
         for (p in ThemeState.presets) {
             val after = ThemeState.presetApplied(p, mine)
             assertEquals(p.name, 60, after.visualizerFps)
@@ -77,9 +83,40 @@ class ThemePresetTest {
             assertEquals(0.5f, after.coverOpacity, 0f)
             assertEquals(false, after.maxRefresh)
             assertEquals(true, after.hideStatusBar)
+            assertEquals(EffectsMode.LIGHT, after.effects)
             assertTrue(ThemeState.isActive(p, after))
             // Cover colours only on AMOLED Cover.
             assertEquals(p.name == "AMOLED Cover", after.dynamicColors)
         }
+    }
+
+    @Test fun theDefaultLookIsHue180AtFullSaturationAndBrightness() {
+        val d = ThemeState.defaultLook
+        assertEquals(Hsv(180f, 1f, 1f), d.accentHsv)
+        assertEquals(0xFF00FFFF, d.accent)
+        assertTrue(d.pureBlack)
+        // A fresh "Reset this look to default" gives the same.
+        assertEquals(Hsv(180f, 1f, 1f), Hsv.resolve(d.accent, d.accentHsv))
+    }
+
+    @Test fun yourColoursStayWhenSwitchingBetweenTheAmoledThemes() {
+        val mine = Hsv(300f, 0.45f, 0.7f)
+        val start = ThemeState.amoled.copy(accent = mine.toArgb(), accentHsv = mine)
+        val amoled = ThemeState.presets.first { it.name == "AMOLED" }
+        val cover = ThemeState.presets.first { it.name == "AMOLED Cover" }
+        val onCover = ThemeState.presetApplied(cover, start)
+        assertEquals(mine, onCover.accentHsv)
+        assertTrue(onCover.dynamicColors)
+        assertTrue(ThemeState.isActive(cover, onCover))
+        val back = ThemeState.presetApplied(amoled, onCover)
+        assertEquals(mine, back.accentHsv)
+        assertEquals(mine.toArgb(), back.accent)
+        assertFalse(back.dynamicColors)
+        assertTrue(ThemeState.isActive(amoled, back))
+        assertEquals("AMOLED", ThemeState.themeName(back))
+        // A colourful theme brings its own colours.
+        val aurora = ThemeState.presets.first { it.name == "Aurora" }
+        val onAurora = ThemeState.presetApplied(aurora, back)
+        assertEquals(aurora.config.accent, onAurora.accent)
     }
 }

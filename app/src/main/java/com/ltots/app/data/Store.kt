@@ -98,6 +98,20 @@ object Store {
         JSONObject().put("slots", arr).put("active", active ?: -1).toString()
     }
 
+    // ---- smoothness (per phone) --------------------------------------------------------------
+
+    /**
+     * What Smoothness > Automatic settled on for this phone. Tied to the phone model, so a backup
+     * restored onto another phone measures again instead of inheriting the old phone's result.
+     */
+    fun loadSmoothness(): String? = read("smoothness.json")?.let { o ->
+        if (o.optString("device") == android.os.Build.MODEL) o.optString("auto", "FULL") else null
+    }
+
+    fun saveSmoothness(auto: String) = writeDebounced("smoothness.json") {
+        JSONObject().put("auto", auto).put("device", android.os.Build.MODEL).toString()
+    }
+
     // ---- per-song profiles -----------------------------------------------------------------
 
     private fun profileFile(key: String): String {

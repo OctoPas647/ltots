@@ -16,6 +16,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import com.ltots.app.data.Hsv
 import com.ltots.app.data.Store
 import com.ltots.app.data.ThemeConfig
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -25,12 +26,18 @@ object ThemeState {
     private val _config = MutableStateFlow(ThemeConfig())
     val config: StateFlow<ThemeConfig> = _config
 
-    /** The AMOLED theme: pure black with an electric-cyan accent. Default for new installs. */
+    /** The default accent: hue 180°, saturation and brightness 100% (cyan). */
+    val DEFAULT_ACCENT = Hsv(180f, 1f, 1f)
+
+    /** The AMOLED theme: pure black with a cyan accent. Default for new installs. */
     val amoled = ThemeConfig(
-        accent = 0xFF00E5FF, glow = 0xFF003A42,
+        accent = DEFAULT_ACCENT.toArgb(), accentHsv = DEFAULT_ACCENT, glow = 0xFF003A42,
         pureBlack = true, animateBackground = false, artworkBackground = false,
         glassTint = 0.55f, rimLight = 0.9f, refraction = 0.4f, darkMode = true,
     )
+
+    /** The default look: what new installs, new Custom profiles and "Reset look" start from. */
+    val defaultLook: ThemeConfig get() = amoled
 
     /**
      * @param freshInstall true on the very first run. New installs start on AMOLED; existing
@@ -38,7 +45,7 @@ object ThemeState {
      */
     fun init(freshInstall: Boolean) {
         val saved = Store.loadTheme()
-        _config.value = saved ?: if (freshInstall) amoled else ThemeConfig()
+        _config.value = saved ?: if (freshInstall) defaultLook else ThemeConfig()
         if (saved == null) Store.saveTheme(_config.value)
 
         // Look profiles. The first time, the look you already have becomes Custom 1.
@@ -60,10 +67,10 @@ object ThemeState {
     private val _activeProfile = MutableStateFlow(0)
     val activeProfile: StateFlow<Int> = _activeProfile
 
-    /** Switch to profile [i]. One that was never used starts as a copy of the current look. */
+    /** Switch to profile [i]. One that was never used starts from the default look. */
     fun selectProfile(i: Int) {
         if (i !in 0 until PROFILE_COUNT || i == _activeProfile.value) return
-        val look = _profiles.value[i] ?: _config.value
+        val look = _profiles.value[i] ?: defaultLook
         _profiles.value = _profiles.value.toMutableList().also { it[i] = look }
         _activeProfile.value = i
         _config.value = look
@@ -78,14 +85,30 @@ object ThemeState {
      */
     fun applyPreset(p: ThemePreset) = update { cur -> presetApplied(p, cur) }
 
-    /** What [cur] becomes when theme [p] is picked. */
-    fun presetApplied(p: ThemePreset, cur: ThemeConfig): ThemeConfig = themeOf(p).withPersonalFrom(cur)
+    /**
+     * What [cur] becomes when theme [p] is picked. Between the two AMOLED themes your own colours
+     * (hue, saturation, brightness) stay as you set them.
+     */
+    fun presetApplied(p: ThemePreset, cur: ThemeConfig): ThemeConfig {
+        val t = themeOf(p).withPersonalFrom(cur)
+        return if (p.config.pureBlack && cur.pureBlack) t.withColoursFrom(cur) else t
+    }
 
-    /** Whether [cfg] is currently showing preset [p]. */
-    fun isActive(p: ThemePreset, cfg: ThemeConfig): Boolean =
-        themeOf(p).withPersonalFrom(cfg).copy(accentHsv = null, glowHsv = null) == cfg.copy(accentHsv = null, glowHsv = null)
+    /** Whether [cfg] is currently showing preset [p] (on AMOLED, whatever accent you picked). */
+    fun isActive(p: ThemePreset, cfg: ThemeConfig): Boolean {
+        var t = themeOf(p).withPersonalFrom(cfg)
+        if (p.config.pureBlack && cfg.pureBlack) t = t.withColoursFrom(cfg)
+        return t.copy(accentHsv = null, glowHsv = null) == cfg.copy(accentHsv = null, glowHsv = null)
+    }
 
-    private fun themeOf(p: ThemePreset) = p.config.copy(dynamicColors = p.dynamic ?: false, accentHsv = null, glowHsv = null)
+    /** The theme [cfg] is on, by name ("AMOLED Cover", "Aurora"…), for the profile list. */
+    fun themeName(cfg: ThemeConfig): String = presets.firstOrNull { isActive(it, cfg) }?.name
+        ?: if (cfg.pureBlack) (if (cfg.dynamicColors) "AMOLED Cover" else "AMOLED") + " (own settings)" else "Own colours"
+
+    private fun themeOf(p: ThemePreset) = p.config.copy(dynamicColors = p.dynamic ?: false)
+
+    private fun ThemeConfig.withColoursFrom(cur: ThemeConfig) =
+        copy(accent = cur.accent, accentHsv = cur.accentHsv, glow = cur.glow, glowHsv = cur.glowHsv)
 
     /** [this] theme with the settings that belong to the person, not the theme, taken from [cur]. */
     private fun ThemeConfig.withPersonalFrom(cur: ThemeConfig) = copy(
@@ -101,6 +124,7 @@ object ThemeState {
         ringLayout = cur.ringLayout,
         behindLayout = cur.behindLayout,
         maxRefresh = cur.maxRefresh,
+        effects = cur.effects,
         hideNavBar = cur.hideNavBar,
         hideStatusBar = cur.hideStatusBar,
     )
@@ -129,7 +153,8 @@ object ThemeState {
         ThemePreset("Daylight", ThemeConfig(accent = 0xFF5B3DF5, glow = 0xFFD2C6FF, darkMode = false, glassTint = 0.35f)),
     )
 
-    fun reset() = applyPreset(presets.first())
+    /** Back to the default look (AMOLED, accent hue 180°, saturation and brightness 100%). */
+    fun reset() = update { defaultLook }
 }
 
 /** A ready-made look. [dynamic] = cover colours on/off for this theme; null leaves them as they are. */

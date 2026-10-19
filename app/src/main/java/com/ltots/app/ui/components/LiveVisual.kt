@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.inset
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.media3.common.util.UnstableApi
@@ -24,6 +25,7 @@ import com.ltots.app.audio.Analyzer
 import com.ltots.app.audio.AudioEngine
 import com.ltots.app.audio.EqMath
 import com.ltots.app.audio.SpectrumFrame
+import com.ltots.app.data.BehindLayout
 import com.ltots.app.data.SpectrumStyle
 import com.ltots.app.ui.WhileOnScreen
 import com.ltots.app.ui.rememberBatterySaver
@@ -58,7 +60,8 @@ class LiveVisual(val analyzer: Analyzer) {
  *  - only analyses what is drawn: no waveform where none is shown, and no separate pre-EQ
  *    "ghost" analysis while the EQ leaves the sound unchanged;
  *  - is cancelled completely when the app is in the background or the screen is off;
- *  - drops to 30 fps when the phone's Battery Saver is on.
+ *  - drops to 30 fps when the phone's Battery Saver is on, and follows Smoothness (Balanced:
+ *    up to 60 fps, Light: up to 30).
  */
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
@@ -66,7 +69,7 @@ fun rememberLiveVisual(wave: Boolean = true): LiveVisual {
     val settings by AudioEngine.settings.collectAsState()
     val cfg = LocalThemeConfig.current
     val saver by rememberBatterySaver()
-    val fps = if (saver) minOf(cfg.visualizerFps, 30) else cfg.visualizerFps
+    val fps = visualizerFps(cfg.visualizerFps, saver, com.ltots.app.ui.LocalEffects.current)
     val lv = remember(cfg.analyzerBands) { LiveVisual(Analyzer(AudioEngine.tap, cfg.analyzerBands)) }
     lv.fps = fps
     val ghost = cfg.showPreEqGhost
@@ -93,6 +96,16 @@ fun rememberLiveVisual(wave: Boolean = true): LiveVisual {
         }
     }
     return lv
+}
+
+/** The visualizer's frame rate: the chosen one, capped by Battery Saver and by Smoothness. */
+fun visualizerFps(chosen: Int, batterySaver: Boolean, effects: com.ltots.app.data.Effects): Int {
+    val cap = when {
+        batterySaver || effects == com.ltots.app.data.Effects.LIGHT -> 30
+        effects == com.ltots.app.data.Effects.BALANCED -> 60
+        else -> Int.MAX_VALUE
+    }
+    return minOf(chosen, cap)
 }
 
 @androidx.annotation.OptIn(UnstableApi::class)
@@ -172,10 +185,26 @@ fun LiveSpectrum(
         @Suppress("UNUSED_VARIABLE") val t = visual.tick // read to redraw on every new frame
         val f = visual.frame
         val alpha = cfg.spectrumOpacity * intensity
-        // From above: the same drawing turned upside down (and, flipped, mirrored left/right too).
-        val sx = if (from == com.ltots.app.data.BehindLayout.ABOVE_FLIPPED) -1f else 1f
-        val sy = if (from == com.ltots.app.data.BehindLayout.BELOW) 1f else -1f
-        scale(sx, sy) { drawLayers(visual, f, cfg, pal, alpha, showWave) }
+        drawFrom(from) { drawLayers(visual, f, cfg, pal, alpha, showWave) }
+    }
+}
+
+/**
+ * Runs [draw] (a spectrum rising from the bottom, bass on the left) where [from] puts it. From
+ * above: the same drawing turned upside down (flipped: mirrored left/right too). Top & bottom:
+ * drawn twice, each in its half: the bottom half as usual, the top half hanging down, either
+ * a mirror image of the bottom or the bottom turned round (bass on the right).
+ */
+inline fun DrawScope.drawFrom(from: BehindLayout, crossinline draw: DrawScope.() -> Unit) {
+    when (from) {
+        BehindLayout.BELOW -> draw()
+        BehindLayout.ABOVE -> scale(1f, -1f) { draw() }
+        BehindLayout.ABOVE_FLIPPED -> scale(-1f, -1f) { draw() }
+        BehindLayout.BOTH_MIRRORED, BehindLayout.BOTH -> {
+            val half = size.height / 2
+            inset(0f, half, 0f, 0f) { draw() }
+            inset(0f, 0f, 0f, half) { scale(if (from == BehindLayout.BOTH) -1f else 1f, -1f) { draw() } }
+        }
     }
 }
 

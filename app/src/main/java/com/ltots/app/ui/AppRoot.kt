@@ -110,6 +110,10 @@ fun AppRoot() {
     // The page itself (background + the open tab): the floating bars at the bottom bend and blur
     // it as it scrolls under them, like liquid glass on iOS.
     val pageBackdrop = rememberLayerBackdrop()
+    // Smoothness: on a phone that can't keep up, the bars bend only the background (Balanced) or
+    // nothing (Light), instead of re-rendering the whole page under them on every frame.
+    val effects = rememberEffects()
+    val bendPage = effects == com.ltots.app.data.Effects.FULL
 
     // Dynamic colours: the theme follows the current cover.
     LaunchedEffect(artwork) { com.ltots.app.ui.theme.DynamicColor.onArtwork(artwork) }
@@ -130,8 +134,8 @@ fun AppRoot() {
         val sysBar = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
         val chrome = sysBar + 88.dp + (if (miniShown) 74.dp else 0.dp) + 32.dp
 
-        CompositionLocalProvider(LocalBackdrop provides backdrop, LocalBottomChrome provides chrome) {
-          Box(Modifier.fillMaxSize().layerBackdrop(pageBackdrop)) {
+        CompositionLocalProvider(LocalBackdrop provides backdrop, LocalBottomChrome provides chrome, LocalEffects provides effects) {
+          Box(Modifier.fillMaxSize().then(if (bendPage) Modifier.layerBackdrop(pageBackdrop) else Modifier)) {
             // The glass panels on the pages refract this layer.
             AppBackground(artwork, Modifier.fillMaxSize().layerBackdrop(backdrop))
             Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars.union(WindowInsets.displayCutout.only(WindowInsetsSides.Top)))) {
@@ -148,7 +152,10 @@ fun AppRoot() {
             }
           }
 
-          CompositionLocalProvider(LocalBackdrop provides pageBackdrop, com.ltots.app.ui.glass.LocalGlassOverContent provides true) {
+          CompositionLocalProvider(
+              LocalBackdrop provides (if (bendPage) pageBackdrop else backdrop),
+              com.ltots.app.ui.glass.LocalGlassOverContent provides true,
+          ) {
             Column(
                 Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding()
                     .padding(horizontal = 14.dp, vertical = 10.dp),

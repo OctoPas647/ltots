@@ -19,7 +19,7 @@ newer APK updates the app and keeps your settings.
   Treble) that work on top of any shape, Undo and Flatten; save your own presets ("Mine").
   Top right: **EQ profiles** (Custom 1–5), **Undo** (the last change) and **Reset** (every gain back
   to 0 dB). **Reset to 10 bands** in Fine-tune brings back the standard 31 Hz–16 kHz layout,
-  keeping your curve's shape.
+  keeping your curve's shape; the **Preamp** has its own reset button (back to 0 dB, one undo step).
   Everything below stays one tap away under **Fine-tune**.
 - **Parametric EQ** – any number of bands (1–64); every band has an exact frequency, gain, width (Q)
   and type (peak, low/high shelf, low/high cut). Drag the dots on the curve or type exact values.
@@ -27,7 +27,9 @@ newer APK updates the app and keeps your settings.
   cover, in the Bars, Curve or Mirror style: **One loop** (bass at the top, once round clockwise to
   the treble), **Mirrored** (both sides alike, bass at the bottom) or **Mirrored, flipped** (bass at
   the top). Or behind the full-size cover: **From below** (the original), **From above** (hanging
-  down) or **From above, flipped** (bass on the right). Look > Visualizer > "On the Playing tab".
+  down), **From above, flipped** (bass on the right), or both at once: **Top & bottom, mirrored**
+  (the top is a mirror image of the bottom) or **Top & bottom, not mirrored** (the top is the bottom
+  turned round, bass on the right). Look > Visualizer > "On the Playing tab".
 - **Live view** – the spectrum after the EQ, a faint outline of the sound before it, and a scrolling
   waveform. The waveform is **pre-made for every song** (decoded once, like an index: one point per
   10 ms) and drawn from the player's position, so it's exactly in sync and costs nothing to show —
@@ -56,11 +58,22 @@ newer APK updates the app and keeps your settings.
 - **Smooth** – runs at the screen's highest refresh rate (120 Hz; "Highest refresh rate" in Look,
   the way Metrolist does it), nothing caps the frame rate, the moving background animates every
   frame, and release builds are optimised with R8 (Compose needs it to run smoothly).
+- **Smoothness** (Look > Screen) – the same glass costs some phones far more than others. On
+  **Automatic** the app watches how long its frames take; if it keeps stuttering it steps down by
+  itself and remembers that for the phone:
+  - **Full** – real blur everywhere, the bars at the bottom bend the page scrolling under them;
+  - **Balanced** – the bars bend the background instead of the page, panels bend without blur,
+    moving colours and visualizer at up to 60 fps;
+  - **Light** – plain frosted panels (no blur or bending), still background, visualizer at up to
+    30 fps.
+  You can also pick a level yourself, or "Measure again from Full".
 - **Look profiles** – Custom 1–5 in the top right of the Look tab, each keeping every Look setting
-  (visualizer refresh rate and detail included); the one in use saves each change. Picking a theme
-  changes only its colours, glass and background — your visualizer, corners, refresh rate and bar
-  settings stay.
-- **AMOLED themes** – **AMOLED** (default on new installs): pure black with an electric-cyan accent;
+  (visualizer refresh rate and detail, Smoothness included) and showing which theme it uses; the
+  one in use saves each change. An empty profile starts as the default look (AMOLED, hue 180°,
+  saturation and brightness 100%). Picking a theme changes only its colours, glass and background —
+  your visualizer, corners, refresh rate and bar settings stay — and switching between AMOLED and
+  AMOLED Cover keeps your own hue, saturation and brightness too.
+- **AMOLED themes** – **AMOLED** (default on new installs): pure black with a cyan accent (hue 180°);
   **AMOLED Cover**: the same pure black, with buttons, sliders and everything you can touch coloured
   from the current song's cover.
 - **Full screen** – the navigation bar is hidden inside the app (swipe up from the bottom edge to
@@ -102,7 +115,8 @@ newer APK updates the app and keeps your settings.
     while the EQ is flat), measure only new audio for the wave each frame, and sit above the
     glass rather than inside it, so the glass isn't re-rendered for every frame;
   - the moving background only animates while the app is on screen (and not with Battery
-    Saver); "Moving colours" off stops it.
+    Saver); "Moving colours" off stops it. On the AMOLED themes it's grayed out (nothing moves on
+    pure black), and the switch says when Battery Saver or Smoothness: Light is pausing it.
 
 ## Roadmap
 
@@ -146,7 +160,8 @@ GPL-compatible terms.
 - the real ExoPlayer + Media3 audio output + Rubber Band playing through a real-time output,
   while speed and pitch change (position must keep moving at the right rate, no gaps);
 - the YouTube Music parser against captured real responses;
-- the app's screens under Robolectric, with screenshots saved to `app/build/ui-shots/`.
+- the app's screens under Robolectric, with screenshots saved to `app/build/ui-shots/`;
+- the Smoothness stutter detector (when it steps down, and when it must not).
 
 With `-Dltots.live=true` two extra tests talk to the real YouTube Music / YouTube (search and the
 complete download pipeline with the bundled yt-dlp).
@@ -160,7 +175,8 @@ app/src/main/java/com/ltots/app/
   ytm/       YouTube Music client: search, albums, playlists, artists, song details, links
   download/  yt-dlp engine, download queue, tagging/cover, background service
   playback/  background playback service + connection
-  ui/        glass system, screens (Library, Playing, EQ, Look, Sound), components
+  ui/        glass system, Smoothness (frame-time watcher), screens (Library, Playing, EQ, Look,
+             Sound), components
 app/src/main/cpp/  Rubber Band (pitch/speed engine) + CMake build
 app/src/test/  audio-chain tests, YouTube Music parser tests, colour tests, UI tests
 ```

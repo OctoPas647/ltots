@@ -84,6 +84,18 @@ fun Modifier.glass(
     val pal = LocalPalette.current
     val surface = (tint ?: pal.glassTint).copy(alpha = (cfg.glassTint + tintBoost).coerceIn(0f, 0.95f))
     if (backdrop == null) return this.clip(shape).background(surface)
+    val level = com.ltots.app.ui.LocalEffects.current
+    if (level == com.ltots.app.data.Effects.LIGHT) {
+        // Smoothness: Light. Plain frosted panels, no graphics-chip effects at all. The bars over
+        // the page get a solid base so the page doesn't show through them.
+        val base = if (overContent) Modifier.background(pageBase(cfg.pureBlack, pal.dark).copy(alpha = 0.92f)) else Modifier
+        return this.clip(shape).then(base).background(surface)
+    }
+    // Balanced: bend without the blur. What's behind is the soft moving background (the bars
+    // aren't over the page in Balanced), which looks nearly the same blurred or not.
+    val withBlur = level == com.ltots.app.data.Effects.FULL
+    // In Full the bars bend the page itself; otherwise they sit on the background like the panels.
+    val bendsPage = overContent && withBlur
 
     // The glass library only redraws its glass when the glass is rebuilt, not when the values we
     // hand it change (that's why Frost / tint, Blur, Refraction and the play button's cover colour
@@ -95,8 +107,8 @@ fun Modifier.glass(
             // AMOLED: what's behind the glass is plain black, and blurring, bending or boosting
             // black still gives black. So that work is skipped on the graphics chip entirely and
             // the black is painted directly; it looks exactly the same (rim light and shadow stay).
-            plainBlack = cfg.pureBlack && !overContent,
-            blurDp = cfg.blurDp * strength,
+            plainBlack = cfg.pureBlack && !bendsPage,
+            blurDp = if (withBlur) cfg.blurDp * strength else 0f,
             refraction = cfg.refraction * strength,
             rimLight = cfg.rimLight,
             shadowAlpha = if (pal.dark) 0.22f else 0.08f,
@@ -107,7 +119,7 @@ fun Modifier.glass(
             val l = look.value
             if (!l.plainBlack) {
                 vibrancy()
-                blur(l.blurDp.dp.toPx())
+                if (l.blurDp > 0.01f) blur(l.blurDp.dp.toPx())
                 if (l.refraction > 0.01f) {
                     val minSide = size.minDimension
                     lens(
@@ -129,7 +141,7 @@ fun Modifier.glass(
     val highlight = remember(look) { { look.value.rimLight.let { if (it > 0.01f) Highlight.Default.copy(alpha = it) else null } } }
     val shadow = remember(look) { { Shadow(radius = 20.dp, color = Color.Black.copy(alpha = look.value.shadowAlpha)) } }
     val shapeOf = remember(shape) { { shape } }
-    val source = if (cfg.pureBlack && !overContent) remember { emptyBackdrop() } else backdrop
+    val source = if (cfg.pureBlack && !bendsPage) remember { emptyBackdrop() } else backdrop
     return this.drawBackdrop(
         backdrop = source,
         shape = shapeOf,
@@ -138,6 +150,13 @@ fun Modifier.glass(
         shadow = shadow,
         onDrawSurface = onDrawSurface,
     )
+}
+
+/** The colour of the page itself under everything (pure black on the AMOLED themes). */
+fun pageBase(pureBlack: Boolean, dark: Boolean): Color = when {
+    pureBlack -> Color.Black
+    dark -> Color(0xFF07060C)
+    else -> Color(0xFFF4F2FA)
 }
 
 /** Everything about the glass that can change while it is on screen. */
@@ -199,27 +218,30 @@ fun AppBackground(artwork: Bitmap?, modifier: Modifier = Modifier) {
     val pal = LocalPalette.current
     // The glow (Look tab), or the song's cover colours while cover colours are on.
     val (a, b, c) = pal.glows
-    val base = when {
-        cfg.pureBlack -> Color.Black
-        pal.dark -> Color(0xFF07060C)
-        else -> Color(0xFFF4F2FA)
-    }
+    val base = pageBase(cfg.pureBlack, pal.dark)
     if (cfg.pureBlack) {
         // AMOLED: true black only, so the screen's pixels stay switched off behind the glass.
         Box(modifier.background(Color.Black))
         return
     }
 
-    // The colour blobs drift with every frame the screen shows (up to 120 a second), so the
-    // motion is perfectly smooth. Only while the app is on screen, and not at all with Battery
-    // Saver on; "Moving colours" off stops it completely.
+    // The colour blobs (and the album-art glow) drift with every frame the screen shows, so the
+    // motion is smooth. Only while the app is on screen, and not with Battery Saver on;
+    // "Moving colours" off stops it completely. Smoothness: Balanced moves it up to 60 times a
+    // second, Light keeps it still (every move re-renders the glass on top of it).
     val phase = remember { androidx.compose.runtime.mutableFloatStateOf(0.8f) }
     val saver by com.ltots.app.ui.rememberBatterySaver()
-    if (cfg.animateBackground && !saver) {
-        com.ltots.app.ui.WhileOnScreen(cfg.animationSpeed) {
-            val periodNs = 60e9f / max(0.05f, cfg.animationSpeed)
+    val effects = com.ltots.app.ui.LocalEffects.current
+    if (backgroundMoves(cfg, saver, effects)) {
+        val minFrameNs = if (effects == com.ltots.app.data.Effects.BALANCED) 16_000_000L else 0L
+        com.ltots.app.ui.WhileOnScreen(cfg.animationSpeed, minFrameNs) {
+            val periodNs = motionPeriodNs(cfg.animationSpeed)
             var last = 0L
             while (true) {
+                if (minFrameNs > 0 && last != 0L) {
+                    val wait = (last + minFrameNs - System.nanoTime()) / 1_000_000L
+                    if (wait > 1) kotlinx.coroutines.delay(wait - 1)
+                }
                 androidx.compose.animation.core.withInfiniteAnimationFrameNanos { now ->
                     if (last != 0L) {
                         val step = (now - last).coerceAtMost(100_000_000L) / periodNs * TWO_PI
@@ -234,9 +256,10 @@ fun AppBackground(artwork: Bitmap?, modifier: Modifier = Modifier) {
     Box(modifier.background(base)) {
         Canvas(Modifier.fillMaxSize().graphicsLayer()) {
             val t = phase.floatValue // read while drawing: a new phase only redraws, never recomposes
-            blob(a, Offset(size.width * (0.25f + 0.15f * cos(t)), size.height * (0.22f + 0.1f * sin(t * 2))), size.maxDimension * 0.75f)
-            blob(b, Offset(size.width * (0.8f + 0.12f * sin(t + 1f)), size.height * (0.55f + 0.14f * cos(t))), size.maxDimension * 0.7f)
-            blob(c, Offset(size.width * (0.35f + 0.2f * sin(t * 1.5f + 2f)), size.height * (0.9f + 0.08f * cos(t + 3f))), size.maxDimension * 0.65f)
+            val w = size.width; val h = size.height; val m = size.maxDimension
+            blob(a, Offset(w * (0.3f + 0.28f * cos(t)), h * (0.25f + 0.18f * sin(t * 2))), m * 0.75f)
+            blob(b, Offset(w * (0.75f + 0.25f * sin(t + 1f)), h * (0.55f + 0.22f * cos(t))), m * 0.7f)
+            blob(c, Offset(w * (0.4f + 0.3f * sin(t * 1.5f + 2f)), h * (0.85f + 0.15f * cos(t + 3f))), m * 0.65f)
         }
         if (cfg.artworkBackground && artwork != null) {
             // A tiny, already-blurred copy of the cover, scaled up smoothly: looks the same as a
@@ -249,7 +272,16 @@ fun AppBackground(artwork: Bitmap?, modifier: Modifier = Modifier) {
             glow?.let { img ->
                 Image(
                     img, null,
-                    Modifier.fillMaxSize().alpha(if (pal.dark) 0.5f else 0.35f),
+                    Modifier.fillMaxSize()
+                        // Drifts and breathes with the colours (moved as a layer: no redrawing).
+                        .graphicsLayer {
+                            val t = phase.floatValue
+                            val k = 1.25f + 0.06f * sin(t * 2)
+                            scaleX = k; scaleY = k
+                            translationX = size.width * 0.09f * cos(t)
+                            translationY = size.height * 0.05f * sin(t + 1f)
+                        }
+                        .alpha(if (pal.dark) 0.5f else 0.35f),
                     contentScale = ContentScale.Crop,
                     filterQuality = androidx.compose.ui.graphics.FilterQuality.Low,
                 )
@@ -298,6 +330,13 @@ private fun boxPass(src: IntArray, dst: IntArray, n: Int, r: Int, horizontal: Bo
     }
 }
 private const val TWO_PI = (2 * Math.PI).toFloat()
+
+/** Whether the background is moving right now (see Moving colours on the Look tab). */
+fun backgroundMoves(cfg: com.ltots.app.data.ThemeConfig, batterySaver: Boolean, effects: com.ltots.app.data.Effects): Boolean =
+    cfg.animateBackground && !cfg.pureBlack && !batterySaver && effects != com.ltots.app.data.Effects.LIGHT
+
+/** One full loop of the moving colours: 20 s at 1×, so 40 s at the default 0.5×, about 7 s at 3×. */
+fun motionPeriodNs(speed: Float): Float = 20e9f / max(0.05f, speed)
 
 private fun DrawScope.blob(color: Color, center: Offset, radius: Float) {
     drawCircle(

@@ -37,6 +37,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.ExternalResource
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasClickAction
 import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
@@ -195,6 +197,55 @@ class NewControlsUiTest {
         click("Custom 1")
         click("Custom 2"); idle(1500)
         assertEquals(aurora, ThemeState.config.value)
+    }
+
+    /**
+     * Moving colours grays out where it can't work, the top & bottom visualizer, Smoothness, the
+     * default look, and the preamp's reset button.
+     */
+    @Config(qualifiers = "w411dp-h2300dp-xxhdpi")
+    @Test fun lookAndPreampAdditions() {
+        rule.mainClock.autoAdvance = false
+        idle()
+        tab("Look")
+        val moving = hasText("Moving colours") and hasClickAction()
+        fun speed() = hasProgressBarRangeInfo(androidx.compose.ui.semantics.ProgressBarRangeInfo(ThemeState.config.value.animationSpeed, 0.1f..3f))
+        rule.onNodeWithText("AMOLED Cover").performClick(); idle(1000)
+        rule.onNode(moving).assertIsNotEnabled()
+        rule.onNode(speed()).assertIsNotEnabled()
+        rule.onNodeWithText("AMOLED").performClick(); idle(1000)
+        rule.onNode(moving).assertIsNotEnabled()
+        rule.onNodeWithText("Aurora").performClick(); idle(1000)
+        rule.onNode(moving).assertIsEnabled()
+        rule.onNode(speed()).assertIsEnabled()
+        assertTrue(ThemeState.config.value.animateBackground)
+
+        click("Behind the cover")
+        click("Top & bottom, mirrored")
+        assertEquals(com.ltots.app.data.BehindLayout.BOTH_MIRRORED, ThemeState.config.value.behindLayout)
+        click("Top & bottom, not mirrored")
+        assertEquals(com.ltots.app.data.BehindLayout.BOTH, ThemeState.config.value.behindLayout)
+
+        click("Light")
+        assertEquals(com.ltots.app.data.EffectsMode.LIGHT, ThemeState.config.value.effects)
+        rule.onNode(moving).assertIsEnabled() // can be switched, but Light keeps it paused (said under it)
+        rule.onNodeWithText("Paused by Smoothness: Light (below, under Screen).").assertExists()
+        shot("18_look_smoothness_light")
+        click("Automatic")
+        assertEquals(com.ltots.app.data.EffectsMode.AUTO, ThemeState.config.value.effects)
+
+        click("Reset this look to default")
+        assertEquals(com.ltots.app.data.Hsv(180f, 1f, 1f), ThemeState.config.value.accentHsv)
+        assertTrue(ThemeState.config.value.pureBlack)
+
+        // EQ: the preamp's own reset, back to 0 dB in one tap.
+        tab("EQ")
+        AudioEngine.updateEq { it.copy(preampDb = -6f) }; idle()
+        rule.onNodeWithContentDescription("Reset Preamp").assertIsEnabled()
+        rule.onNodeWithContentDescription("Reset Preamp").performSemanticsAction(SemanticsActions.OnClick); idle()
+        assertEquals(0f, AudioEngine.effectiveEq.value.preampDb, 0f)
+        rule.onNodeWithContentDescription("Reset Preamp").assertIsNotEnabled()
+        shot("19_eq_preamp_reset")
     }
 
     /** A tall screen, so the Glass card shows without scrolling (scrolling stalls under Robolectric). */

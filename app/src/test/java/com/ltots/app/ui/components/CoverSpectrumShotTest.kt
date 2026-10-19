@@ -83,6 +83,8 @@ class CoverSpectrumShotTest {
     @Test fun behindBelow() = behind(BehindLayout.BELOW)
     @Test fun behindAbove() = behind(BehindLayout.ABOVE)
     @Test fun behindAboveFlipped() = behind(BehindLayout.ABOVE_FLIPPED)
+    @Test fun behindBothMirrored() = behind(BehindLayout.BOTH_MIRRORED)
+    @Test fun behindBoth() = behind(BehindLayout.BOTH)
 
     @Test fun bars() = shot(SpectrumStyle.BARS)
     @Test fun curve() = shot(SpectrumStyle.CURVE)
