@@ -30,6 +30,20 @@ newer APK updates the app and keeps your settings.
   down), **From above, flipped** (bass on the right), or both at once: **Top & bottom, mirrored**
   (the top is a mirror image of the bottom) or **Top & bottom, not mirrored** (the top is the bottom
   turned round, bass on the right). Look > Visualizer > "On the Playing tab".
+- **Icon mode** – pick a black-and-white picture (PNG works best; JPG and others too) and it takes
+  the cover's place. The picture itself is never drawn: the live spectrum grows out of the outline
+  of its dark parts, so the shape shows only through the bars. It follows every visualizer setting
+  (style, layout along the outline, strength, "before EQ" outline, frame rate, detail, Battery
+  Saver, Smoothness, accent colour). Bars go **outward** over the background, **inward** into the
+  dark parts, or **both ways**; they stop short where the white space narrows (gaps between coils,
+  curls) so they never meet or cover a dark part, and keep a safe margin from the screen's edge.
+  The dark parts can be left **Dark** (empty), **Glass** (the app's glass in the play button's
+  colour, following Blur / Frost / Rim light) or **Accent** (solid, like the play button), with
+  the **song's cover behind the icon** if you like. While nothing plays: **Show nothing**, **Keep
+  the icon** or **Show the cover**. A **Black / white threshold** (with Undo and Reset), **Invert**
+  and **Minimum hole size** (tiny enclosed white spots such as an eye's highlight are ignored)
+  shape how the picture is traced, with a live preview. Saved in each Look profile.
+  Look > Visualizer > "On the Playing tab" > Icon.
 - **Live view** – the spectrum after the EQ, a faint outline of the sound before it, and a scrolling
   waveform. The waveform is **pre-made for every song** (decoded once, like an index: one point per
   10 ms) and drawn from the player's position, so it's exactly in sync and costs nothing to show —
@@ -160,7 +174,12 @@ GPL-compatible terms.
 - the real ExoPlayer + Media3 audio output + Rubber Band playing through a real-time output,
   while speed and pitch change (position must keep moving at the right rate, no gaps);
 - the YouTube Music parser against captured real responses;
-- the app's screens under Robolectric, with screenshots saved to `app/build/ui-shots/`;
+- the app's screens under Robolectric, with screenshots saved to `app/build/ui-shots/` (including
+  icon mode, `22_icon_*`);
+- icon mode's tracing: threshold and invert, transparency, speck removal, minimum hole size,
+  outlines and normals, bar reach in narrow gaps and curls, and the spectrum's order along the
+  outline — on drawn fixtures and on a reference snake picture that lives only in the tests
+  (`app/src/test/resources/icons/`), not in the app;
 - the Smoothness stutter detector (when it steps down, and when it must not).
 
 With `-Dltots.live=true` two extra tests talk to the real YouTube Music / YouTube (search and the
@@ -171,12 +190,20 @@ complete download pipeline with the bundled yt-dlp).
 ```
 app/src/main/java/com/ltots/app/
   audio/     EQ maths, the real-time EQ processor, analyzer/FFT, output & bit-perfect handling
-  data/      local library, per-song profiles, presets, theme & settings storage
+  data/      local library, per-song profiles, presets, theme & settings storage, picked icons
   ytm/       YouTube Music client: search, albums, playlists, artists, song details, links
   download/  yt-dlp engine, download queue, tagging/cover, background service
   playback/  background playback service + connection
   ui/        glass system, Smoothness (frame-time watcher), screens (Library, Playing, EQ, Look,
              Sound), components
+  ui/components/
+    LiveVisual.kt       the analyzer loop (frame rate, Battery Saver, Smoothness, screen-off)
+    SpectrumOutline.kt  points + outward normals + reach that a spectrum grows from (shared)
+    CoverSpectrum.kt    CoverRing: the spectrum round the cover
+    IconMask.kt         icon mode: picture → black/white mask → smooth outlines → distance fields
+    IconRing.kt         icon mode: the outlines placed on screen, bar reach/width, band order
+    IconSpectrum.kt     icon mode: loading/caching, drawing, fills, idle states
+  ui/screens/LookIconSettings.kt  the icon controls in Look
 app/src/main/cpp/  Rubber Band (pitch/speed engine) + CMake build
-app/src/test/  audio-chain tests, YouTube Music parser tests, colour tests, UI tests
+app/src/test/  audio-chain tests, YouTube Music parser tests, colour tests, icon-mode tests, UI tests
 ```
