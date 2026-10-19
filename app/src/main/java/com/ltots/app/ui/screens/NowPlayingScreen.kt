@@ -60,6 +60,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.media3.common.Player
 import com.ltots.app.audio.AudioEngine
 import com.ltots.app.audio.OutputDevice
@@ -239,29 +240,62 @@ private fun PitchSpeedCard() {
             }
 
             // Pitch — heard live while dragging (in tape mode it's applied on release).
+            // Two sliders: whole semitones, and a fine one for the cents in between (1 cent steps).
+            var typing by remember { mutableStateOf(false) }
+            // While the fine slider is dragged, its semitone stays put (so passing ±50 ct doesn't
+            // make the slider jump to the other end).
+            var fineBase by remember { mutableStateOf<Int?>(null) }
+            val semis = fineBase ?: (cents / 100f).roundToInt()
+            val fine = cents - semis * 100
+            fun setCents(c: Int) {
+                AudioEngine.setPitch(c)
+                if (tape) AudioEngine.commit()
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Pitch", color = pal.textDim, modifier = Modifier.weight(1f))
-                Text(pitchLabel(cents), color = pal.text, fontWeight = FontWeight.SemiBold)
+                // Tap the value to type an exact pitch.
+                Text(
+                    pitchLabel(cents), color = pal.text, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { typing = true }
+                        .background(pal.text.copy(alpha = 0.08f)).padding(horizontal = 8.dp, vertical = 4.dp),
+                )
                 Spacer(Modifier.width(8.dp))
-                Pill("Reset", false, { AudioEngine.setPitch(0); if (tape) AudioEngine.commit() })
+                Pill("Reset", false, { setCents(0) })
             }
             Slider(
-                value = (cents / 100f).coerceIn(-12f, 12f),
-                // Snaps to whole semitones; the ±10 ct buttons fine-tune.
-                onValueChange = { v -> AudioEngine.setPitch(v.roundToInt() * 100 + cents.mod(100).let { if (it > 50) it - 100 else it }) },
+                value = semis.toFloat().coerceIn(-12f, 12f),
+                // Whole semitones; the fine slider below keeps its cents.
+                onValueChange = { v -> AudioEngine.setPitch((v.roundToInt() * 100 + fine).coerceIn(-1200, 1200)) },
                 steps = 23,
                 onValueChangeFinished = { if (tape) AudioEngine.commit() },
                 valueRange = -12f..12f,
                 colors = sliderColors,
             )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Fine", color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(36.dp))
+                Slider(
+                    value = fine.toFloat().coerceIn(-50f, 50f),
+                    onValueChange = { v ->
+                        val base = fineBase ?: semis.also { fineBase = it }
+                        AudioEngine.setPitch((base * 100 + v.roundToInt()).coerceIn(-1200, 1200))
+                    },
+                    onValueChangeFinished = { fineBase = null; if (tape) AudioEngine.commit() },
+                    valueRange = -50f..50f,
+                    colors = sliderColors,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    (if (fine > 0) "+" else if (fine < 0) "−" else "") + "${abs(fine)} ct",
+                    color = pal.textDim, style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.End, modifier = Modifier.width(48.dp),
+                )
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(-100 to "−1 st", -10 to "−10 ct", 10 to "+10 ct", 100 to "+1 st").forEach { (d, l) ->
-                    Pill(l, false, {
-                        AudioEngine.setPitch(cents + d)
-                        if (tape) AudioEngine.commit()
-                    })
+                listOf(-100 to "−1 st", -1 to "−1 ct", 1 to "+1 ct", 100 to "+1 st").forEach { (d, l) ->
+                    Pill(l, false, { setCents((cents + d).coerceIn(-1200, 1200)) })
                 }
             }
+            if (typing) ExactPitchDialog(cents, onDismiss = { typing = false }, onSet = { setCents(it); typing = false })
 
             Spacer(Modifier.height(14.dp))
             // Stem pitch — early version. Mids moves the overall pitch for now; independent
@@ -324,6 +358,76 @@ private fun PitchSpeedCard() {
                 color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 10.dp),
             )
         }
+    }
+}
+
+/**
+ * Type an exact pitch: semitones and cents, or tune to a reference — the note A at a given
+ * frequency (A = 432 Hz is about −32 cents from the standard 440 Hz).
+ */
+@Composable
+internal fun ExactPitchDialog(cents: Int, onDismiss: () -> Unit, onSet: (Int) -> Unit) {
+    val pal = LocalPalette.current
+    val st0 = cents / 100
+    var semiText by remember { mutableStateOf(if (st0 == 0) "" else st0.toString()) }
+    var centText by remember { mutableStateOf((cents - st0 * 100).let { if (it == 0) "" else it.toString() }) }
+    var hzText by remember { mutableStateOf("") }
+    fun fromHz(): Int? = hzText.replace(',', '.').toDoubleOrNull()?.takeIf { it in 220.0..880.0 }
+        ?.let { (1200 * kotlin.math.ln(it / 440.0) / kotlin.math.ln(2.0)).roundToInt() }
+    fun fromFields(): Int? {
+        val s = semiText.trim().replace('−', '-').ifEmpty { "0" }.toIntOrNull() ?: return null
+        val c = centText.trim().replace('−', '-').ifEmpty { "0" }.toIntOrNull() ?: return null
+        return s * 100 + c
+    }
+    val result = (if (hzText.isNotBlank()) fromHz() else fromFields())?.takeIf { it in -1200..1200 }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Exact pitch") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    NumberField(semiText, { semiText = it; hzText = "" }, "Semitones", Modifier.weight(1f))
+                    NumberField(centText, { centText = it; hzText = "" }, "Cents", Modifier.weight(1f))
+                    // Number keyboards often have no minus key: this flips higher / lower.
+                    Pill("±", false, {
+                        fromFields()?.let { v -> val n = -v; semiText = (n / 100).toString(); centText = (n - n / 100 * 100).toString() }
+                        hzText = ""
+                    })
+                }
+                Text("or tune the note A to", color = pal.textDim, style = MaterialTheme.typography.bodySmall)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    NumberField(hzText, { hzText = it }, "440", Modifier.weight(1f))
+                    Text("  Hz", color = pal.textDim)
+                }
+                Text(
+                    when {
+                        result == null -> "Up to ±12 semitones (±1200 cents); A between 220 and 880 Hz."
+                        else -> "= " + pitchLabel(result) + if (hzText.isBlank()) "" else " (A = ${hzText.trim()} Hz)"
+                    },
+                    color = if (result == null) Color(0xFFFFC14D) else pal.textFaint, style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = { result?.let(onSet) }, enabled = result != null) { Text("Set") }
+        },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun NumberField(value: String, onChange: (String) -> Unit, hint: String, modifier: Modifier = Modifier) {
+    val pal = LocalPalette.current
+    Box(modifier.clip(RoundedCornerShape(12.dp)).background(pal.text.copy(alpha = 0.08f)).padding(12.dp)) {
+        if (value.isEmpty()) Text(hint, color = pal.textFaint)
+        androidx.compose.foundation.text.BasicTextField(
+            value, { v -> onChange(v.filter { it.isDigit() || it == '-' || it == '−' || it == '.' || it == ',' }.take(7)) },
+            singleLine = true,
+            textStyle = androidx.compose.ui.text.TextStyle(color = pal.text, fontSize = 16.sp),
+            cursorBrush = androidx.compose.ui.graphics.SolidColor(pal.accent),
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 

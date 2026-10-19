@@ -17,6 +17,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTextInput
 import androidx.media3.session.MediaSessionService
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -220,5 +221,31 @@ class NewControlsUiTest {
         click("Battery EQ (experimental)")
         idle(1000)
         assertTrue(!AudioEngine.batteryEqActive.value)
+    }
+
+    /** Pitch can be tuned to the cent: fine slider, ±1 ct, and typing an exact value or A = 432 Hz. */
+    @Config(qualifiers = "w411dp-h3000dp-xxhdpi")
+    @Test fun finePitch() {
+        rule.mainClock.autoAdvance = false
+        idle()
+        click("Song number 1") // a song in the player shows the pitch controls
+        idle(1500)
+        tab("Playing")
+        AudioEngine.setPitch(0)
+        idle()
+        // Fine slider: 1-cent resolution, on top of the semitone.
+        rule.onNode(hasProgressBarRangeInfo(androidx.compose.ui.semantics.ProgressBarRangeInfo(0f, -50f..50f)))
+            .performSemanticsAction(SemanticsActions.SetProgress) { it(17f) }
+        idle()
+        assertEquals(17, AudioEngine.pitchCents.value)
+        click("+1 ct"); click("+1 ct")
+        assertEquals(19, AudioEngine.pitchCents.value)
+        click("+1 st")
+        assertEquals(119, AudioEngine.pitchCents.value)
+        rule.onNodeWithText("+1 st 19 ct").assertExists()
+        shot("18_fine_pitch")
+        // Tapping the value opens the exact-pitch dialog (tested on its own in ExactPitchDialogTest:
+        // dialogs don't settle inside the whole app under the test runner).
+        AudioEngine.setPitch(0)
     }
 }
