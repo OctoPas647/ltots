@@ -605,10 +605,19 @@ private fun PresetsCard(eq: EqState, onApply: (EqPreset) -> Unit) {
 private fun EqProfiles(eq: EqState, onLoad: (EqState) -> Unit) {
     val pal = LocalPalette.current
     var slots by remember { mutableStateOf(Store.loadEqProfiles().let { saved -> List(EQ_PROFILES) { saved.getOrNull(it) } }) }
+    // The one profile picked last. Only it can be "In use", even when two profiles hold the
+    // same EQ (both used to light up then).
+    var active by remember { mutableStateOf(Store.loadEqActiveProfile()) }
     var open by remember { mutableStateOf(false) }
     fun save(i: Int) {
         slots = slots.toMutableList().also { it[i] = eq }
-        Store.saveEqProfiles(slots)
+        active = i
+        Store.saveEqProfiles(slots, active)
+    }
+    fun load(i: Int, slot: EqState) {
+        active = i
+        Store.saveEqProfiles(slots, active)
+        onLoad(slot)
     }
     Box {
         GlassCircleButton({ open = true }, Modifier.size(40.dp)) {
@@ -616,7 +625,8 @@ private fun EqProfiles(eq: EqState, onLoad: (EqState) -> Unit) {
         }
         ProfileMenu(open, { open = false }, "EQ profiles", "Tap one to load it. Tap an empty one, or a save icon, to keep the EQ you have now.") {
             slots.forEachIndexed { i, slot ->
-                val inUse = slot != null && EqTone.sameShape(slot, eq)
+                // In use: the one you picked, while the EQ is still what it holds.
+                val inUse = i == active && slot != null && EqTone.sameShape(slot, eq)
                 ProfileRow(
                     name = customName(i),
                     status = when {
@@ -625,7 +635,7 @@ private fun EqProfiles(eq: EqState, onLoad: (EqState) -> Unit) {
                         else -> "Saved · tap to load"
                     },
                     active = inUse,
-                    onClick = { if (slot == null) save(i) else { onLoad(slot); open = false } },
+                    onClick = { if (slot == null) save(i) else { load(i, slot); open = false } },
                     trailing = {
                         IconButton(onClick = { save(i) }) {
                             Icon(Icons.Rounded.Save, "Save the current EQ to ${customName(i)}", tint = pal.textDim)

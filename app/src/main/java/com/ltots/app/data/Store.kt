@@ -90,9 +90,12 @@ object Store {
         List(arr.length()) { i -> arr.optJSONObject(i)?.let { Json.eq(it) } }
     } ?: emptyList()
 
-    fun saveEqProfiles(slots: List<EqState?>) = writeDebounced("eq_profiles.json") {
+    /** The EQ profile picked last (null = none), so only that one can show as in use. */
+    fun loadEqActiveProfile(): Int? = read("eq_profiles.json")?.optInt("active", -1)?.takeIf { it >= 0 }
+
+    fun saveEqProfiles(slots: List<EqState?>, active: Int? = null) = writeDebounced("eq_profiles.json") {
         val arr = JSONArray().apply { slots.forEach { e -> put(if (e != null) Json.eq(e) else JSONObject.NULL) } }
-        JSONObject().put("slots", arr).toString()
+        JSONObject().put("slots", arr).put("active", active ?: -1).toString()
     }
 
     // ---- per-song profiles -----------------------------------------------------------------

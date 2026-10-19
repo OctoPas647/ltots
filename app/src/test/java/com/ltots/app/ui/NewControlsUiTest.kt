@@ -140,6 +140,9 @@ class NewControlsUiTest {
         screen("11_eq_profiles_menu")
         click("Custom 1")
         rule.onNodeWithText("In use").assertExists()
+        // Save the same EQ into Custom 2 as well: still only one profile is in use (the last one).
+        rule.onNodeWithContentDescription("Save the current EQ to Custom 2").performClick(); idle()
+        assertEquals("only one EQ profile in use", 1, rule.onAllNodesWithText("In use").fetchSemanticsNodes().size)
         screen("11a_eq_profile_saved")
         click("Custom 1") // a saved one loads and closes the menu
 
