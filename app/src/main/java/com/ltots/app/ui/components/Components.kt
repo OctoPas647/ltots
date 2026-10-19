@@ -97,6 +97,10 @@ fun LabeledSlider(
      */
     onReset: (() -> Unit)? = null,
     isDefault: Boolean = false,
+    /** Called when a drag ends (so a whole drag can count as one step, e.g. for Undo). */
+    onChangeFinished: (() -> Unit)? = null,
+    /** Extra controls at the end of the label row (after the value). */
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     val pal = LocalPalette.current
     Column(modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.38f)) {
@@ -119,10 +123,15 @@ fun LabeledSlider(
                     )
                 }
             }
+            if (trailing != null) {
+                Spacer(Modifier.width(8.dp))
+                trailing()
+            }
         }
         Slider(
             value = value.coerceIn(range.start, range.endInclusive),
             onValueChange = onChange,
+            onValueChangeFinished = onChangeFinished,
             valueRange = range,
             steps = steps,
             enabled = enabled,

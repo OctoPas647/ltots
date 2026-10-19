@@ -73,7 +73,7 @@ private val swatches = listOf(
 )
 
 @Composable
-fun LookScreen() {
+fun LookScreen(artwork: android.graphics.Bitmap? = null) {
     // Edit the saved theme (LocalThemeConfig may be showing cover-based colours).
     val cfg by ThemeState.config.collectAsState()
     val pal = LocalPalette.current
@@ -213,20 +213,27 @@ fun LookScreen() {
                 SectionTitle("Visualizer")
                 Text("On the Playing tab", color = LocalPalette.current.textDim, style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.height(6.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Pill("Around the cover", cfg.spectrumAroundCover, { set { it.copy(spectrumAroundCover = true) } })
-                    Pill("Behind the cover", !cfg.spectrumAroundCover, { set { it.copy(spectrumAroundCover = false) } })
+                FlowPills {
+                    Pill("Around the cover", !cfg.iconMode && cfg.spectrumAroundCover, { set { it.copy(iconMode = false, spectrumAroundCover = true) } })
+                    Pill("Behind the cover", !cfg.iconMode && !cfg.spectrumAroundCover, { set { it.copy(iconMode = false, spectrumAroundCover = false) } })
+                    Pill("Icon", cfg.iconMode, { set { it.copy(iconMode = true) } })
                 }
                 Spacer(Modifier.height(8.dp))
+                // Round the cover and along an icon's outline the spectrum runs the same ways.
+                val ring = cfg.spectrumAroundCover || cfg.iconMode
                 FlowPills {
-                    if (cfg.spectrumAroundCover) {
+                    if (ring) {
                         RingLayout.entries.forEach { l -> Pill(l.label, cfg.ringLayout == l, { set { it.copy(ringLayout = l) } }) }
                     } else {
                         BehindLayout.entries.forEach { l -> Pill(l.label, cfg.behindLayout == l, { set { it.copy(behindLayout = l) } }) }
                     }
                 }
                 Text(
-                    if (cfg.spectrumAroundCover) when (cfg.ringLayout) {
+                    if (cfg.iconMode) when (cfg.ringLayout) {
+                        RingLayout.LOOP -> "Once along the icon's outlines, longest first: bass at the top, round to the treble."
+                        RingLayout.MIRRORED -> "The same both ways round the outlines: treble at the top, bass halfway round."
+                        RingLayout.MIRRORED_FLIPPED -> "The same both ways round the outlines: bass at the top, treble halfway round."
+                    } else if (cfg.spectrumAroundCover) when (cfg.ringLayout) {
                         RingLayout.LOOP -> "One continuous ring round the smaller cover: bass at the top, clockwise to the treble."
                         RingLayout.MIRRORED -> "The same on both sides: bass at the bottom, treble at the top."
                         RingLayout.MIRRORED_FLIPPED -> "The same on both sides, upside down: bass at the top, treble at the bottom."
@@ -240,6 +247,7 @@ fun LookScreen() {
                     color = LocalPalette.current.textFaint, style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(top = 6.dp, bottom = 10.dp),
                 )
+                if (cfg.iconMode) IconSettings(cfg, artwork, ::set)
                 Text("Style", color = LocalPalette.current.textDim, style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.height(6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

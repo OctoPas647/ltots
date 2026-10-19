@@ -145,7 +145,7 @@ fun AppRoot() {
                         Tab.PLAYER -> NowPlayingScreen(player, artwork, onOpenEq = { tab = Tab.EQ }, onOpenSound = { tab = Tab.SOUND })
                         Tab.EQ -> EqScreen(player)
                         Tab.DOWNLOADS -> DownloadsScreen(player, onOpenPlayer = { tab = Tab.PLAYER })
-                        Tab.LOOK -> LookScreen()
+                        Tab.LOOK -> LookScreen(artwork)
                         Tab.SOUND -> SoundScreen()
                     }
                 }
