@@ -97,6 +97,7 @@ object ThemeState {
         showPreEqGhost = cur.showPreEqGhost,
         visualizerFps = cur.visualizerFps,
         analyzerBands = cur.analyzerBands,
+        spectrumAroundCover = cur.spectrumAroundCover,
         maxRefresh = cur.maxRefresh,
         hideNavBar = cur.hideNavBar,
         hideStatusBar = cur.hideStatusBar,

@@ -43,6 +43,8 @@ class LiveVisual(val analyzer: Analyzer) {
     internal val fill = Path()
     internal val ghostCurve = Path()
     internal val wave = Path()
+    /** Points around the cover for the wrapped visualizer, kept between frames. */
+    internal var ring: CoverRing? = null
     /** True while the EQ leaves the sound unchanged: the "before" equals the "after". */
     var preMirrorsPost = false
 }

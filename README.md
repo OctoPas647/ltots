@@ -23,6 +23,9 @@ newer APK updates the app and keeps your settings.
   Everything below stays one tap away under **Fine-tune**.
 - **Parametric EQ** – any number of bands (1–64); every band has an exact frequency, gain, width (Q)
   and type (peak, low/high shelf, low/high cut). Drag the dots on the curve or type exact values.
+- **Visualizer around the cover** – on the Playing tab the live spectrum rings a slightly smaller
+  cover (bass at the bottom, treble at the top, mirrored), in the Bars, Curve or Mirror style; or,
+  as before, rises behind the full-size cover (Look > Visualizer > "On the Playing tab").
 - **Live view** – the spectrum after the EQ, a faint outline of the sound before it, and a scrolling
   waveform. The waveform is **pre-made for every song** (decoded once, like an index: one point per
   10 ms) and drawn from the player's position, so it's exactly in sync and costs nothing to show —

@@ -185,6 +185,20 @@ fun LookScreen() {
         GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
             Column(Modifier.padding(16.dp)) {
                 SectionTitle("Visualizer")
+                Text("On the Playing tab", color = LocalPalette.current.textDim, style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Pill("Around the cover", cfg.spectrumAroundCover, { set { it.copy(spectrumAroundCover = true) } })
+                    Pill("Behind the cover", !cfg.spectrumAroundCover, { set { it.copy(spectrumAroundCover = false) } })
+                }
+                Text(
+                    if (cfg.spectrumAroundCover) "The spectrum rings the cover, which is a little smaller so the ring has room."
+                    else "The spectrum rises behind the full-size cover.",
+                    color = LocalPalette.current.textFaint, style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 6.dp, bottom = 10.dp),
+                )
+                Text("Style", color = LocalPalette.current.textDim, style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     SpectrumStyle.entries.forEach { s -> Pill(s.label, cfg.spectrumStyle == s, { set { it.copy(spectrumStyle = s) } }) }
                 }

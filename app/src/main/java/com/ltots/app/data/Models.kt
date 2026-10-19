@@ -103,6 +103,8 @@ data class ThemeConfig(
     val showPreEqGhost: Boolean = true,
     /** Visualizer refresh rate in frames per second (0 = off). Lower uses less battery. */
     val visualizerFps: Int = 120,
+    /** Playing tab: the visualizer wraps around the (smaller) cover; off = behind the cover. */
+    val spectrumAroundCover: Boolean = true,
     /** How finely the live spectrum splits the sound (number of bars). */
     val analyzerBands: Int = 96,
     /** Run the app at the screen's highest refresh rate (120 Hz) instead of letting the phone pick. */
@@ -210,7 +212,7 @@ object Json {
         put("dyn", t.dynamicColors)
         t.accentHsv?.let { put("aHsv", hsvJson(it)) }
         t.glowHsv?.let { put("gHsv", hsvJson(it)) }
-        put("bands", t.analyzerBands); put("maxHz", t.maxRefresh)
+        put("bands", t.analyzerBands); put("maxHz", t.maxRefresh); put("wrap", t.spectrumAroundCover)
     }
 
     private fun hsvJson(h: Hsv) = JSONArray().put(h.h.toDouble()).put(h.s.toDouble()).put(h.v.toDouble())
@@ -242,6 +244,7 @@ object Json {
                 .let { if (it == 30 && o.optInt("vfpsV", 0) < 3) 120 else it },
             analyzerBands = o.optInt("bands", d.analyzerBands).let { if (it in listOf(48, 96, 160)) it else d.analyzerBands },
             maxRefresh = o.optBoolean("maxHz", d.maxRefresh),
+            spectrumAroundCover = o.optBoolean("wrap", d.spectrumAroundCover),
             accentHsv = hsvOf(o.optJSONArray("aHsv")),
             glowHsv = hsvOf(o.optJSONArray("gHsv")),
             pureBlack = o.optBoolean("black", d.pureBlack),

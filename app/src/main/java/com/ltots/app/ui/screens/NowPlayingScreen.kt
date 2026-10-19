@@ -66,6 +66,7 @@ import com.ltots.app.audio.AudioEngine
 import com.ltots.app.audio.OutputDevice
 import com.ltots.app.ui.bottomChrome
 import com.ltots.app.ui.PlayerUi
+import com.ltots.app.ui.components.CoverSpectrum
 import com.ltots.app.ui.components.LiveSpectrum
 import com.ltots.app.ui.components.Pill
 import com.ltots.app.ui.components.SectionTitle
@@ -117,16 +118,22 @@ fun NowPlayingScreen(player: PlayerUi, artwork: Bitmap?, onOpenEq: () -> Unit, o
             return@Column
         }
 
-        // Artwork with the live spectrum glowing behind it
-        val coverAlpha = com.ltots.app.ui.theme.LocalThemeConfig.current.coverOpacity
+        // Artwork with the live spectrum: wrapped around a smaller cover, or rising behind the
+        // full-size one (Look tab > Visualizer).
+        val lookCfg = com.ltots.app.ui.theme.LocalThemeConfig.current
+        val coverAlpha = lookCfg.coverOpacity
+        val wrap = lookCfg.spectrumAroundCover
+        val coverFraction = if (wrap) COVER_WRAPPED else COVER_FULL
+        val coverCorner = if (wrap) 24.dp else 28.dp
         Box(Modifier.fillMaxWidth().aspectRatio(1f), contentAlignment = Alignment.Center) {
-            LiveSpectrum(visual, Modifier.fillMaxSize().padding(top = 40.dp), showWave = false, intensity = 0.8f)
+            if (wrap) CoverSpectrum(visual, coverFraction, coverCorner, Modifier.fillMaxSize(), intensity = 0.9f)
+            else LiveSpectrum(visual, Modifier.fillMaxSize().padding(top = 40.dp), showWave = false, intensity = 0.8f)
             Box(
-                Modifier.fillMaxWidth(0.82f).aspectRatio(1f)
+                Modifier.fillMaxWidth(coverFraction).aspectRatio(1f)
                     // Cover opacity (Look tab): lower lets the live spectrum behind show through.
                     .graphicsLayer { alpha = coverAlpha }
-                    .shadow(28.dp, RoundedCornerShape(28.dp), ambientColor = pal.accent, spotColor = pal.accent)
-                    .clip(RoundedCornerShape(28.dp)).background(pal.text.copy(alpha = 0.08f)),
+                    .shadow(28.dp, RoundedCornerShape(coverCorner), ambientColor = pal.accent, spotColor = pal.accent)
+                    .clip(RoundedCornerShape(coverCorner)).background(pal.text.copy(alpha = 0.08f)),
                 contentAlignment = Alignment.Center,
             ) {
                 if (artwork != null) {
@@ -468,3 +475,7 @@ private fun EqShortcut(onOpenEq: () -> Unit) {
         }
     }
 }
+
+/** The cover's width on the Playing tab: full size, or smaller with the visualizer around it. */
+private const val COVER_FULL = 0.82f
+private const val COVER_WRAPPED = 0.62f
