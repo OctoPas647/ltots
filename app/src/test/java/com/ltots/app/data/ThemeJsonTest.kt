@@ -20,4 +20,19 @@ class ThemeJsonTest {
         assertTrue("navigation bar hidden by default", t.hideNavBar)
         assertEquals(false, t.hideStatusBar)
     }
+
+    @Test fun iconModeSettingsSurviveSaveAndLoad() {
+        val t = ThemeConfig(
+            iconMode = true, iconFile = "icon-123.png", iconThreshold = 0.62f, iconInvert = true, iconMinHole = 0.004f,
+            iconFill = IconFill.GLASS, iconCoverBehind = true, iconBars = IconBars.BOTH, iconIdle = IconIdle.COVER,
+        )
+        assertEquals(t, Json.theme(JSONObject(Json.theme(t).toString())))
+        // Older saves: icon mode off, no picture, 50% threshold, nothing shown while paused.
+        val old = Json.theme(JSONObject().put("accent", 0xFF8B6CFF))
+        assertEquals(false, old.iconMode)
+        assertEquals(null, old.iconFile)
+        assertEquals(0.5f, old.iconThreshold, 0f)
+        assertEquals(IconIdle.NOTHING, old.iconIdle)
+        assertEquals(IconFill.DARK, old.iconFill)
+    }
 }

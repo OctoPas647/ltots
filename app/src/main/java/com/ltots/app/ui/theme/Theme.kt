@@ -80,7 +80,7 @@ object ThemeState {
 
     /**
      * Switch to a theme: its colours, glass and background. Everything else on the Look tab
-     * (visualizer, refresh rate, corners, cover opacity, system bars, motion speed) stays exactly
+     * (visualizer and icon mode, refresh rate, corners, cover opacity, system bars, motion speed) stays exactly
      * as you set it. Cover colours are on only for AMOLED Cover.
      */
     fun applyPreset(p: ThemePreset) = update { cur -> presetApplied(p, cur) }
@@ -127,6 +127,15 @@ object ThemeState {
         effects = cur.effects,
         hideNavBar = cur.hideNavBar,
         hideStatusBar = cur.hideStatusBar,
+        iconMode = cur.iconMode,
+        iconFile = cur.iconFile,
+        iconThreshold = cur.iconThreshold,
+        iconInvert = cur.iconInvert,
+        iconMinHole = cur.iconMinHole,
+        iconFill = cur.iconFill,
+        iconCoverBehind = cur.iconCoverBehind,
+        iconBars = cur.iconBars,
+        iconIdle = cur.iconIdle,
     )
 
     fun update(transform: (ThemeConfig) -> ThemeConfig) {

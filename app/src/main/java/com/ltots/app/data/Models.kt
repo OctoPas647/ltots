@@ -73,6 +73,22 @@ enum class Effects(val label: String) {
 }
 
 /** The Smoothness setting: let the app measure this phone (Automatic), or pick a level. */
+/** Icon mode (Playing tab): how the icon's dark parts look. */
+enum class IconFill(val label: String) {
+    /** Left empty: the shape shows only through the bars round it. */
+    DARK("Dark"),
+    /** Frosted glass tinted with the accent (the play button's colour), using the Glass settings. */
+    GLASS("Glass"),
+    /** Solid accent, like the play button. */
+    ACCENT("Accent"),
+}
+
+/** Icon mode: which way the bars grow from the outline of the dark parts. */
+enum class IconBars(val label: String) { OUT("Outward"), IN("Inward"), BOTH("Both ways") }
+
+/** Icon mode: what the icon's place shows while nothing is playing. */
+enum class IconIdle(val label: String) { NOTHING("Show nothing"), SHAPE("Keep the icon"), COVER("Show the cover") }
+
 enum class EffectsMode(val label: String) { AUTO("Automatic"), FULL("Full"), BALANCED("Balanced"), LIGHT("Light") }
 
 /**
@@ -165,6 +181,21 @@ data class ThemeConfig(
     val hideStatusBar: Boolean = false,
     /** Accent follows the current song's cover: the AMOLED Cover theme. */
     val dynamicColors: Boolean = false,
+    /** Playing tab: the visualizer grows out of an icon's dark parts, in the cover's place. */
+    val iconMode: Boolean = false,
+    /** The picture used in icon mode: a file in the app's own storage (null = none picked yet). */
+    val iconFile: String? = null,
+    /** Pixels darker than this (0..1) count as the icon's dark parts. */
+    val iconThreshold: Float = 0.5f,
+    /** Swap black and white before tracing the icon. */
+    val iconInvert: Boolean = false,
+    /** Enclosed white holes smaller than this share of the picture are filled in (eye highlights). */
+    val iconMinHole: Float = 0.001f,
+    val iconFill: IconFill = IconFill.DARK,
+    /** Show the song's cover inside the icon's dark parts. */
+    val iconCoverBehind: Boolean = false,
+    val iconBars: IconBars = IconBars.OUT,
+    val iconIdle: IconIdle = IconIdle.NOTHING,
 )
 
 data class AppSettings(
@@ -263,6 +294,10 @@ object Json {
         put("bands", t.analyzerBands); put("maxHz", t.maxRefresh); put("wrap", t.spectrumAroundCover)
         put("ring", t.ringLayout.name); put("behind", t.behindLayout.name)
         put("fx", t.effects.name)
+        put("icon", t.iconMode); t.iconFile?.let { put("iconFile", it) }
+        put("iconThr", t.iconThreshold.toDouble()); put("iconInv", t.iconInvert)
+        put("iconHole", t.iconMinHole.toDouble()); put("iconFill", t.iconFill.name)
+        put("iconCover", t.iconCoverBehind); put("iconBars", t.iconBars.name); put("iconIdle", t.iconIdle.name)
     }
 
     private fun hsvJson(h: Hsv) = JSONArray().put(h.h.toDouble()).put(h.s.toDouble()).put(h.v.toDouble())
@@ -305,6 +340,15 @@ object Json {
             hideStatusBar = o.optBoolean("hideStatus", d.hideStatusBar),
             // Cover colours belong to the AMOLED Cover theme only (the separate switch is gone).
             dynamicColors = o.optBoolean("dyn", d.dynamicColors) && o.optBoolean("black", d.pureBlack),
+            iconMode = o.optBoolean("icon", d.iconMode),
+            iconFile = o.optString("iconFile", "").ifEmpty { null },
+            iconThreshold = o.optDouble("iconThr", d.iconThreshold.toDouble()).toFloat().coerceIn(0f, 1f),
+            iconInvert = o.optBoolean("iconInv", d.iconInvert),
+            iconMinHole = o.optDouble("iconHole", d.iconMinHole.toDouble()).toFloat().coerceIn(0f, 0.05f),
+            iconFill = runCatching { IconFill.valueOf(o.optString("iconFill")) }.getOrDefault(d.iconFill),
+            iconCoverBehind = o.optBoolean("iconCover", d.iconCoverBehind),
+            iconBars = runCatching { IconBars.valueOf(o.optString("iconBars")) }.getOrDefault(d.iconBars),
+            iconIdle = runCatching { IconIdle.valueOf(o.optString("iconIdle")) }.getOrDefault(d.iconIdle),
         )
     }
 
