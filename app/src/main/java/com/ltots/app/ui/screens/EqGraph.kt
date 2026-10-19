@@ -62,6 +62,8 @@ fun EqGraph(
     onMove: (id: Long, freq: Float, gain: Float) -> Unit,
     onAdd: (freq: Float, gain: Float) -> Unit,
     modifier: Modifier = Modifier,
+    /** Battery EQ: what the phone's own EQ plays (240 points, 20 Hz–20 kHz), drawn dashed. */
+    phoneCurve: FloatArray? = null,
 ) {
     val pal = LocalPalette.current
     val measurer = rememberTextMeasurer()
@@ -156,6 +158,13 @@ fun EqGraph(
         selectedCurve?.let { sc -> drawResponse(g, sc, pal.text.copy(alpha = 0.35f), fill = false, width = 1.5f) }
         // Total EQ curve.
         drawResponse(g, curve, lineColor, fill = true, width = 3.5f)
+        // Battery EQ: the simplified version the phone's EQ plays.
+        phoneCurve?.let { pc ->
+            drawResponse(
+                g, pc, pal.text.copy(alpha = 0.85f), fill = false, width = 2.5f,
+                dash = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(10.dp.toPx(), 7.dp.toPx())),
+            )
+        }
 
         // Handles
         eq.bands.sortedBy { if (it.id == selectedId) 1 else 0 }.forEach { b ->
@@ -185,7 +194,10 @@ fun EqGraph(
     }
 }
 
-private fun DrawScope.drawResponse(g: GraphGeometry, pts: FloatArray, color: Color, fill: Boolean, width: Float) {
+private fun DrawScope.drawResponse(
+    g: GraphGeometry, pts: FloatArray, color: Color, fill: Boolean, width: Float,
+    dash: androidx.compose.ui.graphics.PathEffect? = null,
+) {
     val n = pts.size
     val path = Path()
     for (i in 0 until n) {
@@ -204,7 +216,7 @@ private fun DrawScope.drawResponse(g: GraphGeometry, pts: FloatArray, color: Col
             ),
         )
     }
-    drawPath(path, color, style = Stroke(width = width, cap = StrokeCap.Round))
+    drawPath(path, color, style = Stroke(width = width, cap = StrokeCap.Round, pathEffect = dash))
 }
 
 private fun DrawScope.drawGrid(g: GraphGeometry, text: Color, measurer: androidx.compose.ui.text.TextMeasurer) {

@@ -88,6 +88,11 @@ data class AppSettings(
      * audio chip decode and play the music so the main processor can sleep.
      */
     val directPlayback: Boolean = true,
+    /**
+     * Battery EQ (experimental): play a simplified version of the EQ on the phone's own built-in
+     * EQ, so the audio chip can keep playing by itself with an EQ on, on phones that allow it.
+     */
+    val batteryEq: Boolean = false,
 )
 
 /** Hand-written JSON (de)serialisation — no reflection, so it survives R8 untouched. */
@@ -194,6 +199,7 @@ object Json {
         put("formants", s.preserveFormants); put("effPitch", s.efficientPitch)
         put("gPitch", s.globalPitchCents); put("gSpeed", s.globalSpeed.toDouble()); put("gTape", s.globalTape)
         put("direct", s.directPlayback)
+        put("batteryEq", s.batteryEq)
     }
 
     fun settings(o: JSONObject) = AppSettings(
@@ -206,5 +212,6 @@ object Json {
         globalSpeed = o.optDouble("gSpeed", 1.0).toFloat(),
         globalTape = o.optBoolean("gTape", false),
         directPlayback = o.optBoolean("direct", true),
+        batteryEq = o.optBoolean("batteryEq", false),
     )
 }

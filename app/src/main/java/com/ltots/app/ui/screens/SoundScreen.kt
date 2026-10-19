@@ -46,6 +46,9 @@ fun SoundScreen() {
     val info by AudioEngine.tap.info.collectAsState()
     val settings by AudioEngine.settings.collectAsState()
     val direct by AudioEngine.direct.collectAsState()
+    val batteryEq by AudioEngine.batteryEqActive.collectAsState()
+    val phoneEq by AudioEngine.phoneEq.status.collectAsState()
+    val bands = (phoneEq as? com.ltots.app.audio.PhoneEq.Status.Ready)?.layout?.bandCount ?: 0
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp)) {
         Text("Sound", style = MaterialTheme.typography.displaySmall, color = pal.text, modifier = Modifier.padding(top = 12.dp))
@@ -88,15 +91,16 @@ fun SoundScreen() {
                 if (direct) {
                     PathRow("Played by", "Phone's audio chip")
                     Text(
-                        "Nothing to process right now (EQ flat, original pitch and speed), so the audio chip " +
-                            "decodes and plays the file exactly as it is while the processor sleeps. " +
-                            "The live spectrum rests until the EQ or pitch is changed.",
+                        (if (batteryEq) "Your EQ is played by the phone's own EQ (Battery EQ) and pitch and speed are original, so the audio chip "
+                        else "Nothing to process right now (EQ flat, original pitch and speed), so the audio chip ") +
+                            "decodes and plays the file by itself while the processor sleeps. " +
+                            "The live spectrum rests until something needs processing.",
                         color = pal.textDim, style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(top = 2.dp, bottom = 6.dp),
                     )
                 }
                 PathRow("Decoded", if (info.sampleRate > 0) "${"%.1f".format(Locale.ROOT, info.sampleRate / 1000.0)} kHz · ${info.channels} ch" else "—")
-                PathRow("EQ & limiter", "64-bit floating point")
+                PathRow("EQ & limiter", if (batteryEq) "Phone's built-in EQ · $bands bands" else "64-bit floating point")
                 PathRow("Pitch & speed", (if (settings.efficientPitch) "Rubber Band R2" else "Rubber Band R3") + " (only when changed)")
                 PathRow("Limiter", "Soft, above −1 dBFS only")
                 PathRow("Sent to Android", if (settings.bitPerfectUsb) "16-bit, dithered" else "32-bit float")
@@ -116,6 +120,7 @@ fun SoundScreen() {
                         "Switches back instantly when you change the EQ or pitch. " +
                         if (direct) "Active now." else "Not active right now (something needs processing, or the chip can't play this file's format).",
                 )
+                BatteryEqRow(settings, direct, batteryEq, phoneEq)
                 SwitchRow(
                     "Bit-perfect USB output", settings.bitPerfectUsb, { on -> AudioEngine.updateSettings { it.copy(bitPerfectUsb = on) } },
                     sub = if (Build.VERSION.SDK_INT >= 34) "For a USB DAC (e.g. HD 599 via a dongle): Android's mixer is bypassed. Use the DAC's or phone's volume as usual. Status: $bitPerfect"
@@ -217,3 +222,50 @@ private fun PathRow(label: String, value: String) {
 
 private fun appVersion(context: android.content.Context): String =
     runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: ""
+
+/**
+ * Battery EQ (experimental): the EQ is played by the phone's own built-in EQ, so the audio chip
+ * can keep playing by itself with an EQ on. Whether this phone allows that only shows while a
+ * song plays, so the line under the switch says, live, whether it's working.
+ */
+@Composable
+private fun BatteryEqRow(
+    settings: com.ltots.app.data.AppSettings,
+    direct: Boolean,
+    active: Boolean,
+    status: com.ltots.app.audio.PhoneEq.Status,
+    modifier: Modifier = Modifier,
+) {
+    val pal = LocalPalette.current
+    val eq by AudioEngine.effectiveEq.collectAsState()
+    val playing by AudioEngine.isPlaying.collectAsState()
+    val cents by AudioEngine.pitchCents.collectAsState()
+    val speed by AudioEngine.speed.collectAsState()
+    val bands = (status as? com.ltots.app.audio.PhoneEq.Status.Ready)?.layout?.bandCount ?: 5
+    SwitchRow(
+        "Battery EQ (experimental)", settings.batteryEq,
+        { on -> AudioEngine.updateSettings { it.copy(batteryEq = on) } },
+        sub = "Your EQ is played by the phone's own built-in EQ instead of by LToTS, so on phones that allow it the " +
+            "audio chip keeps playing by itself even with an EQ on. The phone's EQ has only a few fixed bands, so it " +
+            "plays a simplified version of your curve (the EQ tab shows it as a dashed line).",
+        modifier = modifier,
+    )
+    if (!settings.batteryEq) return
+    val good = Color(0xFF6CFFB0)
+    val warn = Color(0xFFFFC14D)
+    val (text, color) = when {
+        !settings.directPlayback -> "Power-saving playback is off, so Battery EQ can't save anything. Turn it on above." to warn
+        settings.bitPerfectUsb -> "Bit-perfect USB output keeps the processor busy, so Battery EQ can't save anything." to warn
+        status is com.ltots.app.audio.PhoneEq.Status.Unavailable -> status.reason + " LToTS's own EQ is used instead." to warn
+        !active -> "Starts when a song is loaded." to pal.textDim
+        com.ltots.app.audio.EqMath.isNeutral(eq) -> "Your EQ is flat or off right now, so the phone's EQ has nothing to do." to pal.textDim
+        cents != 0 || kotlin.math.abs(speed - 1f) > 1e-4f -> "Pitch or speed is changed, so the processor is needed anyway." to pal.textDim
+        !playing -> "Play a song to see whether it works on this phone." to pal.textDim
+        direct -> "Working on this phone: the audio chip is playing with the phone's $bands-band EQ while the processor sleeps." to good
+        else -> "Not saving right now: the music still goes through the processor. Either this phone can't keep its EQ " +
+            "on the audio chip, or this song's format can't be played by the chip. To tell which, make the EQ flat: if " +
+            "Power-saving playback then says \"Active now\", it's the phone's EQ." to warn
+    }
+    Text(text, color = color, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.padding(bottom = 8.dp))
+}

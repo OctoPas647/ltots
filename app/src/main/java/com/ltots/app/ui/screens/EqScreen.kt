@@ -96,6 +96,14 @@ fun EqScreen(player: PlayerUi) {
     val eq by AudioEngine.effectiveEq.collectAsState()
     val profile by AudioEngine.songProfile.collectAsState()
     val songKey by AudioEngine.songKey.collectAsState()
+    val batteryEq by AudioEngine.batteryEqActive.collectAsState()
+    val phoneEq by AudioEngine.phoneEq.status.collectAsState()
+    // Battery EQ: the simplified curve the phone's own EQ plays, drawn dashed over the real one.
+    val phoneReady = phoneEq as? com.ltots.app.audio.PhoneEq.Status.Ready
+    val phoneCurve = remember(eq, phoneReady, batteryEq) {
+        if (!batteryEq || phoneReady == null || !eq.enabled || com.ltots.app.audio.EqMath.isNeutral(eq)) null
+        else com.ltots.app.audio.BatteryEqFit.phoneCurve(eq, phoneReady.layout, phoneReady.levels)
+    }
     val visual = rememberLiveVisual()
     var selectedId by remember { mutableStateOf<Long?>(null) }
     val selected = eq.bands.firstOrNull { it.id == selectedId }
@@ -183,6 +191,7 @@ fun EqScreen(player: PlayerUi) {
                     }
                 },
                 modifier = Modifier.fillMaxSize(),
+                phoneCurve = phoneCurve,
             )
         }
         Text(
@@ -190,6 +199,14 @@ fun EqScreen(player: PlayerUi) {
             color = pal.textFaint, style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.fillMaxWidth().padding(top = 6.dp), textAlign = TextAlign.Center,
         )
+        if (batteryEq && phoneReady != null) {
+            Text(
+                "Battery EQ is on: your phone's own ${phoneReady.layout.bandCount}-band EQ plays the dashed line, " +
+                    "a simplified version of this curve.",
+                color = pal.textDim, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp), textAlign = TextAlign.Center,
+            )
+        }
 
         // 2. The selected knob's controls, right under the graph: frequency, gain and width sliders.
         Spacer(Modifier.height(12.dp))

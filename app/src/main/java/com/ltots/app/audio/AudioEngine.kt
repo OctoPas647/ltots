@@ -45,6 +45,8 @@ object AudioEngine : SoundSource {
     val eqProcessor = EqProcessor(tap, this)
     val timePitch = TimePitchProcessor(this)
     val outputStage = OutputStage()
+    /** The phone's own EQ, used instead of LToTS's when Battery EQ is on. */
+    val phoneEq = PhoneEq()
     private val scope = MainScope()
     private val versionCounter = AtomicInteger(0)
 
@@ -112,6 +114,8 @@ object AudioEngine : SoundSource {
         if (!settings.value.perSongPitchSpeed) loadGlobalPitchSpeed()
         output.onDeviceChanged = { reapplyBitPerfect() }
         scope.launch { tap.info.collect { reapplyBitPerfect() } }
+        // Battery EQ follows every EQ change (edits, presets, a new song's own EQ) as it happens.
+        scope.launch { effectiveEq.collect { syncPhoneEq() } }
     }
 
     private fun changed() { versionCounter.incrementAndGet() }
@@ -122,6 +126,8 @@ object AudioEngine : SoundSource {
 
     override fun eqFor(mediaId: String?): EqState {
         if (!initialized) return EqState(enabled = false)
+        // Battery EQ: the phone's own EQ shapes the sound, so LToTS's stays out of the way.
+        if (phoneEqHandles) return EqState(enabled = false)
         val prof = mediaId?.let { Store.loadProfile(it) }
         return prof?.eq ?: defaultEq.value
     }
@@ -163,10 +169,12 @@ object AudioEngine : SoundSource {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = onSongChanged(mediaItem)
             override fun onIsPlayingChanged(isPlaying: Boolean) { _isPlaying.value = isPlaying }
             override fun onTimelineChanged(timeline: Timeline, reason: Int) = updateDirect()
+            override fun onAudioSessionIdChanged(audioSessionId: Int) = syncPhoneEq()
         })
         _player.value = p
         onSongChanged(p.currentMediaItem)
         applySpeedToPlayer()
+        syncPhoneEq()
         return p
     }
 
@@ -186,6 +194,8 @@ object AudioEngine : SoundSource {
 
     fun releasePlayer() {
         directJob?.cancel()
+        phoneEq.release()
+        phoneEqHandles = false
         _player.value?.release()
         _player.value = null
         _isPlaying.value = false
@@ -359,9 +369,44 @@ object AudioEngine : SoundSource {
             outputStage.int16Output = new.bitPerfectUsb
             reapplyBitPerfect(forceRebuild = true)
         }
+        if (old.batteryEq != new.batteryEq) syncPhoneEq()
         changed()
         updateDirect()
     }
+
+    // ---- Battery EQ (the phone's own EQ) ---------------------------------------------------
+
+    /** True while the phone's EQ is shaping the sound instead of LToTS's (read on the audio thread). */
+    @Volatile private var phoneEqHandles = false
+
+    /** True while Battery EQ is on and the phone's EQ is doing the work. */
+    private val _batteryEqActive = MutableStateFlow(false)
+    val batteryEqActive: StateFlow<Boolean> = _batteryEqActive
+
+    /**
+     * Battery EQ: hand the EQ to the phone's own EQ (fitted to its few bands), so nothing in
+     * LToTS needs to touch the sound and the audio chip can keep playing by itself. If the
+     * phone's EQ can't be used, LToTS's own EQ simply carries on.
+     */
+    private fun syncPhoneEq() {
+        if (!initialized) return
+        val p = _player.value
+        val wanted = settings.value.batteryEq && p != null
+        val ready = wanted && phoneEq.attach(p!!.audioSessionId)
+        if (ready) phoneEq.layout?.let { phoneEq.apply(BatteryEqFit.fit(effectiveEq.value, it)) }
+        if (!wanted) phoneEq.release(off = true)
+        val handles = ready && phoneEq.status.value is PhoneEq.Status.Ready
+        if (handles != phoneEqHandles) {
+            phoneEqHandles = handles
+            _batteryEqActive.value = handles
+            // The phone's EQ is set up first, then LToTS's own steps aside (or back in).
+            changed()
+            updateDirect()
+        }
+    }
+
+    /** Whether [eq] needs LToTS's processor (not when it's flat, or when the phone's EQ plays it). */
+    private fun eqNeedsProcessor(eq: EqState): Boolean = !phoneEqHandles && !EqMath.isNeutral(eq)
 
     // ---- direct playback (audio offload) ---------------------------------------------------
 
@@ -372,7 +417,7 @@ object AudioEngine : SoundSource {
         val s = settings.value
         val prof = mediaId?.let { Store.loadProfile(it) }
         val eq = prof?.eq ?: defaultEq.value
-        if (!EqMath.isNeutral(eq)) return false
+        if (eqNeedsProcessor(eq)) return false
         val (cents, speed) = if (s.perSongPitchSpeed && mediaId != null) {
             (prof?.pitchCents ?: 0) to (prof?.speed ?: 1f)
         } else s.globalPitchCents to s.globalSpeed
@@ -384,7 +429,7 @@ object AudioEngine : SoundSource {
         if (!s.directPlayback || s.bitPerfectUsb) return false
         // What the UI shows right now (covers a slider that is still being dragged)...
         if (_pitchCents.value != 0 || abs(_speed.value - 1f) > 1e-4f) return false
-        if (!EqMath.isNeutral(_songProfile.value?.eq ?: defaultEq.value)) return false
+        if (eqNeedsProcessor(_songProfile.value?.eq ?: defaultEq.value)) return false
         // ...and the next song too: with direct playback it's queued on the audio chip ahead
         // of time, so if it needs processing we switch over before it starts.
         val next = p.nextMediaItemIndex

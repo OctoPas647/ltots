@@ -197,4 +197,28 @@ class NewControlsUiTest {
         rule.onNode(hasProgressBarRangeInfo(androidx.compose.ui.semantics.ProgressBarRangeInfo(ThemeState.config.value.refraction, 0f..1f))).assertIsNotEnabled()
         shot("13b_look_glass_grayed")
     }
+
+    /** Battery EQ: the switch, its live status, and the phone's simplified curve on the EQ graph. */
+    @Config(qualifiers = "w411dp-h2300dp-xxhdpi")
+    @Test fun batteryEq() {
+        rule.mainClock.autoAdvance = false
+        idle()
+        tab("EQ")
+        click("Genres"); click("Rock")
+        tab("Sound")
+        click("Battery EQ (experimental)")
+        idle(1000)
+        assertTrue(AudioEngine.settings.value.batteryEq)
+        assertTrue("the phone's EQ is doing the work: ${AudioEngine.phoneEq.status.value}", AudioEngine.batteryEqActive.value)
+        rule.onNodeWithText("Play a song to see whether it works on this phone.").assertExists()
+        shot("16_sound_battery_eq")
+        tab("EQ")
+        rule.onNodeWithText("Battery EQ is on", substring = true).assertExists()
+        shot("17_eq_battery_curve")
+        // Off again: LToTS's own EQ is back.
+        tab("Sound")
+        click("Battery EQ (experimental)")
+        idle(1000)
+        assertTrue(!AudioEngine.batteryEqActive.value)
+    }
 }

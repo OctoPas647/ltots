@@ -72,6 +72,10 @@ newer APK updates the app and keeps your settings.
     offload) and the main processor sleeps between big chunks of audio. Changing the EQ or pitch
     switches back to LToTS' own sound path instantly. Sound shows whether it's active (the chip
     has to support the file's format).
+  - **Battery EQ** (experimental, in Sound): the EQ is played by the phone's own built-in EQ,
+    fitted to its few fixed bands, so on phones whose EQ can run on the audio chip the chip keeps
+    playing by itself even with an EQ on. The EQ tab draws the simplified curve dashed; Sound says
+    live whether it's working on your phone.
   - the player only wakes when the audio output actually needs more sound, instead of every
     10 ms;
   - after 10 minutes paused, the decoder and audio output are released (play resumes exactly
