@@ -48,6 +48,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.ltots.app.data.SpectrumStyle
 import com.ltots.app.data.Hsv
+import com.ltots.app.data.BehindLayout
+import com.ltots.app.data.RingLayout
 import com.ltots.app.data.ThemeConfig
 import com.ltots.app.ui.bottomChrome
 import com.ltots.app.ui.components.LabeledSlider
@@ -191,9 +193,24 @@ fun LookScreen() {
                     Pill("Around the cover", cfg.spectrumAroundCover, { set { it.copy(spectrumAroundCover = true) } })
                     Pill("Behind the cover", !cfg.spectrumAroundCover, { set { it.copy(spectrumAroundCover = false) } })
                 }
+                Spacer(Modifier.height(8.dp))
+                FlowPills {
+                    if (cfg.spectrumAroundCover) {
+                        RingLayout.entries.forEach { l -> Pill(l.label, cfg.ringLayout == l, { set { it.copy(ringLayout = l) } }) }
+                    } else {
+                        BehindLayout.entries.forEach { l -> Pill(l.label, cfg.behindLayout == l, { set { it.copy(behindLayout = l) } }) }
+                    }
+                }
                 Text(
-                    if (cfg.spectrumAroundCover) "The spectrum rings the cover, which is a little smaller so the ring has room."
-                    else "The spectrum rises behind the full-size cover.",
+                    if (cfg.spectrumAroundCover) when (cfg.ringLayout) {
+                        RingLayout.LOOP -> "One continuous ring round the smaller cover: bass at the top, clockwise to the treble."
+                        RingLayout.MIRRORED -> "The same on both sides: bass at the bottom, treble at the top."
+                        RingLayout.MIRRORED_FLIPPED -> "The same on both sides, upside down: bass at the top, treble at the bottom."
+                    } else when (cfg.behindLayout) {
+                        BehindLayout.BELOW -> "Rises from below the full-size cover, bass on the left."
+                        BehindLayout.ABOVE -> "Hangs down from above the full-size cover, bass on the left."
+                        BehindLayout.ABOVE_FLIPPED -> "Hangs down from above the full-size cover, bass on the right."
+                    },
                     color = LocalPalette.current.textFaint, style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(top = 6.dp, bottom = 10.dp),
                 )

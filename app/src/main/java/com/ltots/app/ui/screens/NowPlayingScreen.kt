@@ -127,7 +127,15 @@ fun NowPlayingScreen(player: PlayerUi, artwork: Bitmap?, onOpenEq: () -> Unit, o
         val coverCorner = if (wrap) 24.dp else 28.dp
         Box(Modifier.fillMaxWidth().aspectRatio(1f), contentAlignment = Alignment.Center) {
             if (wrap) CoverSpectrum(visual, coverFraction, coverCorner, Modifier.fillMaxSize(), intensity = 0.9f)
-            else LiveSpectrum(visual, Modifier.fillMaxSize().padding(top = 40.dp), showWave = false, intensity = 0.8f)
+            else LiveSpectrum(
+                visual,
+                // A little space on the side the spectrum grows from (below: at the top; above: at the bottom).
+                Modifier.fillMaxSize().padding(
+                    top = if (lookCfg.behindLayout == com.ltots.app.data.BehindLayout.BELOW) 40.dp else 0.dp,
+                    bottom = if (lookCfg.behindLayout == com.ltots.app.data.BehindLayout.BELOW) 0.dp else 40.dp,
+                ),
+                showWave = false, intensity = 0.8f, from = lookCfg.behindLayout,
+            )
             Box(
                 Modifier.fillMaxWidth(coverFraction).aspectRatio(1f)
                     // Cover opacity (Look tab): lower lets the live spectrum behind show through.

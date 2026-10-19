@@ -24,8 +24,10 @@ newer APK updates the app and keeps your settings.
 - **Parametric EQ** – any number of bands (1–64); every band has an exact frequency, gain, width (Q)
   and type (peak, low/high shelf, low/high cut). Drag the dots on the curve or type exact values.
 - **Visualizer around the cover** – on the Playing tab the live spectrum rings a slightly smaller
-  cover (bass at the bottom, treble at the top, mirrored), in the Bars, Curve or Mirror style; or,
-  as before, rises behind the full-size cover (Look > Visualizer > "On the Playing tab").
+  cover, in the Bars, Curve or Mirror style: **One loop** (bass at the top, once round clockwise to
+  the treble), **Mirrored** (both sides alike, bass at the bottom) or **Mirrored, flipped** (bass at
+  the top). Or behind the full-size cover: **From below** (the original), **From above** (hanging
+  down) or **From above, flipped** (bass on the right). Look > Visualizer > "On the Playing tab".
 - **Live view** – the spectrum after the EQ, a faint outline of the sound before it, and a scrolling
   waveform. The waveform is **pre-made for every song** (decoded once, like an index: one point per
   10 ms) and drawn from the player's position, so it's exactly in sync and costs nothing to show —

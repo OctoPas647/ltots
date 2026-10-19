@@ -1,5 +1,6 @@
 package com.ltots.app.ui.components
 
+import com.ltots.app.data.RingLayout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -36,13 +37,35 @@ class CoverRingTest {
         assertTrue(ring.y[0] < 500f)
     }
 
-    @Test fun bassAtTheBottomTrebleAtTheTopMirrored() {
-        val levels = FloatArray(96) { it / 95f } // treble loudest
-        val top = ring.levelAt(0, levels)
-        val bottom = ring.levelAt(ring.count / 2, levels)
-        assertTrue("treble at the top: $top", top > 0.95f)
-        assertTrue("bass at the bottom: $bottom", bottom < 0.05f)
-        for (k in 1 until ring.count / 2) assertEquals(ring.levelAt(k, levels), ring.levelAt(ring.count - 1 - k, levels), 1e-4f)
+    private val rising = FloatArray(96) { it / 95f } // bass quietest, treble loudest
+
+    @Test fun mirroredBassAtTheBottom() {
+        val l = RingLayout.MIRRORED
+        assertTrue("treble at the top", ring.levelAt(0, rising, l) > 0.95f)
+        assertTrue("bass at the bottom", ring.levelAt(ring.count / 2, rising, l) < 0.05f)
+        for (k in 1 until ring.count / 2) assertEquals(ring.levelAt(k, rising, l), ring.levelAt(ring.count - 1 - k, rising, l), 1e-4f)
+    }
+
+    @Test fun mirroredFlippedBassAtTheTop() {
+        val l = RingLayout.MIRRORED_FLIPPED
+        assertTrue("bass at the top", ring.levelAt(0, rising, l) < 0.05f)
+        assertTrue("treble at the bottom", ring.levelAt(ring.count / 2, rising, l) > 0.95f)
+        for (k in 1 until ring.count / 2) assertEquals(ring.levelAt(k, rising, l), ring.levelAt(ring.count - 1 - k, rising, l), 1e-4f)
+    }
+
+    @Test fun oneLoopGoesOnceRoundWithoutRepeating() {
+        val l = RingLayout.LOOP
+        // Bass at the top, rising steadily all the way round clockwise: every band once.
+        var prev = -1f
+        for (k in 0 until ring.count) {
+            val v = ring.levelAt(k, rising, l)
+            assertTrue("point $k goes on round: $v after $prev", v > prev)
+            prev = v
+        }
+        assertTrue(ring.levelAt(0, rising, l) < 0.02f)
+        assertTrue(ring.levelAt(ring.count - 1, rising, l) > 0.98f)
+        // Not mirrored: the right side (a quarter round) differs from the left (three quarters).
+        assertTrue(ring.levelAt(ring.count / 4, rising, l) < ring.levelAt(3 * ring.count / 4, rising, l) - 0.4f)
     }
 
     @Test fun barsStayInsideTheArea() {

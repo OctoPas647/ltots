@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.media3.common.util.UnstableApi
 import com.ltots.app.audio.Analyzer
@@ -158,6 +159,8 @@ fun LiveSpectrum(
     modifier: Modifier = Modifier,
     showWave: Boolean = true,
     intensity: Float = 1f,
+    /** Rising from the bottom (the EQ tab, and the original Playing tab), or hanging from the top. */
+    from: com.ltots.app.data.BehindLayout = com.ltots.app.data.BehindLayout.BELOW,
 ) {
     val cfg = LocalThemeConfig.current
     val pal = LocalPalette.current
@@ -169,6 +172,22 @@ fun LiveSpectrum(
         @Suppress("UNUSED_VARIABLE") val t = visual.tick // read to redraw on every new frame
         val f = visual.frame
         val alpha = cfg.spectrumOpacity * intensity
+        // From above: the same drawing turned upside down (and, flipped, mirrored left/right too).
+        val sx = if (from == com.ltots.app.data.BehindLayout.ABOVE_FLIPPED) -1f else 1f
+        val sy = if (from == com.ltots.app.data.BehindLayout.BELOW) 1f else -1f
+        scale(sx, sy) { drawLayers(visual, f, cfg, pal, alpha, showWave) }
+    }
+}
+
+private fun DrawScope.drawLayers(
+    visual: LiveVisual,
+    f: SpectrumFrame,
+    cfg: com.ltots.app.data.ThemeConfig,
+    pal: com.ltots.app.ui.theme.Palette,
+    alpha: Float,
+    showWave: Boolean,
+) {
+    run {
         if (showWave) drawWave(f, pal.text.copy(alpha = 0.10f * alpha / 0.85f), visual.wave)
         // The ghost is only worth drawing when the EQ changes something (otherwise it would sit
         // exactly under the main curve).

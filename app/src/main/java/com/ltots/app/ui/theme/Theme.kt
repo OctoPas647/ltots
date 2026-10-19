@@ -98,6 +98,8 @@ object ThemeState {
         visualizerFps = cur.visualizerFps,
         analyzerBands = cur.analyzerBands,
         spectrumAroundCover = cur.spectrumAroundCover,
+        ringLayout = cur.ringLayout,
+        behindLayout = cur.behindLayout,
         maxRefresh = cur.maxRefresh,
         hideNavBar = cur.hideNavBar,
         hideStatusBar = cur.hideStatusBar,

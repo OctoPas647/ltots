@@ -13,6 +13,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.ltots.app.data.RingLayout
 import com.ltots.app.data.SpectrumStyle
 import com.ltots.app.ui.theme.LocalPalette
 import com.ltots.app.ui.theme.LocalThemeConfig
@@ -27,8 +28,7 @@ import kotlin.math.sin
  * with the direction pointing straight out of the shape. Worked out once per size; the live
  * spectrum is then just "how far out from each point".
  *
- * The spectrum is mirrored left/right: the bass sits at the bottom centre, the treble at the top
- * centre, so the ring is symmetrical like the cover.
+ * The spectrum runs once round the cover, or mirrored left/right (see [RingLayout]).
  */
 class CoverRing(
     /** Size of the drawing area (square). */
@@ -90,13 +90,20 @@ class CoverRing(
         }
     }
 
-    /** The spectrum level for ring point [k]: bass at the bottom, treble at the top, mirrored. */
-    fun levelAt(k: Int, levels: FloatArray): Float {
+    /**
+     * The spectrum level for ring point [k]. [layout]: one loop (bass at the top, clockwise to
+     * the treble), or mirrored left/right with the bass at the bottom (or, flipped, at the top).
+     */
+    fun levelAt(k: Int, levels: FloatArray, layout: RingLayout = RingLayout.LOOP): Float {
         val n = levels.size
         if (n == 0) return 0f
-        val u = (k + 0.5f) / count
+        val u = (k + 0.5f) / count // 0 at the top centre, going clockwise
         val d = if (u <= 0.5f) u * 2 else (1 - u) * 2 // 0 at the top, 1 at the bottom
-        val f = (1 - d) * (n - 1)
+        val f = when (layout) {
+            RingLayout.LOOP -> u * (n - 1)
+            RingLayout.MIRRORED -> (1 - d) * (n - 1)
+            RingLayout.MIRRORED_FLIPPED -> d * (n - 1)
+        }
         val i = f.toInt().coerceIn(0, n - 1)
         val j = min(i + 1, n - 1)
         val w = f - i
@@ -136,15 +143,24 @@ fun CoverSpectrum(
         val ring = visual.ring?.takeIf { it.matches(side, coverSide, corner, gap, count) }
             ?: CoverRing(side, coverSide, corner, gap, count).also { visual.ring = it }
         val alpha = cfg.spectrumOpacity * intensity
+        val layout = cfg.ringLayout
         if (cfg.showPreEqGhost && !visual.preMirrorsPost) {
-            drawRing(ring, f.pre, SpectrumStyle.CURVE, pal.text.copy(alpha = 0.25f * alpha), ghost = true, visual.ghostCurve)
+            drawRing(ring, f.pre, SpectrumStyle.CURVE, pal.text.copy(alpha = 0.25f * alpha), ghost = true, visual.ghostCurve, layout)
         }
-        drawRing(ring, f.post, cfg.spectrumStyle, pal.accent.copy(alpha = alpha), ghost = false, visual.curve)
+        drawRing(ring, f.post, cfg.spectrumStyle, pal.accent.copy(alpha = alpha), ghost = false, visual.curve, layout)
     }
 }
 
 /** Draws one spectrum around [ring] in the chosen style. */
-fun DrawScope.drawRing(ring: CoverRing, levels: FloatArray, style: SpectrumStyle, color: Color, ghost: Boolean, path: Path) {
+fun DrawScope.drawRing(
+    ring: CoverRing,
+    levels: FloatArray,
+    style: SpectrumStyle,
+    color: Color,
+    ghost: Boolean,
+    path: Path,
+    layout: RingLayout = RingLayout.LOOP,
+) {
     if (levels.isEmpty() || levels.all { it < 0.01f }) return
     val c = Offset(size.width / 2, size.height / 2)
     val inner = ring.coverSide / 2 + ring.gap
@@ -158,8 +174,8 @@ fun DrawScope.drawRing(ring: CoverRing, levels: FloatArray, style: SpectrumStyle
     path.reset()
     if (ghost || style == SpectrumStyle.CURVE) {
         // A smooth closed outline, "level" away from the cover all the way round.
-        fun qx(k: Int) = ring.x[k] + ring.nx[k] * ring.levelAt(k, levels) * ring.maxLength
-        fun qy(k: Int) = ring.y[k] + ring.ny[k] * ring.levelAt(k, levels) * ring.maxLength
+        fun qx(k: Int) = ring.x[k] + ring.nx[k] * ring.levelAt(k, levels, layout) * ring.maxLength
+        fun qy(k: Int) = ring.y[k] + ring.ny[k] * ring.levelAt(k, levels, layout) * ring.maxLength
         path.moveTo((qx(n - 1) + qx(0)) / 2, (qy(n - 1) + qy(0)) / 2)
         for (k in 0 until n) {
             val nk = (k + 1) % n
@@ -181,7 +197,7 @@ fun DrawScope.drawRing(ring: CoverRing, levels: FloatArray, style: SpectrumStyle
     // out, so they pulse both ways.
     val mid = style == SpectrumStyle.MIRROR
     for (k in 0 until n) {
-        val len = max(ring.levelAt(k, levels) * ring.maxLength, 1f)
+        val len = max(ring.levelAt(k, levels, layout) * ring.maxLength, 1f)
         val from = if (mid) ring.maxLength / 2 - len / 2 else 0f
         val x0 = ring.x[k] + ring.nx[k] * from
         val y0 = ring.y[k] + ring.ny[k] * from

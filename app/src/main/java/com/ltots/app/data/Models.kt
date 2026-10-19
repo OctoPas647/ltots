@@ -31,6 +31,26 @@ data class EqPreset(
 
 enum class SpectrumStyle(val label: String) { BARS("Bars"), CURVE("Curve"), MIRROR("Mirror") }
 
+/** How the spectrum runs around the cover. */
+enum class RingLayout(val label: String) {
+    /** One continuous loop: bass at the top, round clockwise to the treble. */
+    LOOP("One loop"),
+    /** Both sides the same: bass at the bottom, treble at the top. */
+    MIRRORED("Mirrored"),
+    /** Both sides the same, upside down: bass at the top, treble at the bottom. */
+    MIRRORED_FLIPPED("Mirrored, flipped"),
+}
+
+/** Where the spectrum sits behind the full-size cover. */
+enum class BehindLayout(val label: String) {
+    /** Rising from the bottom, bass on the left (the original). */
+    BELOW("From below"),
+    /** Hanging down from the top, bass on the left. */
+    ABOVE("From above"),
+    /** Hanging down from the top, bass on the right. */
+    ABOVE_FLIPPED("From above, flipped"),
+}
+
 /**
  * A colour as hue (0..360), saturation and brightness (0..1). Kept next to the colour itself so
  * the three sliders stay independent: rebuilding them from the colour loses the hue and
@@ -105,6 +125,8 @@ data class ThemeConfig(
     val visualizerFps: Int = 120,
     /** Playing tab: the visualizer wraps around the (smaller) cover; off = behind the cover. */
     val spectrumAroundCover: Boolean = true,
+    val ringLayout: RingLayout = RingLayout.LOOP,
+    val behindLayout: BehindLayout = BehindLayout.BELOW,
     /** How finely the live spectrum splits the sound (number of bars). */
     val analyzerBands: Int = 96,
     /** Run the app at the screen's highest refresh rate (120 Hz) instead of letting the phone pick. */
@@ -213,6 +235,7 @@ object Json {
         t.accentHsv?.let { put("aHsv", hsvJson(it)) }
         t.glowHsv?.let { put("gHsv", hsvJson(it)) }
         put("bands", t.analyzerBands); put("maxHz", t.maxRefresh); put("wrap", t.spectrumAroundCover)
+        put("ring", t.ringLayout.name); put("behind", t.behindLayout.name)
     }
 
     private fun hsvJson(h: Hsv) = JSONArray().put(h.h.toDouble()).put(h.s.toDouble()).put(h.v.toDouble())
@@ -245,6 +268,8 @@ object Json {
             analyzerBands = o.optInt("bands", d.analyzerBands).let { if (it in listOf(48, 96, 160)) it else d.analyzerBands },
             maxRefresh = o.optBoolean("maxHz", d.maxRefresh),
             spectrumAroundCover = o.optBoolean("wrap", d.spectrumAroundCover),
+            ringLayout = runCatching { RingLayout.valueOf(o.optString("ring")) }.getOrDefault(d.ringLayout),
+            behindLayout = runCatching { BehindLayout.valueOf(o.optString("behind")) }.getOrDefault(d.behindLayout),
             accentHsv = hsvOf(o.optJSONArray("aHsv")),
             glowHsv = hsvOf(o.optJSONArray("gHsv")),
             pureBlack = o.optBoolean("black", d.pureBlack),
