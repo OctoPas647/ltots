@@ -30,7 +30,6 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.preferredFrameRate
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -48,6 +47,12 @@ import com.ltots.app.ui.theme.LocalThemeConfig
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.sin
+
+/**
+ * True for glass that floats over the page (the bars at the bottom): it bends the page scrolling
+ * under it, so it always does the real blur/refraction, also on the AMOLED themes.
+ */
+val LocalGlassOverContent = staticCompositionLocalOf { false }
 
 /** The layer everything glass refracts. Provided by the app root. */
 val LocalBackdrop = staticCompositionLocalOf<LayerBackdrop?> { null }
@@ -74,6 +79,7 @@ fun Modifier.glass(
     tint: Color? = null,
 ): Modifier {
     val backdrop = LocalBackdrop.current
+    val overContent = LocalGlassOverContent.current
     val cfg = LocalThemeConfig.current
     val pal = LocalPalette.current
     val surface = (tint ?: pal.glassTint).copy(alpha = (cfg.glassTint + tintBoost).coerceIn(0f, 0.95f))
@@ -89,7 +95,7 @@ fun Modifier.glass(
             // AMOLED: what's behind the glass is plain black, and blurring, bending or boosting
             // black still gives black. So that work is skipped on the graphics chip entirely and
             // the black is painted directly; it looks exactly the same (rim light and shadow stay).
-            plainBlack = cfg.pureBlack,
+            plainBlack = cfg.pureBlack && !overContent,
             blurDp = cfg.blurDp * strength,
             refraction = cfg.refraction * strength,
             rimLight = cfg.rimLight,
@@ -123,7 +129,7 @@ fun Modifier.glass(
     val highlight = remember(look) { { look.value.rimLight.let { if (it > 0.01f) Highlight.Default.copy(alpha = it) else null } } }
     val shadow = remember(look) { { Shadow(radius = 20.dp, color = Color.Black.copy(alpha = look.value.shadowAlpha)) } }
     val shapeOf = remember(shape) { { shape } }
-    val source = if (cfg.pureBlack) remember { emptyBackdrop() } else backdrop
+    val source = if (cfg.pureBlack && !overContent) remember { emptyBackdrop() } else backdrop
     return this.drawBackdrop(
         backdrop = source,
         shape = shapeOf,
@@ -204,22 +210,23 @@ fun AppBackground(artwork: Bitmap?, modifier: Modifier = Modifier) {
         return
     }
 
-    // The colour blobs drift very slowly, so 20 updates a second look perfectly smooth — and
-    // every update makes all the glass on screen re-render, so this matters a lot for battery.
-    // Only while the app is on screen, and not at all with Battery Saver on.
+    // The colour blobs drift with every frame the screen shows (up to 120 a second), so the
+    // motion is perfectly smooth. Only while the app is on screen, and not at all with Battery
+    // Saver on; "Moving colours" off stops it completely.
     val phase = remember { androidx.compose.runtime.mutableFloatStateOf(0.8f) }
     val saver by com.ltots.app.ui.rememberBatterySaver()
     if (cfg.animateBackground && !saver) {
         com.ltots.app.ui.WhileOnScreen(cfg.animationSpeed) {
-            val periodMs = 60000f / max(0.05f, cfg.animationSpeed)
-            var last = System.nanoTime()
+            val periodNs = 60e9f / max(0.05f, cfg.animationSpeed)
+            var last = 0L
             while (true) {
-                kotlinx.coroutines.delay(1000L / BACKGROUND_FPS)
-                androidx.compose.animation.core.withInfiniteAnimationFrameNanos { }
-                val now = System.nanoTime()
-                val step = (now - last) / 1e6f / periodMs * TWO_PI
-                last = now
-                phase.floatValue = (phase.floatValue + step) % TWO_PI
+                androidx.compose.animation.core.withInfiniteAnimationFrameNanos { now ->
+                    if (last != 0L) {
+                        val step = (now - last).coerceAtMost(100_000_000L) / periodNs * TWO_PI
+                        phase.floatValue = (phase.floatValue + step) % TWO_PI
+                    }
+                    last = now
+                }
             }
         }
     }
@@ -259,7 +266,6 @@ fun AppBackground(artwork: Bitmap?, modifier: Modifier = Modifier) {
     }
 }
 
-private const val BACKGROUND_FPS = 20
 
 /** The cover shrunk to 40×40 and box-blurred (3 passes ≈ Gaussian), for the background glow. */
 private fun softGlow(src: Bitmap): Bitmap {

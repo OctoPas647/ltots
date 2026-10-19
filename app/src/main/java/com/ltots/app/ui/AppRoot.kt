@@ -107,6 +107,9 @@ fun AppRoot() {
     var tab by rememberSaveable { mutableStateOf(Tab.LIBRARY) }
     val artwork = rememberArtwork(player.trackId, player.artworkData)
     val backdrop = rememberLayerBackdrop()
+    // The page itself (background + the open tab): the floating bars at the bottom bend and blur
+    // it as it scrolls under them, like liquid glass on iOS.
+    val pageBackdrop = rememberLayerBackdrop()
 
     // Dynamic colours: the theme follows the current cover.
     LaunchedEffect(artwork) { com.ltots.app.ui.theme.DynamicColor.onArtwork(artwork) }
@@ -121,8 +124,6 @@ fun AppRoot() {
     }
 
     Box(Modifier.fillMaxSize()) {
-        // Everything glass refracts this layer.
-        AppBackground(artwork, Modifier.fillMaxSize().layerBackdrop(backdrop))
 
         // nav bar 68 + its padding 10+10, mini player 64 + gap 10, system bar, and 32 extra.
         val miniShown = player.hasMedia && tab != Tab.PLAYER
@@ -130,6 +131,9 @@ fun AppRoot() {
         val chrome = sysBar + 88.dp + (if (miniShown) 74.dp else 0.dp) + 32.dp
 
         CompositionLocalProvider(LocalBackdrop provides backdrop, LocalBottomChrome provides chrome) {
+          Box(Modifier.fillMaxSize().layerBackdrop(pageBackdrop)) {
+            // The glass panels on the pages refract this layer.
+            AppBackground(artwork, Modifier.fillMaxSize().layerBackdrop(backdrop))
             Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars.union(WindowInsets.displayCutout.only(WindowInsetsSides.Top)))) {
                 Crossfade(tab, label = "tab") { t ->
                     when (t) {
@@ -142,7 +146,9 @@ fun AppRoot() {
                     }
                 }
             }
+          }
 
+          CompositionLocalProvider(LocalBackdrop provides pageBackdrop, com.ltots.app.ui.glass.LocalGlassOverContent provides true) {
             Column(
                 Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding()
                     .padding(horizontal = 14.dp, vertical = 10.dp),
@@ -157,6 +163,7 @@ fun AppRoot() {
                 }
                 NavBar(tab) { tab = it }
             }
+          }
         }
     }
 }

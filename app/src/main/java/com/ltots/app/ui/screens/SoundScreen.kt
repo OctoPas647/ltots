@@ -147,17 +147,6 @@ fun SoundScreen() {
         Spacer(Modifier.height(12.dp))
         LibraryPrepCard()
 
-        Spacer(Modifier.height(12.dp))
-        GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.06f) {
-            Column(Modifier.padding(16.dp)) {
-                SectionTitle("Visualizer detail")
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(48, 96, 160).forEach { n ->
-                        Pill("$n bands", settings.analyzerBands == n, { AudioEngine.updateSettings { it.copy(analyzerBands = n) } })
-                    }
-                }
-            }
-        }
 
         Spacer(Modifier.height(12.dp))
         Text(

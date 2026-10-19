@@ -59,7 +59,11 @@ object Store {
     // ---- theme / settings / default EQ -----------------------------------------------------
 
     /** The saved theme, or null if none has been saved yet. */
-    fun loadTheme(): ThemeConfig? = read("theme.json")?.let { Json.theme(it) }
+    fun loadTheme(): ThemeConfig? = read("theme.json")?.let { o ->
+        val t = Json.theme(o)
+        // "Visualizer detail" used to live in the Sound tab's settings; it's part of the look now.
+        if (!o.has("bands")) t.copy(analyzerBands = loadSettings().analyzerBands) else t
+    }
     fun saveTheme(t: ThemeConfig) = writeDebounced("theme.json") { Json.theme(t).toString() }
 
     fun loadSettings(): AppSettings = read("settings.json")?.let { Json.settings(it) } ?: AppSettings()

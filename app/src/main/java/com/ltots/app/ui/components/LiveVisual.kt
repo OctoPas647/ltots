@@ -18,7 +18,6 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.preferredFrameRate
 import androidx.media3.common.util.UnstableApi
 import com.ltots.app.audio.Analyzer
 import com.ltots.app.audio.AudioEngine
@@ -50,7 +49,7 @@ class LiveVisual(val analyzer: Analyzer) {
 
 /**
  * Drives the live spectrum. Battery-conscious by design:
- *  - runs at the chosen rate (30 fps by default) instead of every display refresh;
+ *  - runs at the chosen rate (120 fps by default, up to the display's refresh);
  *  - sleeps completely while nothing is playing (once the bars have fallen to rest), and
  *    while the phone's audio chip is playing the music directly (there's no signal to show);
  *  - only analyses what is drawn: no waveform where none is shown, and no separate pre-EQ
@@ -65,7 +64,7 @@ fun rememberLiveVisual(wave: Boolean = true): LiveVisual {
     val cfg = LocalThemeConfig.current
     val saver by rememberBatterySaver()
     val fps = if (saver) minOf(cfg.visualizerFps, 30) else cfg.visualizerFps
-    val lv = remember(settings.analyzerBands) { LiveVisual(Analyzer(AudioEngine.tap, settings.analyzerBands)) }
+    val lv = remember(cfg.analyzerBands) { LiveVisual(Analyzer(AudioEngine.tap, cfg.analyzerBands)) }
     lv.fps = fps
     val ghost = cfg.showPreEqGhost
     // Everything below runs only while the app is visible. Screen off (or app in the
@@ -162,9 +161,9 @@ fun LiveSpectrum(
     val pal = LocalPalette.current
     if (visual.fps <= 0) return
     // Own render layer: redrawing the spectrum never forces the rest of the screen (and the
-    // glass panels on it) to be redrawn. The frame-rate hint lets the display drop to the
-    // visualizer's rate instead of running at 120 Hz just for it.
-    Canvas(modifier.graphicsLayer().preferredFrameRate(visual.fps.toFloat())) {
+    // glass panels on it) to be redrawn. No frame-rate hint: a low one held the whole window
+    // (scrolling, animations) at the visualizer's rate.
+    Canvas(modifier.graphicsLayer()) {
         @Suppress("UNUSED_VARIABLE") val t = visual.tick // read to redraw on every new frame
         val f = visual.frame
         val alpha = cfg.spectrumOpacity * intensity

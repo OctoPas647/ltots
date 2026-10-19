@@ -72,19 +72,35 @@ object ThemeState {
     }
 
     /**
-     * Switch to a preset look without touching the system-bar choices. Cover colours stay as
-     * they were, except for the two AMOLED themes, which are defined by them (off / on).
+     * Switch to a theme: its colours, glass and background. Everything else on the Look tab
+     * (visualizer, refresh rate, corners, cover opacity, system bars, motion speed) stays exactly
+     * as you set it. Cover colours are on only for AMOLED Cover.
      */
-    fun applyPreset(p: ThemePreset) = update { cur ->
-        p.config.copy(hideNavBar = cur.hideNavBar, hideStatusBar = cur.hideStatusBar, dynamicColors = p.dynamic ?: cur.dynamicColors)
-    }
+    fun applyPreset(p: ThemePreset) = update { cur -> presetApplied(p, cur) }
+
+    /** What [cur] becomes when theme [p] is picked. */
+    fun presetApplied(p: ThemePreset, cur: ThemeConfig): ThemeConfig = themeOf(p).withPersonalFrom(cur)
 
     /** Whether [cfg] is currently showing preset [p]. */
-    fun isActive(p: ThemePreset, cfg: ThemeConfig): Boolean {
-        val t = p.config
-        if (cfg.copy(hideNavBar = t.hideNavBar, hideStatusBar = t.hideStatusBar, dynamicColors = t.dynamicColors) != t) return false
-        return p.dynamic == null || p.dynamic == cfg.dynamicColors
-    }
+    fun isActive(p: ThemePreset, cfg: ThemeConfig): Boolean =
+        themeOf(p).withPersonalFrom(cfg).copy(accentHsv = null, glowHsv = null) == cfg.copy(accentHsv = null, glowHsv = null)
+
+    private fun themeOf(p: ThemePreset) = p.config.copy(dynamicColors = p.dynamic ?: false, accentHsv = null, glowHsv = null)
+
+    /** [this] theme with the settings that belong to the person, not the theme, taken from [cur]. */
+    private fun ThemeConfig.withPersonalFrom(cur: ThemeConfig) = copy(
+        animationSpeed = cur.animationSpeed,
+        coverOpacity = cur.coverOpacity,
+        cornerDp = cur.cornerDp,
+        spectrumStyle = cur.spectrumStyle,
+        spectrumOpacity = cur.spectrumOpacity,
+        showPreEqGhost = cur.showPreEqGhost,
+        visualizerFps = cur.visualizerFps,
+        analyzerBands = cur.analyzerBands,
+        maxRefresh = cur.maxRefresh,
+        hideNavBar = cur.hideNavBar,
+        hideStatusBar = cur.hideStatusBar,
+    )
 
     fun update(transform: (ThemeConfig) -> ThemeConfig) {
         val t = transform(_config.value)

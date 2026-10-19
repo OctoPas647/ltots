@@ -182,15 +182,23 @@ private val SwitchPad = 5.dp
 
 /** Small pill-shaped choice chip. */
 @Composable
-fun Pill(text: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, onLongClick: (() -> Unit)? = null) {
+fun Pill(
+    text: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    onLongClick: (() -> Unit)? = null,
+    enabled: Boolean = true,
+) {
     val pal = LocalPalette.current
     val shape = RoundedCornerShape(50)
     Box(
         modifier
+            .then(if (enabled) Modifier else Modifier.alpha(0.4f))
             .clip(shape)
             .background(if (selected) pal.accent else pal.text.copy(alpha = 0.08f))
             .border(1.dp, if (selected) Color.Transparent else pal.text.copy(alpha = 0.12f), shape)
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .combinedClickable(enabled = enabled, onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 14.dp, vertical = 8.dp),
     ) {
         Text(

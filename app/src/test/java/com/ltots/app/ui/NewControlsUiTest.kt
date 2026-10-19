@@ -126,8 +126,10 @@ class NewControlsUiTest {
         val rootW = rule.onRoot().fetchSemanticsNode().size.width
         val reset = rule.onNodeWithContentDescription("Reset EQ: every gain back to 0 dB").fetchSemanticsNode().boundsInRoot
         val profiles = rule.onNodeWithContentDescription("EQ profiles").fetchSemanticsNode().boundsInRoot
+        val undo = rule.onNodeWithContentDescription("Undo the last EQ change").fetchSemanticsNode().boundsInRoot
         assertTrue("reset is in the top-right corner: $reset of $rootW", reset.right > rootW * 0.88f && reset.top < 400f)
-        assertTrue("profiles is just left of reset: $profiles vs $reset", profiles.right <= reset.left && profiles.right > reset.left - 80f)
+        assertTrue("undo is just left of reset: $undo vs $reset", undo.right <= reset.left && undo.right > reset.left - 80f)
+        assertTrue("profiles is just left of undo: $profiles vs $undo", profiles.right <= undo.left && profiles.right > undo.left - 80f)
 
         click("Genres"); click("Rock")
         val rock = Store.builtInPresets.first { it.name == "Rock" }.eq
@@ -151,11 +153,16 @@ class NewControlsUiTest {
         click("Custom 1")
         assertTrue("profile loads", EqTone.sameShape(AudioEngine.effectiveEq.value, rock))
 
-        // 3. Look: AMOLED grays out Glow, Blur and Refraction.
+        // Undo: the last change was loading Custom 1 (Rock), so one undo returns to the reset EQ.
+        rule.onNodeWithContentDescription("Undo the last EQ change").performClick(); idle()
+        assertTrue("undo goes back one step", !EqTone.sameShape(AudioEngine.effectiveEq.value, rock))
+
+        // 3. Look: AMOLED grays out Glow (no background to colour); Blur and Refraction stay on:
+        // they shape the bars at the bottom.
         tab("Look")
         rule.onNodeWithText("AMOLED").performClick(); idle(1000)
         assertTrue(ThemeState.config.value.pureBlack)
-        rule.onNode(hasProgressBarRangeInfo(androidx.compose.ui.semantics.ProgressBarRangeInfo(ThemeState.config.value.blurDp, 0f..60f))).assertIsNotEnabled()
+        rule.onNode(hasProgressBarRangeInfo(androidx.compose.ui.semantics.ProgressBarRangeInfo(ThemeState.config.value.blurDp, 0f..60f))).assertIsEnabled()
         rule.onNodeWithText("Glow").assertIsNotEnabled()
         rule.onAllNodesWithText("Prism edges").fetchSemanticsNodes().let { assertTrue("Prism edges removed", it.isEmpty()) }
         shot("13_look_amoled_grayed")
@@ -170,8 +177,8 @@ class NewControlsUiTest {
         // Make Custom 2 Aurora with cover colours off: the glow is in use and can be changed.
         rule.onNodeWithText("Aurora").performClick(); idle(1000)
         assertTrue(!ThemeState.config.value.pureBlack)
-        if (ThemeState.config.value.dynamicColors) ThemeState.update { it.copy(dynamicColors = false) }
-        idle()
+        assertTrue("cover colours belong to AMOLED Cover only", !ThemeState.config.value.dynamicColors)
+        rule.onAllNodesWithText("Colours from the song's cover").fetchSemanticsNodes().let { assertTrue("cover switch removed", it.isEmpty()) }
         rule.onNodeWithText("Glow").assertIsEnabled()
         rule.onNode(hasProgressBarRangeInfo(androidx.compose.ui.semantics.ProgressBarRangeInfo(ThemeState.config.value.blurDp, 0f..60f))).assertIsEnabled()
         shot("15_look_aurora_glow")
@@ -195,8 +202,9 @@ class NewControlsUiTest {
         tab("Look")
         rule.onNodeWithText("AMOLED").performClick(); idle(1000)
         rule.onNodeWithText("Frost / tint").assertIsDisplayed()
-        rule.onNode(hasProgressBarRangeInfo(androidx.compose.ui.semantics.ProgressBarRangeInfo(ThemeState.config.value.refraction, 0f..1f))).assertIsNotEnabled()
-        shot("13b_look_glass_grayed")
+        // Refraction works on AMOLED too: it bends the page under the bars at the bottom.
+        rule.onNode(hasProgressBarRangeInfo(androidx.compose.ui.semantics.ProgressBarRangeInfo(ThemeState.config.value.refraction, 0f..1f))).assertIsEnabled()
+        shot("13b_look_glass_amoled")
     }
 
     /** Battery EQ: the switch, its live status, and the phone's simplified curve on the EQ graph. */

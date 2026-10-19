@@ -47,6 +47,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.ltots.app.data.SpectrumStyle
+import com.ltots.app.data.Hsv
 import com.ltots.app.data.ThemeConfig
 import com.ltots.app.ui.bottomChrome
 import com.ltots.app.ui.components.LabeledSlider
@@ -115,15 +116,6 @@ fun LookScreen() {
             }
         }
 
-        Spacer(Modifier.height(12.dp))
-        GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
-            Column(Modifier.padding(16.dp)) {
-                SwitchRow(
-                    "Colours from the song's cover", cfg.dynamicColors, { on -> set { it.copy(dynamicColors = on) } },
-                    sub = "The accent and background glow take the average colour of the current cover, like Spotify and YouTube Music. The colours below are used when nothing is playing.",
-                )
-            }
-        }
 
         Spacer(Modifier.height(12.dp))
         ColorCard(cfg, ::set)
@@ -132,13 +124,13 @@ fun LookScreen() {
         GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
             Column(Modifier.padding(16.dp)) {
                 SectionTitle("Glass")
-                // Blur and Refraction bend what's behind the glass. On the AMOLED themes that's pure
-                // black, so there is nothing for them to change: they stay visible, grayed out.
-                val bends = !cfg.pureBlack
-                LabeledSlider("Blur", cfg.blurDp, { v -> set { it.copy(blurDp = v) } }, 0f..60f, "%.0f dp".format(Locale.ROOT, cfg.blurDp), enabled = bends)
-                LabeledSlider("Refraction", cfg.refraction, { v -> set { it.copy(refraction = v) } }, 0f..1f, pct(cfg.refraction), enabled = bends)
-                if (!bends) Text(
-                    "Blur and Refraction work on what's behind the glass. On the AMOLED themes that's pure black, so they have nothing to change.",
+                // Blur and Refraction bend what's behind the glass: the page scrolling under the bars
+                // at the bottom (every theme), and the moving colours behind the panels.
+                LabeledSlider("Blur", cfg.blurDp, { v -> set { it.copy(blurDp = v) } }, 0f..60f, "%.0f dp".format(Locale.ROOT, cfg.blurDp))
+                LabeledSlider("Refraction", cfg.refraction, { v -> set { it.copy(refraction = v) } }, 0f..1f, pct(cfg.refraction))
+                Text(
+                    if (cfg.pureBlack) "Blur and Refraction show on the bars at the bottom, bending the page as it scrolls under them. The panels sit on pure black, which looks the same bent or not."
+                    else "Blur and Refraction bend what's behind the glass: the moving colours under the panels, and the page scrolling under the bars at the bottom.",
                     color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 8.dp),
                 )
                 LabeledSlider("Frost / tint", cfg.glassTint, { v -> set { it.copy(glassTint = v) } }, 0f..0.7f, pct(cfg.glassTint / 0.7f))
@@ -174,6 +166,11 @@ fun LookScreen() {
             Column(Modifier.padding(16.dp)) {
                 SectionTitle("Screen")
                 SwitchRow(
+                    "Highest refresh rate", cfg.maxRefresh, { on -> set { it.copy(maxRefresh = on) } },
+                    sub = "Runs LToTS at your screen's top refresh rate (120 Hz) so scrolling and animations are as smooth as they can be. " +
+                        "Off lets the phone choose, which may be 60 Hz to save a little battery.",
+                )
+                SwitchRow(
                     "Hide navigation bar", cfg.hideNavBar, { on -> set { it.copy(hideNavBar = on) } },
                     sub = "Swipe up from the bottom edge to bring it back for a moment.",
                 )
@@ -204,9 +201,18 @@ fun LookScreen() {
                     }
                 }
                 Text(
-                    "Higher is smoother but uses more battery. 30 fps (the default) is already smooth and the easiest on the battery; Battery Saver caps it at 30. The visualizer stops completely with the screen off and sleeps while nothing is playing.",
+                    "120 fps matches a 120 Hz screen. Lower uses a little less battery; Battery Saver caps it at 30. " +
+                        "The visualizer stops completely with the screen off and sleeps while nothing is playing.",
                     color = LocalPalette.current.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp),
                 )
+                Spacer(Modifier.height(10.dp))
+                Text("Detail", color = LocalPalette.current.textDim, style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(48, 96, 160).forEach { n ->
+                        Pill("$n bars", cfg.analyzerBands == n, { set { it.copy(analyzerBands = n) } })
+                    }
+                }
             }
         }
 
@@ -223,23 +229,19 @@ private fun pct(v: Float) = "%.0f%%".format(Locale.ROOT, v * 100)
 @Composable
 private fun ColorCard(cfg: ThemeConfig, set: ((ThemeConfig) -> ThemeConfig) -> Unit) {
     val pal = LocalPalette.current
-    val cover by DynamicColor.colors.collectAsState()
-    // The glow colours the moving background. It can't show on the AMOLED themes (the background
-    // stays pure black), and while cover colours are on the song's cover takes its place: then it
-    // is grayed out, so it's clear it exists but can't be changed right now.
-    val glowLockedWhy = when {
-        cfg.pureBlack -> "Glow isn't used on the AMOLED themes: the background stays pure black. Pick another theme to use it."
-        cfg.dynamicColors && cover != null -> "Glow follows the song's cover right now. Turn off \"Colours from the song's cover\" to pick your own."
-        else -> null
-    }
+    // The glow colours the moving background, which the AMOLED themes don't have (pure black).
+    val glowLockedWhy = if (cfg.pureBlack) "Glow isn't used on the AMOLED themes: the background stays pure black. Pick another theme to use it." else null
     var pickedGlow by rememberSaveable { mutableStateOf(false) }
     val glow = pickedGlow && glowLockedWhy == null
-    val current = (if (glow) cfg.glow else cfg.accent).toColor()
-    fun apply(c: Color) {
-        val v = c.toArgbLong()
-        set { if (glow) it.copy(glow = v) else it.copy(accent = v) }
+
+    // Each colour keeps its own hue, saturation and brightness. A slider changes only its own
+    // value: hue never touches saturation or brightness, and so on, whatever the colour.
+    val argb = if (glow) cfg.glow else cfg.accent
+    val hsv = Hsv.resolve(argb, if (glow) cfg.glowHsv else cfg.accentHsv)
+    fun setHsv(n: Hsv) {
+        val v = n.toArgb()
+        set { if (glow) it.copy(glow = v, glowHsv = n) else it.copy(accent = v, accentHsv = n) }
     }
-    val hsv = FloatArray(3).also { android.graphics.Color.colorToHSV(current.toArgbLong().toInt(), it) }
 
     GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
         Column(Modifier.padding(16.dp)) {
@@ -249,17 +251,72 @@ private fun ColorCard(cfg: ThemeConfig, set: ((ThemeConfig) -> ThemeConfig) -> U
                 ColourChip("Glow", cfg.glow.toColor(), selected = glow, enabled = glowLockedWhy == null) { pickedGlow = true }
             }
             Text(
-                glowLockedWhy ?: if (glow) "Glow: the colour the moving background is made of." else "Accent: buttons, sliders and highlights.",
+                glowLockedWhy?.takeIf { pickedGlow }
+                    ?: if (glow) "Glow: the colour the moving background is made of."
+                    else if (cfg.dynamicColors) "Accent: buttons, sliders and highlights. On AMOLED Cover the song's cover sets it while music plays; this one shows when nothing is."
+                    else "Accent: buttons, sliders and highlights.",
                 color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(start = 4.dp, top = 6.dp),
             )
             Spacer(Modifier.height(12.dp))
             FlowPills {
-                swatches.forEach { s -> Swatch(s.toColor(), current.toArgbLong() == s, { apply(s.toColor()) }) }
+                swatches.forEach { sw -> Swatch(sw.toColor(), (argb and 0xFFFFFFFFL) == sw, { setHsv(Hsv.of(sw)) }) }
             }
             Spacer(Modifier.height(10.dp))
-            HueBar(hsv[0]) { h -> apply(Color.hsv(h, hsv[1].coerceAtLeast(0.05f), hsv[2].coerceAtLeast(0.05f))) }
-            LabeledSlider("Saturation", hsv[1], { s -> apply(Color.hsv(hsv[0], s, hsv[2])) }, 0f..1f, pct(hsv[1]))
-            LabeledSlider("Brightness", hsv[2], { v -> apply(Color.hsv(hsv[0], hsv[1], v)) }, 0f..1f, pct(hsv[2]))
+            GradientSlider(
+                "Hue", "%.0f°".format(Locale.ROOT, hsv.h), hsv.h, 0f..360f,
+                Brush.horizontalGradient((0..6).map { Color.hsv(it * 60f % 360f, 1f, 1f) }),
+            ) { h -> setHsv(hsv.copy(h = h)) }
+            GradientSlider(
+                "Saturation", pct(hsv.s), hsv.s, 0f..1f,
+                Brush.horizontalGradient(listOf(Color.hsv(hsv.h, 0f, maxOf(hsv.v, 0.35f)), Color.hsv(hsv.h, 1f, maxOf(hsv.v, 0.35f)))),
+            ) { v -> setHsv(hsv.copy(s = v)) }
+            GradientSlider(
+                "Brightness", pct(hsv.v), hsv.v, 0f..1f,
+                Brush.horizontalGradient(listOf(Color.Black, Color.hsv(hsv.h, hsv.s, 1f))),
+            ) { v -> setHsv(hsv.copy(v = v)) }
+        }
+    }
+}
+
+/**
+ * A slider drawn as a colour strip with a ring on it. The ring follows the value exactly (no
+ * rounding through a colour), so it glides smoothly at any brightness.
+ */
+@Composable
+private fun GradientSlider(
+    label: String,
+    valueText: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    brush: Brush,
+    onChange: (Float) -> Unit,
+) {
+    val pal = LocalPalette.current
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(label, color = pal.textDim, style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.weight(1f))
+            Text(valueText, color = pal.text, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+        }
+        Box(Modifier.fillMaxWidth().padding(vertical = 8.dp).height(26.dp)) {
+            Canvas(Modifier.fillMaxSize().clip(RoundedCornerShape(13.dp))) {
+                drawRect(brush)
+                val r = size.height / 2
+                val t = ((value - range.start) / (range.endInclusive - range.start)).coerceIn(0f, 1f)
+                val x = r + (size.width - 2 * r) * t
+                drawCircle(Color.Black.copy(alpha = 0.35f), r - 1f, androidx.compose.ui.geometry.Offset(x, r),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 7f))
+                drawCircle(Color.White, r - 2f, androidx.compose.ui.geometry.Offset(x, r),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 4f))
+            }
+            androidx.compose.material3.Slider(
+                value = value.coerceIn(range.start, range.endInclusive), onValueChange = onChange, valueRange = range,
+                modifier = Modifier.fillMaxSize(),
+                colors = androidx.compose.material3.SliderDefaults.colors(
+                    thumbColor = Color.Transparent, activeTrackColor = Color.Transparent, inactiveTrackColor = Color.Transparent,
+                    activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent,
+                ),
+            )
         }
     }
 }
@@ -322,26 +379,4 @@ private fun LookDot(t: ThemeConfig) {
             .background(Brush.linearGradient(listOf(back, back, t.accent.toColor())))
             .border(1.dp, pal.text.copy(alpha = 0.2f), CircleShape)
     )
-}
-
-@Composable
-private fun HueBar(hue: Float, onHue: (Float) -> Unit) {
-    val pal = LocalPalette.current
-    Column {
-        Text("Hue", color = pal.textDim, style = MaterialTheme.typography.bodyMedium)
-        Box(Modifier.fillMaxWidth().padding(vertical = 8.dp).height(26.dp)) {
-            Canvas(Modifier.fillMaxSize().clip(RoundedCornerShape(13.dp))) {
-                drawRect(Brush.horizontalGradient((0..6).map { Color.hsv(it * 60f % 360f, 1f, 1f) }))
-                val x = size.width * hue / 360f
-                drawCircle(Color.White, size.height / 2 - 2, androidx.compose.ui.geometry.Offset(x, size.height / 2),
-                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 4f))
-            }
-            androidx.compose.material3.Slider(
-                value = hue, onValueChange = onHue, valueRange = 0f..359.9f, modifier = Modifier.fillMaxSize(),
-                colors = androidx.compose.material3.SliderDefaults.colors(
-                    thumbColor = Color.Transparent, activeTrackColor = Color.Transparent, inactiveTrackColor = Color.Transparent,
-                ),
-            )
-        }
-    }
 }

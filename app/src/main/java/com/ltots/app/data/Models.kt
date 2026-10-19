@@ -31,14 +31,58 @@ data class EqPreset(
 
 enum class SpectrumStyle(val label: String) { BARS("Bars"), CURVE("Curve"), MIRROR("Mirror") }
 
+/**
+ * A colour as hue (0..360), saturation and brightness (0..1). Kept next to the colour itself so
+ * the three sliders stay independent: rebuilding them from the colour loses the hue and
+ * saturation of dark or grey colours, which made one slider move the others.
+ */
+data class Hsv(val h: Float, val s: Float, val v: Float) {
+    /** Opaque ARGB as a Long (the form the theme stores colours in). */
+    fun toArgb(): Long {
+        val hh = ((h % 360f) + 360f) % 360f
+        val ss = s.coerceIn(0f, 1f); val vv = v.coerceIn(0f, 1f)
+        val c = vv * ss
+        val x = c * (1 - kotlin.math.abs((hh / 60f) % 2f - 1))
+        val m = vv - c
+        val (r, g, b) = when ((hh / 60f).toInt()) {
+            0 -> Triple(c, x, 0f); 1 -> Triple(x, c, 0f); 2 -> Triple(0f, c, x)
+            3 -> Triple(0f, x, c); 4 -> Triple(x, 0f, c); else -> Triple(c, 0f, x)
+        }
+        fun ch(f: Float) = Math.round((f + m) * 255f).coerceIn(0, 255).toLong()
+        return (0xFFL shl 24) or (ch(r) shl 16) or (ch(g) shl 8) or ch(b)
+    }
+
+    companion object {
+        fun of(argb: Long): Hsv {
+            val r = ((argb shr 16) and 0xFF) / 255f
+            val g = ((argb shr 8) and 0xFF) / 255f
+            val b = (argb and 0xFF) / 255f
+            val max = maxOf(r, g, b); val min = minOf(r, g, b); val d = max - min
+            val h = when {
+                d == 0f -> 0f
+                max == r -> 60f * (((g - b) / d + 6f) % 6f)
+                max == g -> 60f * ((b - r) / d + 2f)
+                else -> 60f * ((r - g) / d + 4f)
+            }
+            return Hsv(h, if (max == 0f) 0f else d / max, max)
+        }
+
+        /** The stored [hsv] if it still describes [argb], otherwise worked out from [argb]. */
+        fun resolve(argb: Long, hsv: Hsv?): Hsv = hsv?.takeIf { it.toArgb() == (argb and 0xFFFFFFFFL) } ?: of(argb)
+    }
+}
+
 data class ThemeConfig(
     val accent: Long = 0xFF8B6CFF,
+    /** The accent as hue/saturation/brightness, exactly as last set (see [Hsv]). */
+    val accentHsv: Hsv? = null,
     /**
      * The background glow: one colour the moving background is made from (lighter and darker
      * shades of it drift around). Not shown on the AMOLED themes, and the song's cover takes its
      * place while cover colours are on.
      */
     val glow: Long = 0xFF5A30D8,
+    val glowHsv: Hsv? = null,
     val animateBackground: Boolean = true,
     val animationSpeed: Float = 0.5f,
     /** Blend the current album art into the background. */
@@ -58,15 +102,19 @@ data class ThemeConfig(
     val spectrumOpacity: Float = 0.85f,
     val showPreEqGhost: Boolean = true,
     /** Visualizer refresh rate in frames per second (0 = off). Lower uses less battery. */
-    val visualizerFps: Int = 30,
+    val visualizerFps: Int = 120,
+    /** How finely the live spectrum splits the sound (number of bars). */
+    val analyzerBands: Int = 96,
+    /** Run the app at the screen's highest refresh rate (120 Hz) instead of letting the phone pick. */
+    val maxRefresh: Boolean = true,
     /** AMOLED: pure #000 background — no colour blobs or artwork glow, so black pixels stay off. */
     val pureBlack: Boolean = false,
     /** Hide Android's navigation bar inside the app (swipe up from the bottom edge to reveal it). */
     val hideNavBar: Boolean = true,
     /** Hide the status bar (clock, battery) too, for fully full-screen. */
     val hideStatusBar: Boolean = false,
-    /** Accent and background glow follow the current song's cover (like Spotify / YT Music). */
-    val dynamicColors: Boolean = true,
+    /** Accent follows the current song's cover: the AMOLED Cover theme. */
+    val dynamicColors: Boolean = false,
 )
 
 data class AppSettings(
@@ -157,10 +205,17 @@ object Json {
         put("tint", t.glassTint.toDouble()); put("rim", t.rimLight.toDouble())
         put("corner", t.cornerDp.toDouble()); put("dark", t.darkMode)
         put("specStyle", t.spectrumStyle.name); put("specOpacity", t.spectrumOpacity.toDouble())
-        put("ghost", t.showPreEqGhost); put("vfps", t.visualizerFps); put("vfpsV", 2)
+        put("ghost", t.showPreEqGhost); put("vfps", t.visualizerFps); put("vfpsV", 3)
         put("black", t.pureBlack); put("hideNav", t.hideNavBar); put("hideStatus", t.hideStatusBar)
         put("dyn", t.dynamicColors)
+        t.accentHsv?.let { put("aHsv", hsvJson(it)) }
+        t.glowHsv?.let { put("gHsv", hsvJson(it)) }
+        put("bands", t.analyzerBands); put("maxHz", t.maxRefresh)
     }
+
+    private fun hsvJson(h: Hsv) = JSONArray().put(h.h.toDouble()).put(h.s.toDouble()).put(h.v.toDouble())
+    private fun hsvOf(a: JSONArray?): Hsv? =
+        if (a == null || a.length() < 3) null else Hsv(a.optDouble(0).toFloat(), a.optDouble(1).toFloat(), a.optDouble(2).toFloat())
 
     fun theme(o: JSONObject): ThemeConfig {
         val d = ThemeConfig()
@@ -182,13 +237,18 @@ object Json {
             spectrumOpacity = o.optDouble("specOpacity", d.spectrumOpacity.toDouble()).toFloat(),
             showPreEqGhost = o.optBoolean("ghost", d.showPreEqGhost),
             visualizerFps = o.optInt("vfps", d.visualizerFps).let { if (it in listOf(0, 30, 60, 120)) it else d.visualizerFps }
-                // The old default was 60 fps; settings saved before the 30 fps default move to 30
-                // once (a rate picked after that is kept).
-                .let { if (it == 60 && !o.has("vfpsV")) 30 else it },
+                // 30 fps was the default before the app aimed for 120: saves from then move up once
+                // (a rate picked after this is kept).
+                .let { if (it == 30 && o.optInt("vfpsV", 0) < 3) 120 else it },
+            analyzerBands = o.optInt("bands", d.analyzerBands).let { if (it in listOf(48, 96, 160)) it else d.analyzerBands },
+            maxRefresh = o.optBoolean("maxHz", d.maxRefresh),
+            accentHsv = hsvOf(o.optJSONArray("aHsv")),
+            glowHsv = hsvOf(o.optJSONArray("gHsv")),
             pureBlack = o.optBoolean("black", d.pureBlack),
             hideNavBar = o.optBoolean("hideNav", d.hideNavBar),
             hideStatusBar = o.optBoolean("hideStatus", d.hideStatusBar),
-            dynamicColors = o.optBoolean("dyn", d.dynamicColors),
+            // Cover colours belong to the AMOLED Cover theme only (the separate switch is gone).
+            dynamicColors = o.optBoolean("dyn", d.dynamicColors) && o.optBoolean("black", d.pureBlack),
         )
     }
 

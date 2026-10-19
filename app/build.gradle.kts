@@ -67,10 +67,12 @@ android {
 
     buildTypes {
         release {
-            // R8 was renaming/removing a class required by yt-dlp initialization,
-            // causing NoClassDefFoundError: kl0 in release installs. Keep release
-            // builds unshrunk until the exact keep rule is identified.
-            isMinifyEnabled = false
+            // R8 on, in a careful form: it optimises only LToTS's own code, Kotlin and AndroidX
+            // (Compose, Media3) — that's what makes Compose run smoothly — while every other
+            // library (the yt-dlp download engine and what it uses) is kept exactly as shipped,
+            // and nothing is renamed. Full shrinking once broke yt-dlp (NoClassDefFoundError
+            // for a renamed class); see proguard-rules.pro.
+            isMinifyEnabled = true
             isShrinkResources = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = if (hasReleaseKey) signingConfigs.getByName("release")

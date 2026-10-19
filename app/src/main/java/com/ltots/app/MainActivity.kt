@@ -36,6 +36,7 @@ class MainActivity : ComponentActivity() {
                 bars = cfg
                 applySystemBars()
             }
+            LaunchedEffect(cfg.maxRefresh) { applyRefreshRate(cfg.maxRefresh) }
             LToTSTheme { AppRoot() }
         }
     }
@@ -58,6 +59,26 @@ class MainActivity : ComponentActivity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) applySystemBars()
+    }
+
+    /**
+     * Highest refresh rate: ask for the screen's fastest mode (120 Hz on the Xiaomi 17 Ultra) at
+     * the current resolution. Without this many phones (HyperOS included) keep apps at 60 Hz.
+     * Off hands the choice back to the phone. (Same approach as Metrolist's "high refresh rate".)
+     */
+    private fun applyRefreshRate(max: Boolean) {
+        val d = runCatching { display }.getOrNull() ?: return
+        val attrs = window.attributes
+        val want = if (!max) 0 else {
+            val cur = d.mode
+            d.supportedModes
+                .filter { it.physicalWidth == cur.physicalWidth && it.physicalHeight == cur.physicalHeight }
+                .maxByOrNull { it.refreshRate }?.modeId ?: 0
+        }
+        if (attrs.preferredDisplayModeId != want) {
+            attrs.preferredDisplayModeId = want
+            window.attributes = attrs
+        }
     }
 
     private fun applySystemBars() {

@@ -17,7 +17,9 @@ newer APK updates the app and keeps your settings.
 - **Easy-first EQ** – 33 presets in four groups (Basics, Genres, Voice & places, Precise) with a
   one-line description of each, the active preset highlighted, **Quick tone** sliders (Bass / Mids /
   Treble) that work on top of any shape, Undo and Flatten; save your own presets ("Mine").
-  Top right: **EQ profiles** (Custom 1–5) and **Reset** (every gain back to 0 dB).
+  Top right: **EQ profiles** (Custom 1–5), **Undo** (the last change) and **Reset** (every gain back
+  to 0 dB). **Reset to 10 bands** in Fine-tune brings back the standard 31 Hz–16 kHz layout,
+  keeping your curve's shape.
   Everything below stays one tap away under **Fine-tune**.
 - **Parametric EQ** – any number of bands (1–64); every band has an exact frequency, gain, width (Q)
   and type (peak, low/high shelf, low/high cut). Drag the dots on the curve or type exact values.
@@ -41,11 +43,18 @@ newer APK updates the app and keeps your settings.
   limiter just below 0 dBFS, 32-bit float output.
 - **Output awareness** – shows where audio is going, warns when earbuds fall back to LE Audio (LC3)
   instead of LDAC, and offers **bit-perfect USB output** (Android 14+) for USB DACs.
-- **Liquid glass UI** – real refraction and blur; accent, background glow, blur, refraction, tint,
-  rim light, corner roundness, background motion, album-art glow and visualizer style are all
-  adjustable, and every change shows at once.
-- **Look profiles** – Custom 1–5 in the top right of the Look tab, each keeping every Look setting;
-  the one in use saves each change.
+- **Liquid glass UI** – real refraction and blur; the bars at the bottom bend and blur the page as
+  it scrolls under them (every theme, AMOLED included). Accent, background glow, blur, refraction,
+  tint, rim light, corner roundness, background motion, album-art glow and the visualizer are all
+  adjustable, and every change shows at once. Colours are set with independent Hue, Saturation
+  and Brightness strips: each one changes only itself, at any brightness.
+- **Smooth** – runs at the screen's highest refresh rate (120 Hz; "Highest refresh rate" in Look,
+  the way Metrolist does it), nothing caps the frame rate, the moving background animates every
+  frame, and release builds are optimised with R8 (Compose needs it to run smoothly).
+- **Look profiles** – Custom 1–5 in the top right of the Look tab, each keeping every Look setting
+  (visualizer refresh rate and detail included); the one in use saves each change. Picking a theme
+  changes only its colours, glass and background — your visualizer, corners, refresh rate and bar
+  settings stay.
 - **AMOLED themes** – **AMOLED** (default on new installs): pure black with an electric-cyan accent;
   **AMOLED Cover**: the same pure black, with buttons, sliders and everything you can touch coloured
   from the current song's cover.
@@ -81,13 +90,14 @@ newer APK updates the app and keeps your settings.
   - after 10 minutes paused, the decoder and audio output are released (play resumes exactly
     where it stopped);
   - the live spectrum's audio copy is only made while a spectrum is on screen;
-  - the live spectrum and wave run at 30 fps by default (30/60/120/off in Look); everything to
+  - the live spectrum and wave run at 120 fps by default (30/60/120/off in Look); everything to
     do with them is shut down completely when the screen turns off or the app goes to the
     background, and sleeps while nothing plays or while the audio chip plays directly;
   - they only analyse what's drawn (no wave on Now Playing, no separate "before EQ" analysis
     while the EQ is flat), measure only new audio for the wave each frame, and sit above the
     glass rather than inside it, so the glass isn't re-rendered for every frame;
-  - the moving background updates 20 times a second and only while the app is on screen.
+  - the moving background only animates while the app is on screen (and not with Battery
+    Saver); "Moving colours" off stops it.
 
 ## Roadmap
 

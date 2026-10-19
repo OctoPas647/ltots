@@ -63,7 +63,10 @@ object EqDefaults {
         }
     }
 
-    fun tenBand(): List<EqBand> = spaced(10)
+    /** The standard layout: 10 bands from 31 Hz to 16 kHz. */
+    const val DEFAULT_BANDS = 10
+
+    fun tenBand(): List<EqBand> = spaced(DEFAULT_BANDS)
 
     /** A Q that makes neighbouring bands overlap smoothly for [count] log-spaced bands. */
     private fun bandwidthQ(count: Int, ratio: Double): Float {

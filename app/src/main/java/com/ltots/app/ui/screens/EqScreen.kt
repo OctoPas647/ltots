@@ -28,6 +28,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Undo
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.RestartAlt
@@ -111,17 +112,19 @@ fun EqScreen(player: PlayerUi) {
         if (eq.bands.none { it.id == selectedId }) selectedId = null
     }
 
-    // Undo: remembers the EQ before each change (a slider drag counts as one change).
+    // Undo: remembers the EQ before each change. Buttons, presets and profiles are one step each;
+    // a slider drag or knob move ([drag] = true) counts as one step however long it lasts.
     val history = remember { androidx.compose.runtime.mutableStateListOf<EqState>() }
     var lastPush by remember { mutableStateOf(0L) }
     LaunchedEffect(songKey, profile?.eq != null) { history.clear() }
-    fun edit(t: (EqState) -> EqState) {
+    fun edit(drag: Boolean = false, t: (EqState) -> EqState) {
         val now = System.currentTimeMillis()
-        if (now - lastPush > 700) {
+        if (!drag || now - lastPush > 700) {
             history.add(AudioEngine.effectiveEq.value)
             if (history.size > 40) history.removeAt(0)
         }
-        lastPush = now
+        // A drag continues its step; anything else ends it, so the next drag starts a new one.
+        lastPush = if (drag) now else 0L
         AudioEngine.updateEq(t)
     }
     fun undo() {
@@ -130,7 +133,7 @@ fun EqScreen(player: PlayerUi) {
         AudioEngine.updateEq { prev }
         selectedId = null
     }
-    fun editBand(id: Long, t: (EqBand) -> EqBand) = edit { s -> s.copy(bands = s.bands.map { if (it.id == id) t(it) else it }) }
+    fun editBand(id: Long, t: (EqBand) -> EqBand) = edit(drag = true) { s -> s.copy(bands = s.bands.map { if (it.id == id) t(it) else it }) }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp)) {
         // Header
@@ -150,6 +153,12 @@ fun EqScreen(player: PlayerUi) {
                 edit { p.copy(enabled = true, bands = p.bands.map { it.copy(id = EqDefaults.newId()) }) }
                 selectedId = null
             })
+            Spacer(Modifier.width(8.dp))
+            // Undo the last change (a whole slider drag or knob move counts as one).
+            val canUndo = history.isNotEmpty()
+            GlassCircleButton({ if (canUndo) undo() }, Modifier.size(40.dp).alpha(if (canUndo) 1f else 0.4f)) {
+                Icon(Icons.AutoMirrored.Rounded.Undo, "Undo the last EQ change", tint = pal.text, modifier = Modifier.size(22.dp))
+            }
             Spacer(Modifier.width(8.dp))
             GlassCircleButton({ edit { EqTone.flatten(it) }; selectedId = null }, Modifier.size(40.dp)) {
                 Icon(Icons.Rounded.RestartAlt, "Reset EQ: every gain back to 0 dB", tint = pal.text, modifier = Modifier.size(22.dp))
@@ -233,9 +242,14 @@ fun EqScreen(player: PlayerUi) {
             color = pal.textDim, style = MaterialTheme.typography.bodySmall,
         )
         Spacer(Modifier.height(10.dp))
-        BandStrip(eq, selectedId, onSelect = { selectedId = it }, onCountChange = { n -> edit { setBandCount(it, n) } }, onRespace = { edit { respace(it) } })
+        BandStrip(
+            eq, selectedId, onSelect = { selectedId = it },
+            onCountChange = { n -> edit { setBandCount(it, n) } },
+            onRespace = { edit { respace(it) } },
+            onResetTo10 = { edit { respace(it, EqDefaults.DEFAULT_BANDS) }; selectedId = null },
+        )
         Spacer(Modifier.height(12.dp))
-        LevelCard(eq) { edit(it) }
+        LevelCard(eq) { edit(drag = true, t = it) }
 
         // 4. Quick ways to a sound: presets and simple tone controls.
         Spacer(Modifier.height(20.dp))
@@ -249,7 +263,7 @@ fun EqScreen(player: PlayerUi) {
         Spacer(Modifier.height(12.dp))
         QuickToneCard(
             eq,
-            onSet = { r, v -> edit { EqTone.set(it, r, v) } },
+            onSet = { r, v -> edit(drag = true) { EqTone.set(it, r, v) } },
             canUndo = history.isNotEmpty(),
             onUndo = ::undo,
             onFlat = { edit { EqTone.flatten(it) }; selectedId = null },
@@ -311,8 +325,8 @@ private fun setBandCount(s: EqState, n: Int): EqState {
 }
 
 /** Re-space all bands evenly (log scale) and carry the current shape over to them. */
-private fun respace(s: EqState): EqState {
-    val n = s.bands.size.coerceAtLeast(1)
+private fun respace(s: EqState, count: Int = s.bands.size): EqState {
+    val n = count.coerceIn(1, EqLimits.MAX_BANDS)
     val old = s.bands.filter { it.type.usesGain }.sortedBy { it.freqHz }
     val fresh = EqDefaults.spaced(n).map { b ->
         if (old.isEmpty()) return@map b
@@ -334,7 +348,14 @@ private fun respace(s: EqState): EqState {
 }
 
 @Composable
-private fun BandStrip(eq: EqState, selectedId: Long?, onSelect: (Long?) -> Unit, onCountChange: (Int) -> Unit, onRespace: () -> Unit) {
+private fun BandStrip(
+    eq: EqState,
+    selectedId: Long?,
+    onSelect: (Long?) -> Unit,
+    onCountChange: (Int) -> Unit,
+    onRespace: () -> Unit,
+    onResetTo10: () -> Unit,
+) {
     val pal = LocalPalette.current
     GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
         Column(Modifier.padding(vertical = 14.dp)) {
@@ -347,8 +368,11 @@ private fun BandStrip(eq: EqState, selectedId: Long?, onSelect: (Long?) -> Unit,
                 IconButton(onClick = { onCountChange(eq.bands.size + 1) }, Modifier.size(36.dp)) {
                     Icon(Icons.Rounded.Add, "More bands", tint = pal.text)
                 }
-                Spacer(Modifier.width(6.dp))
+            }
+            Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Pill("Respace", false, onRespace)
+                // Back to the standard 10 bands (31 Hz … 16 kHz); the curve's shape carries over.
+                Pill("Reset to ${EqDefaults.DEFAULT_BANDS} bands", false, onResetTo10, enabled = eq.bands.size != EqDefaults.DEFAULT_BANDS || !isStandard10(eq))
             }
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp),
@@ -625,3 +649,10 @@ fun FlowPills(content: @Composable () -> Unit) {
 }
 
 private const val MINE = "Mine"
+
+/** True when the EQ already uses the standard 10-band layout. */
+private fun isStandard10(eq: EqState): Boolean {
+    val std = EqDefaults.spaced(EqDefaults.DEFAULT_BANDS).map { it.freqHz }
+    val cur = eq.bands.map { it.freqHz }.sorted()
+    return cur.size == std.size && cur.zip(std).all { (a, b) -> kotlin.math.abs(a - b) < 0.5f } && eq.bands.all { it.type == FilterType.PEAK }
+}
