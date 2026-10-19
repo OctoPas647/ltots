@@ -24,7 +24,7 @@ class ThemeJsonTest {
     @Test fun iconModeSettingsSurviveSaveAndLoad() {
         val t = ThemeConfig(
             iconMode = true, iconFile = "icon-123.png", iconThreshold = 0.62f, iconInvert = true, iconMinHole = 0.004f,
-            iconFill = IconFill.GLASS, iconCoverBehind = true, iconBars = IconBars.BOTH, iconIdle = IconIdle.COVER,
+            iconFill = IconFill.GLASS, iconCover = IconCover.FULL, iconCoverDim = 0.35f, iconBars = IconBars.BOTH, iconIdle = IconIdle.COVER,
         )
         assertEquals(t, Json.theme(JSONObject(Json.theme(t).toString())))
         // Older saves: icon mode off, no picture, 50% threshold, nothing shown while paused.
@@ -34,5 +34,8 @@ class ThemeJsonTest {
         assertEquals(0.5f, old.iconThreshold, 0f)
         assertEquals(IconIdle.NOTHING, old.iconIdle)
         assertEquals(IconFill.DARK, old.iconFill)
+        assertEquals(IconCover.OFF, old.iconCover)
+        // The earlier on/off cover switch becomes "inside the icon".
+        assertEquals(IconCover.INSIDE, Json.theme(JSONObject().put("iconCover", true)).iconCover)
     }
 }

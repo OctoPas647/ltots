@@ -19,6 +19,7 @@ import com.github.takahirom.roborazzi.captureRoboImage
 import com.ltots.app.audio.Analyzer
 import com.ltots.app.audio.AnalyzerTap
 import com.ltots.app.data.IconBars
+import com.ltots.app.data.IconCover
 import com.ltots.app.data.IconFill
 import com.ltots.app.data.IconIdle
 import com.ltots.app.data.RingLayout
@@ -97,15 +98,23 @@ class IconSpectrumShotTest {
     @Test fun curveWithGlass() = shot("curve_glass") { it.copy(spectrumStyle = SpectrumStyle.CURVE, iconFill = IconFill.GLASS) }
 
     @Test fun mirrorWithAccentAndCover() = shot("mirror_accent_cover") {
-        it.copy(spectrumStyle = SpectrumStyle.MIRROR, iconFill = IconFill.ACCENT, iconCoverBehind = true, ringLayout = RingLayout.MIRRORED)
+        it.copy(spectrumStyle = SpectrumStyle.MIRROR, iconFill = IconFill.ACCENT, iconCover = IconCover.INSIDE, ringLayout = RingLayout.MIRRORED)
     }
 
     @Test fun barsBothWaysWithCover() = shot("bars_both_cover") {
-        it.copy(spectrumStyle = SpectrumStyle.BARS, iconBars = IconBars.BOTH, iconCoverBehind = true)
+        it.copy(spectrumStyle = SpectrumStyle.BARS, iconBars = IconBars.BOTH, iconCover = IconCover.INSIDE)
     }
 
     @Test fun barsInward() = shot("bars_inward_glass") {
         it.copy(spectrumStyle = SpectrumStyle.BARS, iconBars = IconBars.IN, iconFill = IconFill.GLASS)
+    }
+
+    @Test fun fullSizeCoverDimmedBehind() = shot("full_cover_dimmed") {
+        it.copy(spectrumStyle = SpectrumStyle.BARS, iconCover = IconCover.FULL, iconCoverDim = 0.6f)
+    }
+
+    @Test fun fullSizeCoverWithGlass() = shot("full_cover_glass_curve") {
+        it.copy(spectrumStyle = SpectrumStyle.CURVE, iconFill = IconFill.GLASS, iconCover = IconCover.FULL, iconCoverDim = 0.4f)
     }
 
     @Test fun pausedShowsNothing() = shot("paused_nothing", playing = false) { it.copy(iconFill = IconFill.ACCENT, iconIdle = IconIdle.NOTHING) }

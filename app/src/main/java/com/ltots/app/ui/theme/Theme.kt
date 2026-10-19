@@ -133,7 +133,8 @@ object ThemeState {
         iconInvert = cur.iconInvert,
         iconMinHole = cur.iconMinHole,
         iconFill = cur.iconFill,
-        iconCoverBehind = cur.iconCoverBehind,
+        iconCover = cur.iconCover,
+        iconCoverDim = cur.iconCoverDim,
         iconBars = cur.iconBars,
         iconIdle = cur.iconIdle,
     )

@@ -33,6 +33,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.ltots.app.data.IconBars
+import com.ltots.app.data.IconCover
 import com.ltots.app.data.IconFiles
 import com.ltots.app.data.IconFill
 import com.ltots.app.data.IconIdle
@@ -48,6 +49,9 @@ import com.ltots.app.ui.theme.LocalPalette
 import com.ltots.app.ui.theme.ThemeState
 import kotlinx.coroutines.launch
 import java.util.Locale
+
+/** Default dimming of the full-size cover (Reset goes back to it). */
+private val DEFAULT_COVER_DIM = ThemeConfig().iconCoverDim
 
 /** Default black / white threshold (Reset goes back to it). */
 private const val DEFAULT_THRESHOLD = 0.5f
@@ -125,8 +129,26 @@ internal fun IconSettings(cfg: ThemeConfig, artwork: Bitmap?, set: ((ThemeConfig
             IconFill.ACCENT -> "Solid, in the play button's colour."
         }
     )
-    SwitchRow("Song's cover behind the icon", cfg.iconCoverBehind, { on -> set { it.copy(iconCoverBehind = on) } },
-        sub = "Shows the song's cover inside the dark parts.")
+
+    Spacer(Modifier.height(8.dp))
+    Label("Song's cover")
+    FlowPills { IconCover.entries.forEach { c -> Pill(c.label, cfg.iconCover == c, { set { it.copy(iconCover = c) } }) } }
+    Description(
+        when (cfg.iconCover) {
+            IconCover.OFF -> "No cover: only the icon and the bars."
+            IconCover.INSIDE -> "The song's cover shows inside the dark parts."
+            IconCover.FULL -> "The whole cover, as big as usual, stays behind the visualizer, dimmed."
+        }
+    )
+    if (cfg.iconCover == IconCover.FULL) {
+        LabeledSlider(
+            "Cover dimming", cfg.iconCoverDim, { v -> set { it.copy(iconCoverDim = v) } }, 0f..0.9f,
+            "%.0f%%".format(Locale.ROOT, cfg.iconCoverDim * 100),
+            onReset = { set { it.copy(iconCoverDim = DEFAULT_COVER_DIM) } },
+            isDefault = cfg.iconCoverDim == DEFAULT_COVER_DIM,
+        )
+        Description("Higher makes the cover darker, so the bars stand out more.")
+    }
 
     Spacer(Modifier.height(8.dp))
     Label("Bars")
@@ -144,7 +166,8 @@ internal fun IconSettings(cfg: ThemeConfig, artwork: Bitmap?, set: ((ThemeConfig
     FlowPills { IconIdle.entries.forEach { i -> Pill(i.label, cfg.iconIdle == i, { set { it.copy(iconIdle = i) } }) } }
     Description(
         when (cfg.iconIdle) {
-            IconIdle.NOTHING -> "Nothing is drawn while the music is paused or stopped."
+            IconIdle.NOTHING -> if (cfg.iconCover == IconCover.FULL) "Only the dimmed cover stays while the music is paused or stopped."
+                else "Nothing is drawn while the music is paused or stopped."
             IconIdle.SHAPE -> "The dark parts stay as set above, without bars."
             IconIdle.COVER -> "The song's cover shows in the icon's place."
         }

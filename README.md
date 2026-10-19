@@ -38,9 +38,10 @@ newer APK updates the app and keeps your settings.
   dark parts, or **both ways**; they stop short where the white space narrows (gaps between coils,
   curls) so they never meet or cover a dark part, and keep a safe margin from the screen's edge.
   The dark parts can be left **Dark** (empty), **Glass** (the app's glass in the play button's
-  colour, following Blur / Frost / Rim light) or **Accent** (solid, like the play button), with
-  the **song's cover behind the icon** if you like. While nothing plays: **Show nothing**, **Keep
-  the icon** or **Show the cover**. A **Black / white threshold** (with Undo and Reset), **Invert**
+  colour, following Blur / Frost / Rim light) or **Accent** (solid, like the play button). The
+  **song's cover** can be **Off**, **Inside the icon** (in its dark parts) or **Full size**: the
+  whole cover, as big as the normal one, stays behind the visualizer with adjustable **Cover
+  dimming**. While nothing plays: **Show nothing**, **Keep the icon** or **Show the cover**. A **Black / white threshold** (with Undo and Reset), **Invert**
   and **Minimum hole size** (tiny enclosed white spots such as an eye's highlight are ignored)
   shape how the picture is traced, with a live preview. Saved in each Look profile.
   Look > Visualizer > "On the Playing tab" > Icon.

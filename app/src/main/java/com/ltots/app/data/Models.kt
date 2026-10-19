@@ -83,6 +83,15 @@ enum class IconFill(val label: String) {
     ACCENT("Accent"),
 }
 
+/** Icon mode: where the song's cover shows. */
+enum class IconCover(val label: String) {
+    OFF("Off"),
+    /** Only inside the icon's dark parts. */
+    INSIDE("Inside the icon"),
+    /** The whole cover, full size, dimmed, behind the visualizer. */
+    FULL("Full size"),
+}
+
 /** Icon mode: which way the bars grow from the outline of the dark parts. */
 enum class IconBars(val label: String) { OUT("Outward"), IN("Inward"), BOTH("Both ways") }
 
@@ -192,8 +201,10 @@ data class ThemeConfig(
     /** Enclosed white holes smaller than this share of the picture are filled in (eye highlights). */
     val iconMinHole: Float = 0.001f,
     val iconFill: IconFill = IconFill.DARK,
-    /** Show the song's cover inside the icon's dark parts. */
-    val iconCoverBehind: Boolean = false,
+    /** Where the song's cover shows: not at all, inside the dark parts, or full size behind. */
+    val iconCover: IconCover = IconCover.OFF,
+    /** How much darker the full-size cover is behind the visualizer, 0 (as is) .. 0.9. */
+    val iconCoverDim: Float = 0.6f,
     val iconBars: IconBars = IconBars.OUT,
     val iconIdle: IconIdle = IconIdle.NOTHING,
 )
@@ -297,7 +308,7 @@ object Json {
         put("icon", t.iconMode); t.iconFile?.let { put("iconFile", it) }
         put("iconThr", t.iconThreshold.toDouble()); put("iconInv", t.iconInvert)
         put("iconHole", t.iconMinHole.toDouble()); put("iconFill", t.iconFill.name)
-        put("iconCover", t.iconCoverBehind); put("iconBars", t.iconBars.name); put("iconIdle", t.iconIdle.name)
+        put("iconCoverMode", t.iconCover.name); put("iconDim", t.iconCoverDim.toDouble()); put("iconBars", t.iconBars.name); put("iconIdle", t.iconIdle.name)
     }
 
     private fun hsvJson(h: Hsv) = JSONArray().put(h.h.toDouble()).put(h.s.toDouble()).put(h.v.toDouble())
@@ -346,7 +357,10 @@ object Json {
             iconInvert = o.optBoolean("iconInv", d.iconInvert),
             iconMinHole = o.optDouble("iconHole", d.iconMinHole.toDouble()).toFloat().coerceIn(0f, 0.05f),
             iconFill = runCatching { IconFill.valueOf(o.optString("iconFill")) }.getOrDefault(d.iconFill),
-            iconCoverBehind = o.optBoolean("iconCover", d.iconCoverBehind),
+            // Older saves had an on/off "cover behind the icon" (inside the dark parts).
+            iconCover = runCatching { IconCover.valueOf(o.optString("iconCoverMode")) }.getOrNull()
+                ?: if (o.optBoolean("iconCover", false)) IconCover.INSIDE else d.iconCover,
+            iconCoverDim = o.optDouble("iconDim", d.iconCoverDim.toDouble()).toFloat().coerceIn(0f, 0.9f),
             iconBars = runCatching { IconBars.valueOf(o.optString("iconBars")) }.getOrDefault(d.iconBars),
             iconIdle = runCatching { IconIdle.valueOf(o.optString("iconIdle")) }.getOrDefault(d.iconIdle),
         )

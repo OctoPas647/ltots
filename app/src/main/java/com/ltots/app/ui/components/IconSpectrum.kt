@@ -6,8 +6,9 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -44,6 +45,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.ltots.app.data.Effects
 import com.ltots.app.data.IconBars
+import com.ltots.app.data.IconCover
 import com.ltots.app.data.IconFiles
 import com.ltots.app.data.IconFill
 import com.ltots.app.data.IconIdle
@@ -63,6 +65,8 @@ import kotlin.math.roundToInt
 
 /** Icon mode: safe space kept free at the edges of the icon's area (no bar reaches into it). */
 val ICON_MARGIN = 16.dp
+/** The full-size cover's width, as a share of the area: the same as the Playing tab's normal cover. */
+const val ICON_COVER_FULL = 0.82f
 /** Distance between neighbouring bars along the icon's outline. */
 private val ICON_SPACING = 3.dp
 /** The widest a bar gets. */
@@ -162,8 +166,10 @@ private fun rememberIconLayout(shape: IconShape, size: IntSize, bands: Int): Ico
 /**
  * Icon mode on the Playing tab, in the cover's place. The icon itself is never drawn: the live
  * spectrum grows out of the outline of its dark parts, so the shape shows through the bars. The
- * dark parts are left empty, glass or accent (Look), optionally with the song's cover inside.
- * While nothing plays: nothing, the icon without bars, or the cover (Look).
+ * dark parts are left empty, glass or accent (Look). The song's cover can show inside them, or
+ * whole and full size (as big as the normal cover), dimmed, behind everything.
+ * While nothing plays: nothing (the dimmed full-size cover stays, if on), the icon without bars,
+ * or the cover.
  */
 @Composable
 fun IconSpectrum(
@@ -177,6 +183,9 @@ fun IconSpectrum(
     var size by remember { mutableStateOf(IntSize.Zero) }
     val layout = rememberIconLayout(shape, size, visual.analyzer.bands)
     Box(modifier.onSizeChanged { size = it }) {
+        val idleCover = !playing && cfg.iconIdle == IconIdle.COVER
+        // The whole cover behind the visualizer stays there, playing or not.
+        if (cfg.iconCover == IconCover.FULL && artwork != null && !idleCover) FullSizeCover(artwork, cfg.iconCoverDim)
         val l = layout ?: return@Box
         when {
             playing -> {
@@ -184,7 +193,7 @@ fun IconSpectrum(
                 if (visual.fps > 0) IconBarsCanvas(visual, l)
             }
             cfg.iconIdle == IconIdle.SHAPE -> IconFillLayer(l, artwork)
-            cfg.iconIdle == IconIdle.COVER -> IdleCover(l, artwork)
+            idleCover -> FullSizeCover(artwork, dim = 0f, shadow = true)
             else -> Unit // Show nothing.
         }
     }
@@ -205,6 +214,7 @@ fun IconPreview(shape: IconShape, artwork: Bitmap?, modifier: Modifier = Modifie
     val path = remember { Path() }
     val band = remember { Path() }
     Box(modifier.onSizeChanged { size = it }) {
+        if (cfg.iconCover == IconCover.FULL && artwork != null) FullSizeCover(artwork, cfg.iconCoverDim)
         val l = layout ?: return@Box
         IconFillLayer(l, artwork)
         Canvas(Modifier.matchParentSize()) {
@@ -219,7 +229,7 @@ fun IconPreview(shape: IconShape, artwork: Bitmap?, modifier: Modifier = Modifie
 private fun IconFillLayer(l: IconLayout, artwork: Bitmap?) {
     val cfg = LocalThemeConfig.current
     val pal = LocalPalette.current
-    val withCover = cfg.iconCoverBehind && artwork != null
+    val withCover = cfg.iconCover == IconCover.INSIDE && artwork != null
     if (withCover) CoverInShape(l, artwork, glass = cfg.iconFill == IconFill.GLASS)
     when (cfg.iconFill) {
         IconFill.DARK -> Unit
@@ -266,27 +276,30 @@ private fun DrawScope.drawCoverInBox(img: ImageBitmap, left: Float, top: Float, 
     )
 }
 
-/** While nothing plays ("Show the cover"): the cover, as a square over the icon's place. */
+/**
+ * The song's cover at the size it has on the Playing tab without icon mode ([ICON_COVER_FULL] of
+ * the width, centred), made darker by [dim] (0 = as it is). With [shadow], the coloured glow the
+ * normal cover has (for "Show the cover" while nothing plays).
+ */
 @Composable
-private fun IdleCover(l: IconLayout, artwork: Bitmap?) {
+private fun FullSizeCover(artwork: Bitmap?, dim: Float, shadow: Boolean = false) {
     val pal = LocalPalette.current
     val cfg = LocalThemeConfig.current
-    val density = LocalDensity.current
-    val side = max(l.ring.iconWidth, l.ring.iconHeight)
-    val left = (l.areaWidth - side) / 2; val top = (l.areaHeight - side) / 2
-    val corner = RoundedCornerShape(24.dp)
-    Box(
-        Modifier.offset { IntOffset(left.roundToInt(), top.roundToInt()) }
-            .size(with(density) { side.toDp() })
-            .graphicsLayer { alpha = cfg.coverOpacity }
-            .shadow(28.dp, corner, ambientColor = pal.accent, spotColor = pal.accent)
-            .clip(corner).background(pal.text.copy(alpha = 0.08f)),
-        contentAlignment = Alignment.Center,
-    ) {
-        if (artwork != null) {
-            Image(remember(artwork) { artwork.asImageBitmap() }, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-        } else {
-            Icon(Icons.Rounded.MusicNote, null, tint = pal.textFaint, modifier = Modifier.size(72.dp))
+    val corner = RoundedCornerShape(28.dp)
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier.fillMaxWidth(ICON_COVER_FULL).aspectRatio(1f)
+                .graphicsLayer { alpha = cfg.coverOpacity }
+                .then(if (shadow) Modifier.shadow(28.dp, corner, ambientColor = pal.accent, spotColor = pal.accent) else Modifier)
+                .clip(corner).background(pal.text.copy(alpha = 0.08f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (artwork != null) {
+                Image(remember(artwork) { artwork.asImageBitmap() }, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            } else {
+                Icon(Icons.Rounded.MusicNote, null, tint = pal.textFaint, modifier = Modifier.size(72.dp))
+            }
+            if (dim > 0f) Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = dim)))
         }
     }
 }
