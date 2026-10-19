@@ -29,6 +29,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.RestartAlt
+import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material3.AlertDialog
@@ -76,6 +79,10 @@ import com.ltots.app.ui.components.SwitchRow
 import com.ltots.app.ui.components.formatDb
 import com.ltots.app.ui.components.formatFreq
 import com.ltots.app.ui.components.rememberLiveVisual
+import com.ltots.app.ui.components.ProfileMenu
+import com.ltots.app.ui.components.ProfileRow
+import com.ltots.app.ui.components.customName
+import com.ltots.app.ui.glass.GlassCircleButton
 import com.ltots.app.ui.glass.GlassPanel
 import com.ltots.app.ui.glass.glassShape
 import com.ltots.app.ui.theme.LocalPalette
@@ -128,6 +135,17 @@ fun EqScreen(player: PlayerUi) {
                 )
             }
             com.ltots.app.ui.components.LSwitch(eq.enabled, { on -> edit { it.copy(enabled = on) } })
+            Spacer(Modifier.width(10.dp))
+            // Top right: your own EQ profiles (Custom 1-5), and reset (every gain back to 0 dB).
+            EqProfiles(eq, onLoad = { p ->
+                // Fresh ids so the processor rebuilds cleanly; loading a profile also switches the EQ on.
+                edit { p.copy(enabled = true, bands = p.bands.map { it.copy(id = EqDefaults.newId()) }) }
+                selectedId = null
+            })
+            Spacer(Modifier.width(8.dp))
+            GlassCircleButton({ edit { EqTone.flatten(it) }; selectedId = null }, Modifier.size(40.dp)) {
+                Icon(Icons.Rounded.RestartAlt, "Reset EQ: every gain back to 0 dB", tint = pal.text, modifier = Modifier.size(22.dp))
+            }
         }
 
         // Scope: default EQ vs this song's own EQ
@@ -537,6 +555,48 @@ private fun PresetsCard(eq: EqState, onApply: (EqPreset) -> Unit) {
         )
     }
 }
+
+/**
+ * The EQ profiles button and its menu: Custom 1-5. Tap a saved one to load it into the EQ you're
+ * editing (the default or this song's); tap an empty one, or a save icon, to keep the current EQ there.
+ */
+@Composable
+private fun EqProfiles(eq: EqState, onLoad: (EqState) -> Unit) {
+    val pal = LocalPalette.current
+    var slots by remember { mutableStateOf(Store.loadEqProfiles().let { saved -> List(EQ_PROFILES) { saved.getOrNull(it) } }) }
+    var open by remember { mutableStateOf(false) }
+    fun save(i: Int) {
+        slots = slots.toMutableList().also { it[i] = eq }
+        Store.saveEqProfiles(slots)
+    }
+    Box {
+        GlassCircleButton({ open = true }, Modifier.size(40.dp)) {
+            Icon(Icons.Rounded.Person, "EQ profiles", tint = pal.text, modifier = Modifier.size(22.dp))
+        }
+        ProfileMenu(open, { open = false }, "EQ profiles", "Tap one to load it. Tap an empty one, or a save icon, to keep the EQ you have now.") {
+            slots.forEachIndexed { i, slot ->
+                val inUse = slot != null && EqTone.sameShape(slot, eq)
+                ProfileRow(
+                    name = customName(i),
+                    status = when {
+                        slot == null -> "Empty · tap to save the current EQ"
+                        inUse -> "In use"
+                        else -> "Saved · tap to load"
+                    },
+                    active = inUse,
+                    onClick = { if (slot == null) save(i) else { onLoad(slot); open = false } },
+                    trailing = {
+                        IconButton(onClick = { save(i) }) {
+                            Icon(Icons.Rounded.Save, "Save the current EQ to ${customName(i)}", tint = pal.textDim)
+                        }
+                    },
+                )
+            }
+        }
+    }
+}
+
+private const val EQ_PROFILES = 5
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable

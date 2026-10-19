@@ -17,6 +17,7 @@ newer APK updates the app and keeps your settings.
 - **Easy-first EQ** – 33 presets in four groups (Basics, Genres, Voice & places, Precise) with a
   one-line description of each, the active preset highlighted, **Quick tone** sliders (Bass / Mids /
   Treble) that work on top of any shape, Undo and Flatten; save your own presets ("Mine").
+  Top right: **EQ profiles** (Custom 1–5) and **Reset** (every gain back to 0 dB).
   Everything below stays one tap away under **Fine-tune**.
 - **Parametric EQ** – any number of bands (1–64); every band has an exact frequency, gain, width (Q)
   and type (peak, low/high shelf, low/high cut). Drag the dots on the curve or type exact values.
@@ -40,15 +41,18 @@ newer APK updates the app and keeps your settings.
   limiter just below 0 dBFS, 32-bit float output.
 - **Output awareness** – shows where audio is going, warns when earbuds fall back to LE Audio (LC3)
   instead of LDAC, and offers **bit-perfect USB output** (Android 14+) for USB DACs.
-- **Liquid glass UI** – real refraction and blur; colours, blur, refraction, tint, rim light, corner
-  roundness, background motion, album-art glow and visualizer style are all adjustable.
+- **Liquid glass UI** – real refraction and blur; accent, background glow, blur, refraction, tint,
+  rim light, corner roundness, background motion, album-art glow and visualizer style are all
+  adjustable, and every change shows at once.
+- **Look profiles** – Custom 1–5 in the top right of the Look tab, each keeping every Look setting;
+  the one in use saves each change.
 - **AMOLED themes** – **AMOLED** (default on new installs): pure black with an electric-cyan accent;
   **AMOLED Cover**: the same pure black, with buttons, sliders and everything you can touch coloured
   from the current song's cover.
 - **Full screen** – the navigation bar is hidden inside the app (swipe up from the bottom edge to
   bring it back); the status bar can be hidden too.
 - **Dynamic colours** – the accent and background glow follow the average colour of the
-  current song's cover, fading between songs (switch in Look).
+  current song's cover, switching with the song (switch in Look).
 - **Downloads ("Get" tab)** – search YouTube Music or paste/share a link to a song, album,
   playlist or artist:
   - YouTube's best audio (Opus) kept exactly as sent — no re-encoding;

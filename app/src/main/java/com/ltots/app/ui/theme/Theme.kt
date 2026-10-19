@@ -27,7 +27,7 @@ object ThemeState {
 
     /** The AMOLED theme: pure black with an electric-cyan accent. Default for new installs. */
     val amoled = ThemeConfig(
-        accent = 0xFF00E5FF, gradientA = 0xFF000000, gradientB = 0xFF000000, gradientC = 0xFF003A42,
+        accent = 0xFF00E5FF, glow = 0xFF003A42,
         pureBlack = true, animateBackground = false, artworkBackground = false,
         glassTint = 0.55f, rimLight = 0.9f, refraction = 0.4f, darkMode = true,
     )
@@ -40,6 +40,35 @@ object ThemeState {
         val saved = Store.loadTheme()
         _config.value = saved ?: if (freshInstall) amoled else ThemeConfig()
         if (saved == null) Store.saveTheme(_config.value)
+
+        // Look profiles. The first time, the look you already have becomes Custom 1.
+        val stored = Store.loadLookProfiles()
+        val slots = MutableList(PROFILE_COUNT) { i -> stored?.second?.getOrNull(i) }
+        val active = (stored?.first ?: 0).coerceIn(0, PROFILE_COUNT - 1)
+        slots[active] = _config.value
+        _profiles.value = slots
+        _activeProfile.value = active
+        if (stored == null) Store.saveLookProfiles(active, slots)
+    }
+
+    // ---- Look profiles: Custom 1-5, each a complete look. The selected one saves every change. ----
+
+    const val PROFILE_COUNT = 5
+    private val _profiles = MutableStateFlow<List<ThemeConfig?>>(List(PROFILE_COUNT) { null })
+    /** Saved looks; null = never used yet. */
+    val profiles: StateFlow<List<ThemeConfig?>> = _profiles
+    private val _activeProfile = MutableStateFlow(0)
+    val activeProfile: StateFlow<Int> = _activeProfile
+
+    /** Switch to profile [i]. One that was never used starts as a copy of the current look. */
+    fun selectProfile(i: Int) {
+        if (i !in 0 until PROFILE_COUNT || i == _activeProfile.value) return
+        val look = _profiles.value[i] ?: _config.value
+        _profiles.value = _profiles.value.toMutableList().also { it[i] = look }
+        _activeProfile.value = i
+        _config.value = look
+        Store.saveTheme(look)
+        Store.saveLookProfiles(i, _profiles.value)
     }
 
     /**
@@ -61,6 +90,10 @@ object ThemeState {
         val t = transform(_config.value)
         _config.value = t
         Store.saveTheme(t)
+        // Every change is kept in the selected profile too.
+        val i = _activeProfile.value
+        _profiles.value = _profiles.value.toMutableList().also { it[i] = t }
+        Store.saveLookProfiles(i, _profiles.value)
     }
 
     val presets: List<ThemePreset> = listOf(
@@ -69,12 +102,12 @@ object ThemeState {
         // from the current song's cover (cyan while nothing is playing).
         ThemePreset("AMOLED Cover", amoled, dynamic = true),
         ThemePreset("Aurora", ThemeConfig()),
-        ThemePreset("Sunset", ThemeConfig(accent = 0xFFFF8A5C, gradientA = 0xFF4A1230, gradientB = 0xFF6B2A10, gradientC = 0xFF2B0F4D)),
-        ThemePreset("Ocean", ThemeConfig(accent = 0xFF3FD5FF, gradientA = 0xFF04263F, gradientB = 0xFF06435A, gradientC = 0xFF0C1C4A)),
-        ThemePreset("Forest", ThemeConfig(accent = 0xFF6CFFB0, gradientA = 0xFF07301F, gradientB = 0xFF12403A, gradientC = 0xFF1D2A10)),
-        ThemePreset("Neon", ThemeConfig(accent = 0xFFFF3DCB, gradientA = 0xFF1A0640, gradientB = 0xFF00334D, gradientC = 0xFF3D0033, refraction = 0.85f, chromaticAberration = true)),
-        ThemePreset("Mono", ThemeConfig(accent = 0xFFE6E6E6, gradientA = 0xFF1A1A1A, gradientB = 0xFF2A2A2A, gradientC = 0xFF101010, glassTint = 0.1f)),
-        ThemePreset("Daylight", ThemeConfig(accent = 0xFF5B3DF5, gradientA = 0xFFE4DCFF, gradientB = 0xFFCFEFFF, gradientC = 0xFFFFDDEE, darkMode = false, glassTint = 0.35f)),
+        ThemePreset("Sunset", ThemeConfig(accent = 0xFFFF8A5C, glow = 0xFF9A3220)),
+        ThemePreset("Ocean", ThemeConfig(accent = 0xFF3FD5FF, glow = 0xFF0A5A85)),
+        ThemePreset("Forest", ThemeConfig(accent = 0xFF6CFFB0, glow = 0xFF146046)),
+        ThemePreset("Neon", ThemeConfig(accent = 0xFFFF3DCB, glow = 0xFF6A18C4, refraction = 0.85f)),
+        ThemePreset("Mono", ThemeConfig(accent = 0xFFE6E6E6, glow = 0xFF3C3C3C, glassTint = 0.1f)),
+        ThemePreset("Daylight", ThemeConfig(accent = 0xFF5B3DF5, glow = 0xFFD2C6FF, darkMode = false, glassTint = 0.35f)),
     )
 
     fun reset() = applyPreset(presets.first())
@@ -93,7 +126,20 @@ data class Palette(
     val glassTint: Color,
     val line: Color,
     val dark: Boolean,
+    /** The three colours the moving background is painted with (black on AMOLED). */
+    val glows: List<Color> = listOf(Color.Black, Color.Black, Color.Black),
 )
+
+/**
+ * The background's three shades from the one glow colour: the colour itself, and a lighter and a
+ * deeper neighbour on either side of its hue, so the background moves but stays one colour.
+ */
+fun glowShades(glow: Long): List<Color> {
+    val hsv = DynamicColor.rgbToHsv(glow.toInt())
+    fun shade(dh: Float, sat: Float, value: Float) =
+        Color(DynamicColor.hsvToRgb((hsv[0] + dh + 360f) % 360f, (hsv[1] * sat).coerceIn(0f, 1f), (hsv[2] * value).coerceIn(0f, 1f)))
+    return listOf(glow.toColor(), shade(22f, 0.95f, 0.8f), shade(-22f, 1.05f, 0.62f))
+}
 
 val LocalThemeConfig = staticCompositionLocalOf { ThemeConfig() }
 val LocalPalette = staticCompositionLocalOf {
@@ -110,17 +156,13 @@ fun LToTSTheme(content: @Composable () -> Unit) {
     // With dynamic colours on, the accent (and the background glow) follow the song's cover.
     // They switch at once, in step with the cover: no fade, which lagged behind the song and
     // re-drew the whole app on every frame of the fade.
-    val dyn = saved.dynamicColors && cover != null
-    val accentAnim = if (dyn) Color(if (saved.darkMode) cover!!.accentDark else cover!!.accentLight) else saved.accent.toColor()
-    val gA = if (dyn) Color(cover!!.glowTop) else saved.gradientA.toColor()
-    val gB = if (dyn) Color(cover!!.glowMid) else saved.gradientB.toColor()
-    val gC = if (dyn) Color(cover!!.glowBottom) else saved.gradientC.toColor()
-    val cfg = if (!saved.dynamicColors) saved else saved.copy(
-        accent = accentAnim.toArgbLong(),
-        gradientA = if (saved.pureBlack) saved.gradientA else gA.toArgbLong(),
-        gradientB = if (saved.pureBlack) saved.gradientB else gB.toArgbLong(),
-        gradientC = if (saved.pureBlack) saved.gradientC else gC.toArgbLong(),
-    )
+    val c = cover.takeIf { saved.dynamicColors }
+    val cfg = if (c == null) saved else saved.copy(accent = (if (saved.darkMode) c.accentDark else c.accentLight).toLong() and 0xFFFFFFFFL)
+    val glows = when {
+        saved.pureBlack -> listOf(Color.Black, Color.Black, Color.Black)
+        c != null -> listOf(Color(c.glowTop), Color(c.glowMid), Color(c.glowBottom))
+        else -> glowShades(saved.glow)
+    }
     val accent = cfg.accent.toColor()
     val dark = cfg.darkMode
     val text = if (dark) Color(0xFFF5F3FF) else Color(0xFF15121F)
@@ -137,6 +179,7 @@ fun LToTSTheme(content: @Composable () -> Unit) {
         },
         line = text.copy(alpha = 0.12f),
         dark = dark,
+        glows = glows,
     )
     val scheme = if (dark) {
         darkColorScheme(

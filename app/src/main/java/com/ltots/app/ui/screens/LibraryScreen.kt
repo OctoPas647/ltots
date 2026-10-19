@@ -64,6 +64,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -171,7 +172,10 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
             }
         }
 
-        GlassPanel(Modifier.fillMaxWidth().weight(1f), tintBoost = 0.06f) {
+        // The list is the rest of the page: no box around it. It runs down behind the mini player
+        // and the nav bar, and ends with enough room for the last song to scroll clear of them.
+        val bottom = bottomChrome()
+        Box(Modifier.fillMaxWidth().weight(1f)) {
             when {
                 !hasPerm -> EmptyState(
                     "LToTS needs access to your music",
@@ -179,32 +183,36 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
                     "Allow access",
                 ) { launcher.launch(arrayOf(audioPerm)) }
                 tracks.isEmpty() -> EmptyState("No songs found", "Put some music files on your phone (any folder) and they'll show up here.", null) {}
-                openGroup != null -> GroupDetail(openGroup!!, player, onBack = { openGroup = null }, onPlayed = onOpenPlayer)
-                view == LibView.SONGS -> SongList(filtered, player, onOpenPlayer)
+                openGroup != null -> GroupDetail(openGroup!!, player, bottom, onBack = { openGroup = null }, onPlayed = onOpenPlayer)
+                view == LibView.SONGS -> SongList(filtered, player, bottom, onOpenPlayer)
                 view == LibView.ALBUMS -> AlbumGrid(
                     remember(filtered) {
                         filtered.groupBy { it.albumId }.values.map { g ->
                             Group(g.first().album.ifBlank { "Unknown album" }, g.first().artist.takeIf { it != Track.UNKNOWN } ?: "", g)
                         }.sortedBy { it.title.lowercase(Locale.ROOT) }
-                    }
+                    },
+                    bottom,
                 ) { openGroup = it }
                 else -> ArtistList(
                     remember(filtered) {
                         filtered.groupBy { if (it.artist == Track.UNKNOWN) "Unknown artist" else it.artist }.map { (a, g) ->
                             Group(a, "${g.size} song${if (g.size == 1) "" else "s"}", g)
                         }.sortedBy { it.title.lowercase(Locale.ROOT) }
-                    }
+                    },
+                    bottom,
                 ) { openGroup = it }
             }
         }
-        Spacer(Modifier.height(bottomChrome()))
     }
 }
 
 @Composable
 private fun EmptyState(title: String, body: String, action: String?, onAction: () -> Unit) {
     val pal = LocalPalette.current
-    Column(Modifier.fillMaxSize().padding(28.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(
+        Modifier.fillMaxSize().padding(bottom = bottomChrome()).padding(28.dp),
+        verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
         Icon(Icons.Rounded.MusicNote, null, tint = pal.accent, modifier = Modifier.size(48.dp))
         Spacer(Modifier.height(12.dp))
         Text(title, style = MaterialTheme.typography.titleMedium, color = pal.text)
@@ -218,8 +226,8 @@ private fun EmptyState(title: String, body: String, action: String?, onAction: (
 }
 
 @Composable
-private fun SongList(tracks: List<Track>, player: PlayerUi, onPlayed: () -> Unit) {
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 8.dp)) {
+private fun SongList(tracks: List<Track>, player: PlayerUi, bottom: Dp, onPlayed: () -> Unit) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 2.dp, bottom = bottom)) {
         itemsIndexed(tracks, key = { _, t -> t.id }) { i, t ->
             TrackRow(t, playing = player.trackId == t.id) { player.play(tracks, i); onPlayed() }
         }
@@ -230,7 +238,7 @@ private fun SongList(tracks: List<Track>, player: PlayerUi, onPlayed: () -> Unit
 private fun TrackRow(t: Track, playing: Boolean, onClick: () -> Unit) {
     val pal = LocalPalette.current
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 7.dp),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable(onClick = onClick).padding(horizontal = 4.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Thumb(t.id, 48)
@@ -263,9 +271,9 @@ private fun Thumb(trackId: Long, sizeDp: Int) {
 }
 
 @Composable
-private fun AlbumGrid(groups: List<Group>, onOpen: (Group) -> Unit) {
+private fun AlbumGrid(groups: List<Group>, bottom: Dp, onOpen: (Group) -> Unit) {
     val pal = LocalPalette.current
-    LazyVerticalGrid(GridCells.Adaptive(150.dp), Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp),
+    LazyVerticalGrid(GridCells.Adaptive(150.dp), Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 2.dp, end = 2.dp, top = 4.dp, bottom = bottom),
         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         items(groups, key = { it.tracks.first().albumId }) { g ->
             Column(Modifier.clip(RoundedCornerShape(14.dp)).clickable { onOpen(g) }) {
@@ -291,12 +299,12 @@ private fun BigThumb(trackId: Long) {
 }
 
 @Composable
-private fun ArtistList(groups: List<Group>, onOpen: (Group) -> Unit) {
+private fun ArtistList(groups: List<Group>, bottom: Dp, onOpen: (Group) -> Unit) {
     val pal = LocalPalette.current
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 8.dp)) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 2.dp, bottom = bottom)) {
         items(groups, key = { it.title }) { g ->
             Row(
-                Modifier.fillMaxWidth().clickable { onOpen(g) }.padding(horizontal = 12.dp, vertical = 9.dp),
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable { onOpen(g) }.padding(horizontal = 4.dp, vertical = 9.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(Modifier.size(46.dp).clip(CircleShape).background(pal.accent.copy(alpha = 0.18f)), contentAlignment = Alignment.Center) {
@@ -313,10 +321,10 @@ private fun ArtistList(groups: List<Group>, onOpen: (Group) -> Unit) {
 }
 
 @Composable
-private fun GroupDetail(g: Group, player: PlayerUi, onBack: () -> Unit, onPlayed: () -> Unit) {
+private fun GroupDetail(g: Group, player: PlayerUi, bottom: Dp, onBack: () -> Unit, onPlayed: () -> Unit) {
     val pal = LocalPalette.current
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back", tint = pal.text) }
             Column(Modifier.weight(1f)) {
                 Text(g.title, style = MaterialTheme.typography.titleMedium, color = pal.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -326,7 +334,7 @@ private fun GroupDetail(g: Group, player: PlayerUi, onBack: () -> Unit, onPlayed
                 Icon(Icons.Rounded.PlayArrow, "Play", tint = pal.accent, modifier = Modifier.size(30.dp))
             }
         }
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 8.dp)) {
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = bottom)) {
             itemsIndexed(g.tracks, key = { _, t -> t.id }) { i, t ->
                 TrackRow(t, playing = player.trackId == t.id) { player.play(g.tracks, i); onPlayed() }
             }

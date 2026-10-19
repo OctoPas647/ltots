@@ -33,9 +33,12 @@ enum class SpectrumStyle(val label: String) { BARS("Bars"), CURVE("Curve"), MIRR
 
 data class ThemeConfig(
     val accent: Long = 0xFF8B6CFF,
-    val gradientA: Long = 0xFF2A1260,
-    val gradientB: Long = 0xFF0B3D63,
-    val gradientC: Long = 0xFF5B1048,
+    /**
+     * The background glow: one colour the moving background is made from (lighter and darker
+     * shades of it drift around). Not shown on the AMOLED themes, and the song's cover takes its
+     * place while cover colours are on.
+     */
+    val glow: Long = 0xFF5A30D8,
     val animateBackground: Boolean = true,
     val animationSpeed: Float = 0.5f,
     /** Blend the current album art into the background. */
@@ -43,7 +46,6 @@ data class ThemeConfig(
     val blurDp: Float = 22f,
     /** Edge refraction strength of the glass, 0..1. */
     val refraction: Float = 0.55f,
-    val chromaticAberration: Boolean = false,
     /** How solid the song's cover is on the Playing tab, 0.1..1 (lower shows the spectrum behind it). */
     val coverOpacity: Float = 1f,
     /** Tint over the glass, 0..1 (how frosted it looks). */
@@ -143,10 +145,10 @@ object Json {
     )
 
     fun theme(t: ThemeConfig) = JSONObject().apply {
-        put("accent", t.accent); put("gA", t.gradientA); put("gB", t.gradientB); put("gC", t.gradientC)
+        put("accent", t.accent); put("gA", t.glow)
         put("anim", t.animateBackground); put("animSpeed", t.animationSpeed.toDouble())
         put("art", t.artworkBackground); put("blur", t.blurDp.toDouble())
-        put("refr", t.refraction.toDouble()); put("chroma", t.chromaticAberration); put("coverAlpha", t.coverOpacity.toDouble())
+        put("refr", t.refraction.toDouble()); put("coverAlpha", t.coverOpacity.toDouble())
         put("tint", t.glassTint.toDouble()); put("rim", t.rimLight.toDouble())
         put("corner", t.cornerDp.toDouble()); put("dark", t.darkMode)
         put("specStyle", t.spectrumStyle.name); put("specOpacity", t.spectrumOpacity.toDouble())
@@ -159,15 +161,13 @@ object Json {
         val d = ThemeConfig()
         return ThemeConfig(
             accent = o.optLong("accent", d.accent),
-            gradientA = o.optLong("gA", d.gradientA),
-            gradientB = o.optLong("gB", d.gradientB),
-            gradientC = o.optLong("gC", d.gradientC),
+            // Older saves had three glow colours (gA, gB, gC); the first one becomes the glow.
+            glow = o.optLong("gA", d.glow),
             animateBackground = o.optBoolean("anim", d.animateBackground),
             animationSpeed = o.optDouble("animSpeed", d.animationSpeed.toDouble()).toFloat(),
             artworkBackground = o.optBoolean("art", d.artworkBackground),
             blurDp = o.optDouble("blur", d.blurDp.toDouble()).toFloat(),
             refraction = o.optDouble("refr", d.refraction.toDouble()).toFloat(),
-            chromaticAberration = o.optBoolean("chroma", d.chromaticAberration),
             coverOpacity = o.optDouble("coverAlpha", d.coverOpacity.toDouble()).toFloat().coerceIn(0.1f, 1f),
             glassTint = o.optDouble("tint", d.glassTint.toDouble()).toFloat(),
             rimLight = o.optDouble("rim", d.rimLight.toDouble()).toFloat(),

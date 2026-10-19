@@ -26,6 +26,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -87,9 +88,11 @@ fun LabeledSlider(
     valueText: String,
     modifier: Modifier = Modifier,
     steps: Int = 0,
+    /** False shows the slider grayed out: it's there, but can't be changed right now. */
+    enabled: Boolean = true,
 ) {
     val pal = LocalPalette.current
-    Column(modifier.fillMaxWidth()) {
+    Column(modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.38f)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(label, color = pal.textDim, style = androidx.compose.material3.MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.weight(1f))
@@ -100,12 +103,19 @@ fun LabeledSlider(
             onValueChange = onChange,
             valueRange = range,
             steps = steps,
+            enabled = enabled,
             colors = SliderDefaults.colors(
                 thumbColor = pal.accent,
                 activeTrackColor = pal.accent,
                 inactiveTrackColor = pal.text.copy(alpha = 0.16f),
                 activeTickColor = Color.Transparent,
                 inactiveTickColor = Color.Transparent,
+                // Grayed out: the whole row is already faded, so keep the same colours underneath.
+                disabledThumbColor = pal.textDim,
+                disabledActiveTrackColor = pal.textDim,
+                disabledInactiveTrackColor = pal.text.copy(alpha = 0.16f),
+                disabledActiveTickColor = Color.Transparent,
+                disabledInactiveTickColor = Color.Transparent,
             ),
         )
     }

@@ -20,12 +20,23 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material3.Icon
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.ui.draw.alpha
+import com.ltots.app.ui.components.ProfileMenu
+import com.ltots.app.ui.components.ProfilePill
+import com.ltots.app.ui.components.ProfileRow
+import com.ltots.app.ui.components.customName
+import com.ltots.app.ui.theme.DynamicColor
+import com.ltots.app.ui.theme.glowShades
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -65,8 +76,13 @@ fun LookScreen() {
     fun set(t: (ThemeConfig) -> ThemeConfig) = ThemeState.update(t)
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp)) {
-        Text("Look", style = MaterialTheme.typography.displaySmall, color = pal.text, modifier = Modifier.padding(top = 12.dp))
-        Text("Everything here changes live.", color = pal.textDim, style = MaterialTheme.typography.bodySmall)
+        Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Look", style = MaterialTheme.typography.displaySmall, color = pal.text)
+                Text("Everything here changes live.", color = pal.textDim, style = MaterialTheme.typography.bodySmall)
+            }
+            LookProfiles(cfg)
+        }
         Spacer(Modifier.height(14.dp))
 
         // Theme presets
@@ -83,7 +99,7 @@ fun LookScreen() {
                                     if (p.dynamic == true) {
                                         // Black with a ring of cover-like colours.
                                         Brush.sweepGradient(listOf(Color(0xFFFF5C7A), Color(0xFFFFC14D), Color(0xFF6CFFB0), Color(0xFF3FD5FF), Color(0xFFB07CFF), Color(0xFFFF5C7A)))
-                                    } else Brush.linearGradient(listOf(t.gradientA.toColor(), t.accent.toColor(), t.gradientB.toColor()))
+                                    } else glowShades(t.glow).let { g -> Brush.linearGradient(listOf(g[0], t.accent.toColor(), g[2])) }
                                 ).border(if (on) 2.dp else 1.dp, if (on) pal.text else pal.text.copy(alpha = 0.15f), RoundedCornerShape(16.dp)),
                                 contentAlignment = Alignment.Center,
                             ) {
@@ -116,12 +132,18 @@ fun LookScreen() {
         GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
             Column(Modifier.padding(16.dp)) {
                 SectionTitle("Glass")
-                LabeledSlider("Blur", cfg.blurDp, { v -> set { it.copy(blurDp = v) } }, 0f..60f, "%.0f dp".format(Locale.ROOT, cfg.blurDp))
-                LabeledSlider("Refraction", cfg.refraction, { v -> set { it.copy(refraction = v) } }, 0f..1f, pct(cfg.refraction))
+                // Blur and Refraction bend what's behind the glass. On the AMOLED themes that's pure
+                // black, so there is nothing for them to change: they stay visible, grayed out.
+                val bends = !cfg.pureBlack
+                LabeledSlider("Blur", cfg.blurDp, { v -> set { it.copy(blurDp = v) } }, 0f..60f, "%.0f dp".format(Locale.ROOT, cfg.blurDp), enabled = bends)
+                LabeledSlider("Refraction", cfg.refraction, { v -> set { it.copy(refraction = v) } }, 0f..1f, pct(cfg.refraction), enabled = bends)
+                if (!bends) Text(
+                    "Blur and Refraction work on what's behind the glass. On the AMOLED themes that's pure black, so they have nothing to change.",
+                    color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 8.dp),
+                )
                 LabeledSlider("Frost / tint", cfg.glassTint, { v -> set { it.copy(glassTint = v) } }, 0f..0.7f, pct(cfg.glassTint / 0.7f))
                 LabeledSlider("Rim light", cfg.rimLight, { v -> set { it.copy(rimLight = v) } }, 0f..1f, pct(cfg.rimLight))
                 LabeledSlider("Corner roundness", cfg.cornerDp, { v -> set { it.copy(cornerDp = v) } }, 4f..44f, "%.0f dp".format(Locale.ROOT, cfg.cornerDp))
-                SwitchRow("Prism edges", cfg.chromaticAberration, { on -> set { it.copy(chromaticAberration = on) } }, sub = "Rainbow colour split along every glass edge, like light through a prism.")
                 LabeledSlider("Cover opacity", cfg.coverOpacity, { v -> set { it.copy(coverOpacity = v) } }, 0.1f..1f, pct(cfg.coverOpacity))
             }
         }
@@ -201,18 +223,21 @@ private fun pct(v: Float) = "%.0f%%".format(Locale.ROOT, v * 100)
 @Composable
 private fun ColorCard(cfg: ThemeConfig, set: ((ThemeConfig) -> ThemeConfig) -> Unit) {
     val pal = LocalPalette.current
-    var target by rememberSaveable { mutableIntStateOf(0) }
-    val names = listOf("Accent", "Glow 1", "Glow 2", "Glow 3")
-    val current = when (target) {
-        0 -> cfg.accent; 1 -> cfg.gradientA; 2 -> cfg.gradientB; else -> cfg.gradientC
-    }.toColor()
+    val cover by DynamicColor.colors.collectAsState()
+    // The glow colours the moving background. It can't show on the AMOLED themes (the background
+    // stays pure black), and while cover colours are on the song's cover takes its place: then it
+    // is grayed out, so it's clear it exists but can't be changed right now.
+    val glowLockedWhy = when {
+        cfg.pureBlack -> "Glow isn't used on the AMOLED themes: the background stays pure black. Pick another theme to use it."
+        cfg.dynamicColors && cover != null -> "Glow follows the song's cover right now. Turn off \"Colours from the song's cover\" to pick your own."
+        else -> null
+    }
+    var pickedGlow by rememberSaveable { mutableStateOf(false) }
+    val glow = pickedGlow && glowLockedWhy == null
+    val current = (if (glow) cfg.glow else cfg.accent).toColor()
     fun apply(c: Color) {
         val v = c.toArgbLong()
-        set {
-            when (target) {
-                0 -> it.copy(accent = v); 1 -> it.copy(gradientA = v); 2 -> it.copy(gradientB = v); else -> it.copy(gradientC = v)
-            }
-        }
+        set { if (glow) it.copy(glow = v) else it.copy(accent = v) }
     }
     val hsv = FloatArray(3).also { android.graphics.Color.colorToHSV(current.toArgbLong().toInt(), it) }
 
@@ -220,20 +245,13 @@ private fun ColorCard(cfg: ThemeConfig, set: ((ThemeConfig) -> ThemeConfig) -> U
         Column(Modifier.padding(16.dp)) {
             SectionTitle("Colours")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                names.forEachIndexed { i, n ->
-                    val c = when (i) { 0 -> cfg.accent; 1 -> cfg.gradientA; 2 -> cfg.gradientB; else -> cfg.gradientC }.toColor()
-                    Row(
-                        Modifier.clip(RoundedCornerShape(50))
-                            .background(if (target == i) pal.text.copy(alpha = 0.16f) else Color.Transparent)
-                            .clickable { target = i }.padding(horizontal = 10.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(Modifier.size(14.dp).clip(CircleShape).background(c))
-                        Spacer(Modifier.width(6.dp))
-                        Text(n, color = pal.text, style = MaterialTheme.typography.bodySmall, fontWeight = if (target == i) FontWeight.Bold else FontWeight.Normal)
-                    }
-                }
+                ColourChip("Accent", cfg.accent.toColor(), selected = !glow, enabled = true) { pickedGlow = false }
+                ColourChip("Glow", cfg.glow.toColor(), selected = glow, enabled = glowLockedWhy == null) { pickedGlow = true }
             }
+            Text(
+                glowLockedWhy ?: if (glow) "Glow: the colour the moving background is made of." else "Accent: buttons, sliders and highlights.",
+                color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(start = 4.dp, top = 6.dp),
+            )
             Spacer(Modifier.height(12.dp))
             FlowPills {
                 swatches.forEach { s -> Swatch(s.toColor(), current.toArgbLong() == s, { apply(s.toColor()) }) }
@@ -244,6 +262,66 @@ private fun ColorCard(cfg: ThemeConfig, set: ((ThemeConfig) -> ThemeConfig) -> U
             LabeledSlider("Brightness", hsv[2], { v -> apply(Color.hsv(hsv[0], hsv[1], v)) }, 0f..1f, pct(hsv[2]))
         }
     }
+}
+
+@Composable
+private fun ColourChip(name: String, color: Color, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val pal = LocalPalette.current
+    Row(
+        Modifier.alpha(if (enabled) 1f else 0.38f)
+            .clip(RoundedCornerShape(50))
+            .background(if (selected) pal.text.copy(alpha = 0.16f) else Color.Transparent)
+            .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(14.dp).clip(CircleShape).background(if (enabled) color else pal.textFaint))
+        Spacer(Modifier.width(6.dp))
+        Text(name, color = pal.text, style = MaterialTheme.typography.bodySmall, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
+    }
+}
+
+/**
+ * Look profiles, top right: Custom 1-5. Each keeps every setting on this page; the one in use
+ * saves each change as you make it, and picking another switches the whole look.
+ */
+@Composable
+private fun LookProfiles(cfg: ThemeConfig) {
+    val pal = LocalPalette.current
+    val active by ThemeState.activeProfile.collectAsState()
+    val profiles by ThemeState.profiles.collectAsState()
+    var open by remember { mutableStateOf(false) }
+    Box {
+        ProfilePill(customName(active), { open = true })
+        ProfileMenu(open, { open = false }, "Look profiles", "Each keeps everything on this page. Changes save into the one in use.") {
+            profiles.forEachIndexed { i, look ->
+                val inUse = i == active
+                ProfileRow(
+                    name = customName(i),
+                    status = when {
+                        inUse -> "In use"
+                        look == null -> "Empty · starts as a copy of this look"
+                        else -> "Saved look · tap to switch"
+                    },
+                    active = inUse,
+                    onClick = { ThemeState.selectProfile(i); open = false },
+                    leading = { LookDot(look ?: cfg) },
+                    trailing = if (inUse) ({ Icon(Icons.Rounded.Check, null, tint = pal.accent) }) else null,
+                )
+            }
+        }
+    }
+}
+
+/** A small round preview of a look: its background glow (black on AMOLED) and its accent. */
+@Composable
+private fun LookDot(t: ThemeConfig) {
+    val pal = LocalPalette.current
+    val back = if (t.pureBlack) Color.Black else t.glow.toColor()
+    Box(
+        Modifier.size(24.dp).clip(CircleShape)
+            .background(Brush.linearGradient(listOf(back, back, t.accent.toColor())))
+            .border(1.dp, pal.text.copy(alpha = 0.2f), CircleShape)
+    )
 }
 
 @Composable

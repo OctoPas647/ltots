@@ -16,6 +16,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -28,12 +29,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.translate
-import androidx.compose.ui.graphics.drawscope.clipPath
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.addOutline
-import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.preferredFrameRate
 import androidx.compose.ui.layout.ContentScale
@@ -41,6 +36,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.kyant.backdrop.backdrops.emptyBackdrop
+import com.kyant.backdrop.BackdropEffectScope
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
@@ -49,7 +45,6 @@ import com.kyant.backdrop.highlight.Highlight
 import com.kyant.backdrop.shadow.Shadow
 import com.ltots.app.ui.theme.LocalPalette
 import com.ltots.app.ui.theme.LocalThemeConfig
-import com.ltots.app.ui.theme.toColor
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.sin
@@ -83,68 +78,71 @@ fun Modifier.glass(
     val pal = LocalPalette.current
     val surface = (tint ?: pal.glassTint).copy(alpha = (cfg.glassTint + tintBoost).coerceIn(0f, 0.95f))
     if (backdrop == null) return this.clip(shape).background(surface)
-    if (cfg.pureBlack) {
-        // AMOLED: what's behind the glass is plain black, and blurring, bending or boosting
-        // black still gives black. So skip that work on the graphics chip entirely and paint
-        // the black directly — it looks exactly the same (rim light and shadow stay).
-        return this.drawBackdrop(
-            backdrop = emptyBackdrop(),
-            shape = { shape },
-            effects = {},
-            highlight = { if (cfg.rimLight > 0.01f) Highlight.Default.copy(alpha = cfg.rimLight) else null },
-            shadow = { Shadow(radius = 20.dp, color = Color.Black.copy(alpha = if (pal.dark) 0.22f else 0.08f)) },
-            onDrawSurface = { drawRect(Color.Black); drawRect(surface); if (cfg.chromaticAberration) prismRim(shape, strength) },
+
+    // The glass library only redraws its glass when the glass is rebuilt, not when the values we
+    // hand it change (that's why Frost / tint, Blur, Refraction and the play button's cover colour
+    // used to wait until Corner roundness changed or you switched tabs). So the values that can
+    // change are kept in a state that the glass reads while drawing: any change redraws it at once.
+    val look = rememberUpdatedState(
+        GlassLook(
+            surface = surface,
+            // AMOLED: what's behind the glass is plain black, and blurring, bending or boosting
+            // black still gives black. So that work is skipped on the graphics chip entirely and
+            // the black is painted directly; it looks exactly the same (rim light and shadow stay).
+            plainBlack = cfg.pureBlack,
+            blurDp = cfg.blurDp * strength,
+            refraction = cfg.refraction * strength,
+            rimLight = cfg.rimLight,
+            shadowAlpha = if (pal.dark) 0.22f else 0.08f,
         )
-    }
-    return this.drawBackdrop(
-        backdrop = backdrop,
-        shape = { shape },
-        effects = {
-            vibrancy()
-            blur((cfg.blurDp * strength).dp.toPx())
-            val r = cfg.refraction * strength
-            if (r > 0.01f) {
-                val minSide = size.minDimension
-                lens(
-                    refractionHeight = (18.dp.toPx() * r).coerceAtMost(minSide / 2f),
-                    refractionAmount = (40.dp.toPx() * r).coerceAtMost(minSide),
-                    depthEffect = true,
-                    chromaticAberration = cfg.chromaticAberration,
-                )
+    )
+    val effects: BackdropEffectScope.() -> Unit = remember(look) {
+        {
+            val l = look.value
+            if (!l.plainBlack) {
+                vibrancy()
+                blur(l.blurDp.dp.toPx())
+                if (l.refraction > 0.01f) {
+                    val minSide = size.minDimension
+                    lens(
+                        refractionHeight = (18.dp.toPx() * l.refraction).coerceAtMost(minSide / 2f),
+                        refractionAmount = (40.dp.toPx() * l.refraction).coerceAtMost(minSide),
+                        depthEffect = true,
+                    )
+                }
             }
-        },
-        highlight = { if (cfg.rimLight > 0.01f) Highlight.Default.copy(alpha = cfg.rimLight) else null },
-        shadow = { Shadow(radius = 20.dp, color = Color.Black.copy(alpha = if (pal.dark) 0.22f else 0.08f)) },
-        onDrawSurface = { drawRect(surface); if (cfg.chromaticAberration) prismRim(shape, strength) },
+        }
+    }
+    val onDrawSurface: DrawScope.() -> Unit = remember(look) {
+        {
+            val l = look.value
+            if (l.plainBlack) drawRect(Color.Black)
+            drawRect(l.surface)
+        }
+    }
+    val highlight = remember(look) { { look.value.rimLight.let { if (it > 0.01f) Highlight.Default.copy(alpha = it) else null } } }
+    val shadow = remember(look) { { Shadow(radius = 20.dp, color = Color.Black.copy(alpha = look.value.shadowAlpha)) } }
+    val shapeOf = remember(shape) { { shape } }
+    val source = if (cfg.pureBlack) remember { emptyBackdrop() } else backdrop
+    return this.drawBackdrop(
+        backdrop = source,
+        shape = shapeOf,
+        effects = effects,
+        highlight = highlight,
+        shadow = shadow,
+        onDrawSurface = onDrawSurface,
     )
 }
 
-private val prismColors = listOf(
-    Color(0xFFFF3B30), Color(0xFFFF9500), Color(0xFFFFEA00), Color(0xFF34C759),
-    Color(0xFF00E5FF), Color(0xFF3D5AFE), Color(0xFFD500F9), Color(0xFFFF3B30),
+/** Everything about the glass that can change while it is on screen. */
+private data class GlassLook(
+    val surface: Color,
+    val plainBlack: Boolean,
+    val blurDp: Float,
+    val refraction: Float,
+    val rimLight: Float,
+    val shadowAlpha: Float,
 )
-
-/**
- * "Prism edges": a rainbow split along the glass edge — a red fringe pushed one way, a cyan
- * fringe the other, and a spectrum sweeping round the rim. Drawn by us (not the backdrop), so it
- * shows on every theme, including AMOLED where there is nothing behind the glass to split.
- */
-private fun DrawScope.prismRim(shape: Shape, strength: Float) {
-    val outline = shape.createOutline(size, layoutDirection, this)
-    val k = strength.coerceIn(0.5f, 1f)
-    val w = 1.6.dp.toPx() * k
-    val o = 1.4.dp.toPx() * k
-    // Everything stays inside the glass's own rounded shape, so the corners are never touched.
-    clipPath(Path().apply { addOutline(outline) }) {
-        // Split fringes: red to the top-left, cyan to the bottom-right (inside the edge only).
-        translate(o, o) { drawOutline(outline, Color(0xFFFF2D55).copy(alpha = 0.75f), style = Stroke(w * 2f)) }
-        translate(-o, -o) { drawOutline(outline, Color(0xFF00E5FF).copy(alpha = 0.75f), style = Stroke(w * 2f)) }
-        // Spectrum round the rim, plus a soft inner glow of the same colours.
-        val sweep = Brush.sweepGradient(prismColors, center)
-        drawOutline(outline, sweep, alpha = 0.9f, style = Stroke(w * 2f))
-        drawOutline(outline, sweep, alpha = 0.25f, style = Stroke(w * 7f))
-    }
-}
 
 /** A glass panel with content. */
 @Composable
@@ -176,7 +174,8 @@ fun GlassCircleButton(
     val pal = LocalPalette.current
     Box(
         modifier
-            .glass(CircleShape, strength = 0.7f, tint = if (highlighted) pal.accent else null, tintBoost = if (highlighted) 1f else 0f)
+            .glass(CircleShape, strength = 0.7f)
+            .then(if (highlighted) Modifier.background(pal.accent, CircleShape) else Modifier)
             .clip(CircleShape)
             .clickable(remember { MutableInteractionSource() }, indication = androidx.compose.material3.ripple(), onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -192,9 +191,8 @@ fun GlassCircleButton(
 fun AppBackground(artwork: Bitmap?, modifier: Modifier = Modifier) {
     val cfg = LocalThemeConfig.current
     val pal = LocalPalette.current
-    val a = cfg.gradientA.toColor()
-    val b = cfg.gradientB.toColor()
-    val c = cfg.gradientC.toColor()
+    // The glow (Look tab), or the song's cover colours while cover colours are on.
+    val (a, b, c) = pal.glows
     val base = when {
         cfg.pureBlack -> Color.Black
         pal.dark -> Color(0xFF07060C)

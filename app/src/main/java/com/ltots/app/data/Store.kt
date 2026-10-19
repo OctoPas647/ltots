@@ -68,6 +68,29 @@ object Store {
     fun loadDefaultEq(): EqState = read("default_eq.json")?.let { Json.eq(it) } ?: EqState()
     fun saveDefaultEq(e: EqState) = writeDebounced("default_eq.json") { Json.eq(e).toString() }
 
+    // ---- Custom 1-5: Look profiles and EQ profiles ------------------------------------------
+
+    /** The selected Look profile and the saved looks (null = never used); null before the first save. */
+    fun loadLookProfiles(): Pair<Int, List<ThemeConfig?>>? = read("look_profiles.json")?.let { o ->
+        val arr = o.optJSONArray("slots") ?: JSONArray()
+        o.optInt("active", 0) to List(arr.length()) { i -> arr.optJSONObject(i)?.let { Json.theme(it) } }
+    }
+
+    fun saveLookProfiles(active: Int, slots: List<ThemeConfig?>) = writeDebounced("look_profiles.json") {
+        val arr = JSONArray().apply { slots.forEach { t -> put(if (t != null) Json.theme(t) else JSONObject.NULL) } }
+        JSONObject().put("active", active).put("slots", arr).toString()
+    }
+
+    /** Saved EQ profiles (null = empty slot). */
+    fun loadEqProfiles(): List<EqState?> = read("eq_profiles.json")?.optJSONArray("slots")?.let { arr ->
+        List(arr.length()) { i -> arr.optJSONObject(i)?.let { Json.eq(it) } }
+    } ?: emptyList()
+
+    fun saveEqProfiles(slots: List<EqState?>) = writeDebounced("eq_profiles.json") {
+        val arr = JSONArray().apply { slots.forEach { e -> put(if (e != null) Json.eq(e) else JSONObject.NULL) } }
+        JSONObject().put("slots", arr).toString()
+    }
+
     // ---- per-song profiles -----------------------------------------------------------------
 
     private fun profileFile(key: String): String {
