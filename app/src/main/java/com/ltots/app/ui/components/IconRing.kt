@@ -54,6 +54,23 @@ class IconRing private constructor(
         private const val CONVERGE = 0.55f
         /** Ray-marching step, in mask pixels. */
         private const val STEP = 0.5f
+        /**
+         * The outline is softened (it runs up to a pixel inside sharp corners), so what is within
+         * this many mask pixels of it counts as the outline itself, not as something in the way.
+         */
+        private const val NEAR = 2f
+        /** How much longer a bar may be than its neighbour, per point spacing. */
+        private const val SLOPE = 1.2f
+
+        /** Shortens bars so each is at most [step] longer than its neighbours (closed outline st..en). */
+        internal fun limitSlope(r: FloatArray, st: Int, en: Int, step: Float) {
+            val n = en - st
+            if (n < 3) return
+            repeat(2) {
+                for (i in 1..n) { val k = st + i % n; val p = st + (i - 1) % n; if (r[k] > r[p] + step) r[k] = r[p] + step }
+                for (i in n - 1 downTo -1) { val k = st + (i + n) % n; val p = st + (i + 1 + n) % n; if (r[k] > r[p] + step) r[k] = r[p] + step }
+            }
+        }
 
         /**
          * @param areaWidth, areaHeight the drawing area in px.
@@ -129,15 +146,22 @@ class IconRing private constructor(
                 val n = en - st
                 // Neighbours a few points away on either side, to see where bars converge.
                 val w = (8f * spacingPx / spacing).roundToInt().coerceIn(1, max(1, n / 4))
+                val convOut = FloatArray(n); val convIn = FloatArray(n)
                 for (k in st until en) {
                     val a = st + (k - st - w + n) % n; val b = st + (k - st + w) % n
                     convergence(mx, my, nx, ny, a, k, b, conv)
-                    val outMask = min(reachOut(shape.field, mx[k], my[k], nx[k], ny[k], maxLen / s, bounds), conv[0] * CONVERGE)
-                    val inMask = min(reachIn(shape.field, mx[k], my[k], nx[k], ny[k], maxLen / s), conv[1] * CONVERGE)
-                    reachOut[k] = outMask * s; reachIn[k] = inMask * s
+                    convOut[k - st] = conv[0]; convIn[k - st] = conv[1]
+                    reachOut[k] = min(reachOut(shape.field, mx[k], my[k], nx[k], ny[k], maxLen / s, bounds), conv[0] * CONVERGE) * s
+                    reachIn[k] = min(reachIn(shape.field, mx[k], my[k], nx[k], ny[k], maxLen / s), conv[1] * CONVERGE) * s
+                }
+                // Neighbouring bars change length gradually (only ever shortening), so where the
+                // room changes abruptly the bars and the curve follow a smooth edge, not steps.
+                limitSlope(reachOut, st, en, spacing * SLOPE)
+                limitSlope(reachIn, st, en, spacing * SLOPE)
+                for (k in st until en) {
                     // Short bars (narrow gaps) and converging bars are thinner.
-                    halfOut[k] = min(baseHalf * taper(outMask, conv[0]), max(0.5f, reachOut[k] * 0.3f))
-                    halfIn[k] = min(baseHalf * taper(inMask, conv[1]), max(0.5f, reachIn[k] * 0.3f))
+                    halfOut[k] = min(baseHalf * taper(reachOut[k] / s, convOut[k - st]), max(0.5f, reachOut[k] * 0.3f))
+                    halfIn[k] = min(baseHalf * taper(reachIn[k] / s, convIn[k - st]), max(0.5f, reachIn[k] * 0.3f))
                 }
             }
             val ring = IconRing(
@@ -192,7 +216,7 @@ class IconRing private constructor(
             while (t <= maxLen) {
                 val px = x + nx * t; val py = y + ny * t
                 if (px < bounds[0] || px > bounds[1] || py < bounds[2] || py > bounds[3]) return max(0f, t - STEP)
-                if (t >= 1f && shared(t)) return edge(t - STEP, t, shared) * SHARE
+                if (t >= NEAR && shared(t)) return edge(t - STEP, t, shared) * SHARE
                 t += STEP
             }
             return maxLen
@@ -206,7 +230,7 @@ class IconRing private constructor(
             }
             var t = STEP
             while (t <= maxLen) {
-                if (t >= 1f && shared(t)) return edge(t - STEP, t, shared) * SHARE
+                if (t >= NEAR && shared(t)) return edge(t - STEP, t, shared) * SHARE
                 t += STEP
             }
             return maxLen

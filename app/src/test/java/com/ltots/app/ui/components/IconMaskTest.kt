@@ -173,7 +173,9 @@ class IconMaskTest {
         val outside = (0 until ring.count).filter { ring.x[it] < ring.iconLeft + px && ring.nx[it] < -0.9f }
         assertTrue(inGap.isNotEmpty() && outside.isNotEmpty())
         val gapReach = inGap.maxOf { ring.reachOutPx[it] }
-        assertTrue("shorter", gapReach < outside.minOf { ring.reachOutPx[it] } / 4)
+        assertTrue("shorter", gapReach < outside.minOf { ring.reachOutPx[it] } / 2)
+        // Sharp convex corners still get bars (the outline is softened there).
+        assertTrue((0 until ring.count).all { ring.reachOutPx[it] > 5f })
         assertTrue("thinner", inGap.maxOf { ring.halfWidthOut[it] } < outside.minOf { ring.halfWidthOut[it] })
         // Across the slit, the bars from the two walls together never fill more than the slit.
         val left = inGap.filter { ring.nx[it] > 0.999f }
