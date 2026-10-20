@@ -101,7 +101,7 @@ fun SoundScreen() {
                 }
                 PathRow("Decoded", if (info.sampleRate > 0) "${"%.1f".format(Locale.ROOT, info.sampleRate / 1000.0)} kHz · ${info.channels} ch" else "—")
                 PathRow("EQ & limiter", if (batteryEq) "Phone's built-in EQ · $bands bands" else "64-bit floating point")
-                PathRow("Pitch & speed", (if (settings.efficientPitch) "Rubber Band R2" else "Rubber Band R3") + " (only when changed)")
+                PathRow("Pitch & speed", (if (com.ltots.app.audio.TimePitchProcessor.usesFaster(settings.efficientPitch, settings.preserveFormants)) "Rubber Band R2" else "Rubber Band R3") + " (only when changed)")
                 PathRow("Limiter", "Soft, above −1 dBFS only")
                 PathRow("Sent to Android", if (settings.bitPerfectUsb) "16-bit, dithered" else "32-bit float")
                 PathRow("Output", device.kindLabel)
@@ -139,7 +139,8 @@ fun SoundScreen() {
                 SwitchRow(
                     "Battery-saving pitch & speed", settings.efficientPitch,
                     { on -> AudioEngine.updateSettings { it.copy(efficientPitch = on) } },
-                    sub = "Uses the lighter Rubber Band engine: about half the processing (and battery) while pitch or speed is changed, with slightly less polished sound. Nothing runs at original pitch and speed either way.",
+                    sub = "Uses the lighter Rubber Band engine: about half the processing (and battery) while pitch or speed is changed, with slightly less polished sound. Nothing runs at original pitch and speed either way." +
+                        if (settings.efficientPitch && settings.preserveFormants) " Not used while Natural voices is on: only the full engine keeps voices natural." else "",
                 )
             }
         }

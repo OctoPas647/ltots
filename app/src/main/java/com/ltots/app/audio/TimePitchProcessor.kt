@@ -101,11 +101,12 @@ class TimePitchProcessor(@Volatile var source: SoundSource = StaticSoundSource()
 
     /**
      * R3 ("finer") is the studio-quality engine; R2 ("faster") needs roughly half the CPU, which
-     * matters for battery when pitch or speed stays changed for a long time.
+     * matters for battery when pitch or speed stays changed for a long time. R2 only half keeps a
+     * voice's formants, so "Natural voices" always uses R3.
      */
     private fun options(): Int =
         RubberBandStretcher.OptionProcessRealTime or
-            (if (efficient) RubberBandStretcher.OptionEngineFaster else RubberBandStretcher.OptionEngineFiner) or
+            (if (usesFaster(efficient, formants)) RubberBandStretcher.OptionEngineFaster else RubberBandStretcher.OptionEngineFiner) or
             RubberBandStretcher.OptionPitchHighConsistency or
             RubberBandStretcher.OptionChannelsTogether or
             (if (formants) RubberBandStretcher.OptionFormantPreserved else 0)
@@ -165,7 +166,7 @@ class TimePitchProcessor(@Volatile var source: SoundSource = StaticSoundSource()
         val p = source.pitchScaleFor(mediaId)
         val f = source.preserveFormants
         val e = source.efficientPitch
-        if (!engaged || e != efficient) {
+        if (!engaged || usesFaster(e, f) != usesFaster(efficient, formants)) {
             // Not running yet, or switching engines (a fresh start, heard as a tiny skip).
             pitch = p
             formants = f
@@ -297,7 +298,13 @@ class TimePitchProcessor(@Volatile var source: SoundSource = StaticSoundSource()
         pendingFrames = 0
     }
 
+    /** True while the R2 engine is in use. */
+    val usesFasterEngine: Boolean get() = engaged && usesFaster(efficient, formants)
+
     companion object {
         const val CHUNK = 1024
+
+        /** The lighter R2 engine: asked for, and not needed for natural voices. */
+        fun usesFaster(efficient: Boolean, formants: Boolean) = efficient && !formants
     }
 }
