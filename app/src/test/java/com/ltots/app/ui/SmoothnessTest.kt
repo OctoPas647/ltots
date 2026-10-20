@@ -79,7 +79,8 @@ class SmoothnessTest {
         val colourful = ThemeConfig(animateBackground = true, pureBlack = false)
         assertTrue(backgroundMoves(colourful, false, Effects.FULL))
         assertTrue(backgroundMoves(colourful, false, Effects.BALANCED))
-        assertFalse(backgroundMoves(colourful, false, Effects.LIGHT))
+        // Light still moves (at up to 30 fps): it used to stop, so the colours stood still.
+        assertTrue(backgroundMoves(colourful, false, Effects.LIGHT))
         assertFalse(backgroundMoves(colourful, true, Effects.FULL))
         assertFalse(backgroundMoves(colourful.copy(pureBlack = true), false, Effects.FULL))
         assertFalse(backgroundMoves(colourful.copy(animateBackground = false), false, Effects.FULL))

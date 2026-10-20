@@ -230,13 +230,19 @@ fun AppBackground(artwork: Bitmap?, modifier: Modifier = Modifier) {
 
     // The colour blobs (and the album-art glow) drift with every frame the screen shows, so the
     // motion is smooth. Only while the app is on screen, and not with Battery Saver on;
-    // "Moving colours" off stops it completely. Smoothness: Balanced moves it up to 60 times a
-    // second, Light keeps it still (every move re-renders the glass on top of it).
+    // "Animations" off stops it completely. Smoothness: Balanced moves it up to 60 times a
+    // second, Light up to 30 (its panels are plain frosted, so moving costs almost nothing).
+    // It used to stop on Light, and Automatic steps down to Light on a busy phone: then the
+    // colours stood still until the app was restarted a few times.
     val phase = remember { androidx.compose.runtime.mutableFloatStateOf(0.8f) }
     val saver by com.ltots.app.ui.rememberBatterySaver()
     val effects = com.ltots.app.ui.LocalEffects.current
     if (backgroundMoves(cfg, saver, effects)) {
-        val minFrameNs = if (effects == com.ltots.app.data.Effects.BALANCED) 16_000_000L else 0L
+        val minFrameNs = when (effects) {
+            com.ltots.app.data.Effects.BALANCED -> 16_000_000L
+            com.ltots.app.data.Effects.LIGHT -> 33_000_000L
+            else -> 0L
+        }
         com.ltots.app.ui.WhileOnScreen(cfg.animationSpeed, minFrameNs) {
             val periodNs = motionPeriodNs(cfg.animationSpeed)
             var last = 0L
@@ -334,11 +340,12 @@ private fun boxPass(src: IntArray, dst: IntArray, n: Int, r: Int, horizontal: Bo
 }
 private const val TWO_PI = (2 * Math.PI).toFloat()
 
-/** Whether the background is moving right now (see Moving colours on the Look tab). */
+/** Whether the background is moving right now (see Animations on the Look tab), at any Smoothness level. */
+@Suppress("UNUSED_PARAMETER")
 fun backgroundMoves(cfg: com.ltots.app.data.ThemeConfig, batterySaver: Boolean, effects: com.ltots.app.data.Effects): Boolean =
-    cfg.animateBackground && !cfg.pureBlack && !batterySaver && effects != com.ltots.app.data.Effects.LIGHT
+    cfg.animateBackground && !cfg.pureBlack && !batterySaver
 
-/** One full loop of the moving colours: 20 s at 1×, so 40 s at the default 0.5×, about 7 s at 3×. */
+/** One full loop of the animated colours: 20 s at 1×, so 40 s at the default 0.5×, about 7 s at 3×. */
 fun motionPeriodNs(speed: Float): Float = 20e9f / max(0.05f, speed)
 
 private fun DrawScope.blob(color: Color, center: Offset, radius: Float) {
