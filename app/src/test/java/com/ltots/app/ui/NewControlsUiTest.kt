@@ -15,6 +15,8 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
@@ -200,7 +202,7 @@ class NewControlsUiTest {
     }
 
     /**
-     * Moving colours grays out where it can't work, the top & bottom visualizer, Smoothness, the
+     * Animations grays out where it can't work, the top & bottom visualizer, Smoothness, the
      * default look, and the preamp's reset button.
      */
     @Config(qualifiers = "w411dp-h2300dp-xxhdpi")
@@ -208,7 +210,7 @@ class NewControlsUiTest {
         rule.mainClock.autoAdvance = false
         idle()
         tab("Look")
-        val moving = hasText("Moving colours") and hasClickAction()
+        val moving = hasText("Animations") and hasClickAction()
         fun speed() = hasProgressBarRangeInfo(androidx.compose.ui.semantics.ProgressBarRangeInfo(ThemeState.config.value.animationSpeed, 0.1f..3f))
         rule.onNodeWithText("AMOLED Cover").performClick(); idle(1000)
         rule.onNode(moving).assertIsNotEnabled()
@@ -228,15 +230,25 @@ class NewControlsUiTest {
 
         click("Light")
         assertEquals(com.ltots.app.data.EffectsMode.LIGHT, ThemeState.config.value.effects)
-        rule.onNode(moving).assertIsEnabled() // can be switched, but Light keeps it paused (said under it)
-        rule.onNodeWithText("Paused by Smoothness: Light (below, under Screen).").assertExists()
+        rule.onNode(moving).assertIsEnabled() // still moves on Light, at up to 30 fps (said under it)
+        rule.onNodeWithText("The colours behind the glass drift around. Smoothness: Light moves them at up to 30 fps.").assertExists()
         shot("18_look_smoothness_light")
         click("Automatic")
         assertEquals(com.ltots.app.data.EffectsMode.AUTO, ThemeState.config.value.effects)
 
-        click("Reset this look to default")
+        // Reset, top right: asks first, then everything is back to the default look.
+        ThemeState.update { it.copy(analyzerBands = 160, artworkBackground = true) }; idle()
+        rule.onNodeWithContentDescription("Reset the look to default").performClick(); idle()
+        shot("20_look_reset_dialog")
+        click("Reset Custom 1")
         assertEquals(com.ltots.app.data.Hsv(180f, 1f, 1f), ThemeState.config.value.accentHsv)
         assertTrue(ThemeState.config.value.pureBlack)
+        assertEquals(96, ThemeState.config.value.analyzerBands)
+        assertTrue(!ThemeState.config.value.artworkBackground)
+        // The one at the bottom of the page opens the same question.
+        click("Reset everything to default")
+        rule.onNodeWithText("Reset the look?").assertExists()
+        click("Cancel")
 
         // EQ: the preamp's own reset, back to 0 dB in one tap.
         tab("EQ")
@@ -246,6 +258,34 @@ class NewControlsUiTest {
         assertEquals(0f, AudioEngine.effectiveEq.value.preampDb, 0f)
         rule.onNodeWithContentDescription("Reset Preamp").assertIsNotEnabled()
         shot("19_eq_preamp_reset")
+    }
+
+    /** The background colours drift as soon as a theme with them is picked (no restart needed). */
+    @Test fun movingColoursMoveTheFirstTime() {
+        rule.mainClock.autoAdvance = false
+        idle()
+        tab("Look")
+        rule.onNodeWithText("AMOLED").performClick(); idle(1000)
+        rule.onNodeWithText("Aurora").performClick(); idle(1000)
+        assertTrue(ThemeState.config.value.animateBackground)
+        fun gutter(): IntArray {
+            val img = rule.onRoot().captureToImage().asAndroidBitmap()
+            // The thin strip at the left edge, outside the glass panels: the background itself.
+            return IntArray(40) { i -> img.getPixel(6, img.height * (i + 5) / 50) }
+        }
+        fun grid(): IntArray {
+            val img = rule.onRoot().captureToImage().asAndroidBitmap()
+            // Across the page, under the glass panels too (they show the moving colours through).
+            return IntArray(400) { i -> img.getPixel(img.width * (i % 20 + 1) / 22, img.height * (i / 20 + 1) / 22) }
+        }
+        val a = gutter(); val ga = grid()
+        idle(4000)
+        val b = gutter(); val gb = grid()
+        val moved = a.indices.count { a[it] != b[it] }
+        val movedUnder = ga.indices.count { ga[it] != gb[it] }
+        println("MOVING: $moved of ${a.size} edge samples changed, $movedUnder of ${ga.size} across the page")
+        assertTrue("the background moved: $moved", moved > a.size / 4)
+        assertTrue("the colours move under the glass too: $movedUnder", movedUnder > ga.size / 4)
     }
 
     /** A tall screen, so the Glass card shows without scrolling (scrolling stalls under Robolectric). */

@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -78,6 +79,7 @@ fun LookScreen(artwork: android.graphics.Bitmap? = null) {
     val cfg by ThemeState.config.collectAsState()
     val pal = LocalPalette.current
     fun set(t: (ThemeConfig) -> ThemeConfig) = ThemeState.update(t)
+    var resetAsk by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp)) {
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -86,7 +88,13 @@ fun LookScreen(artwork: android.graphics.Bitmap? = null) {
                 Text("Everything here changes live.", color = pal.textDim, style = MaterialTheme.typography.bodySmall)
             }
             LookProfiles(cfg)
+            Spacer(Modifier.width(8.dp))
+            // Reset everything on this page to the default look, like the EQ's reset button.
+            com.ltots.app.ui.glass.GlassCircleButton({ resetAsk = true }, Modifier.size(40.dp)) {
+                Icon(androidx.compose.material.icons.Icons.Rounded.RestartAlt, "Reset the look to default", tint = pal.text, modifier = Modifier.size(22.dp))
+            }
         }
+        if (resetAsk) ResetLookDialog(onDismiss = { resetAsk = false })
         Spacer(Modifier.height(14.dp))
 
         // Theme presets
@@ -140,7 +148,7 @@ fun LookScreen(artwork: android.graphics.Bitmap? = null) {
                     else if (level == Effects.BALANCED) "Smoothness is on Balanced (under Screen): the glass bends without blurring, so Blur is off for now." +
                         (if (cfg.pureBlack) " On the AMOLED themes the bars sit on pure black too." else "")
                     else if (cfg.pureBlack) "Blur and Refraction show on the bars at the bottom, bending the page as it scrolls under them. The panels sit on pure black, which looks the same bent or not."
-                    else "Blur and Refraction bend what's behind the glass: the moving colours under the panels, and the page scrolling under the bars at the bottom.",
+                    else "Blur and Refraction bend what's behind the glass: the animated colours under the panels, and the page scrolling under the bars at the bottom.",
                     color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 8.dp),
                 )
                 LabeledSlider("Frost / tint", cfg.glassTint, { v -> set { it.copy(glassTint = v) } }, 0f..0.7f, pct(cfg.glassTint / 0.7f))
@@ -167,11 +175,11 @@ fun LookScreen(artwork: android.graphics.Bitmap? = null) {
                 val saver by com.ltots.app.ui.rememberBatterySaver()
                 val effects = com.ltots.app.ui.rememberEffects()
                 SwitchRow(
-                    "Moving colours", cfg.animateBackground && bg, { on -> set { it.copy(animateBackground = on) } }, enabled = bg,
+                    "Animations", cfg.animateBackground && bg, { on -> set { it.copy(animateBackground = on) } }, enabled = bg,
                     sub = when {
                         !bg -> "Off on the AMOLED themes: nothing moves on pure black."
                         cfg.animateBackground && saver -> "Paused while the phone's Battery Saver is on."
-                        cfg.animateBackground && effects == com.ltots.app.data.Effects.LIGHT -> "Paused by Smoothness: Light (below, under Screen)."
+                        cfg.animateBackground && effects == com.ltots.app.data.Effects.LIGHT -> "The colours behind the glass drift around. Smoothness: Light moves them at up to 30 fps."
                         else -> "The colours behind the glass drift around, and the album-art glow with them."
                     },
                 )
@@ -283,7 +291,7 @@ fun LookScreen(artwork: android.graphics.Bitmap? = null) {
 
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-            Pill("Reset this look to default", false, { ThemeState.reset() })
+            Pill("Reset everything to default", false, { resetAsk = true })
         }
         Spacer(Modifier.height(bottomChrome()))
     }
@@ -311,7 +319,7 @@ private fun SmoothnessSetting(mode: com.ltots.app.data.EffectsMode, onPick: (com
             when (now) {
                 Effects.FULL -> "Full: real blur everywhere, and the bars at the bottom bend the page scrolling under them."
                 Effects.BALANCED -> "Balanced: the bars bend the background instead of the page, panels bend without blur, motion and visualizer at up to 60 fps."
-                Effects.LIGHT -> "Light: plain frosted panels with no blur or bending, still background, visualizer at up to 30 fps. The smoothest on any phone."
+                Effects.LIGHT -> "Light: plain frosted panels with no blur or bending, animations and visualizer at up to 30 fps. The smoothest on any phone."
             },
         color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp),
     )
@@ -434,6 +442,34 @@ private fun ColourChip(name: String, color: Color, selected: Boolean, enabled: B
 }
 
 /**
+ * Reset, top right: everything on the Look tab back to the default look (AMOLED, hue 180°,
+ * saturation and brightness 100%), for the profile in use or for all five.
+ */
+@Composable
+private fun ResetLookDialog(onDismiss: () -> Unit) {
+    val active by ThemeState.activeProfile.collectAsState()
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Reset the look?") },
+        text = {
+            Text(
+                "Everything on this page goes back to the default: the AMOLED theme, colours, glass, " +
+                    "background, screen, visualizer and icon settings. Can't be undone."
+            )
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = { ThemeState.reset(); onDismiss() }) { Text("Reset ${customName(active)}") }
+        },
+        dismissButton = {
+            Row {
+                androidx.compose.material3.TextButton(onClick = { ThemeState.resetAll(); onDismiss() }) { Text("Reset all 5") }
+                androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        },
+    )
+}
+
+/**
  * Look profiles, top right: Custom 1-5. Each keeps every setting on this page; the one in use
  * saves each change as you make it, and picking another switches the whole look.
  */
@@ -445,7 +481,7 @@ private fun LookProfiles(cfg: ThemeConfig) {
     var open by remember { mutableStateOf(false) }
     Box {
         ProfilePill(customName(active), { open = true })
-        ProfileMenu(open, { open = false }, "Look profiles", "Each keeps everything on this page. Changes save into the one in use.") {
+        ProfileMenu(open, { open = false }, "Look profiles", "Each keeps everything on this page except the visualizer's Detail, which stays the same in all. Changes save into the one in use.") {
             profiles.forEachIndexed { i, look ->
                 val inUse = i == active
                 ProfileRow(

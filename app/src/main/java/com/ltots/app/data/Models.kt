@@ -65,10 +65,10 @@ enum class Effects(val label: String) {
     FULL("Full"),
     /**
      * Lighter: the bars bend the background instead of the whole page, panels bend without the
-     * blur (the background is soft anyway), moving colours and visualizer at up to 60 fps.
+     * blur (the background is soft anyway), animations and visualizer at up to 60 fps.
      */
     BALANCED("Balanced"),
-    /** Lightest: frosted panels with no blur or bending, still background, visualizer up to 30 fps. */
+    /** Lightest: frosted panels with no blur or bending, animations and visualizer up to 30 fps. */
     LIGHT("Light"),
 }
 
@@ -154,8 +154,8 @@ data class ThemeConfig(
     val glowHsv: Hsv? = null,
     val animateBackground: Boolean = true,
     val animationSpeed: Float = 0.5f,
-    /** Blend the current album art into the background. */
-    val artworkBackground: Boolean = true,
+    /** Blend the current album art into the background (off unless you turn it on). */
+    val artworkBackground: Boolean = false,
     val blurDp: Float = 22f,
     /** Edge refraction strength of the glass, 0..1. */
     val refraction: Float = 0.55f,
@@ -190,6 +190,12 @@ data class ThemeConfig(
     val hideStatusBar: Boolean = false,
     /** Accent follows the current song's cover: the AMOLED Cover theme. */
     val dynamicColors: Boolean = false,
+    /**
+     * Your own colour on the AMOLED themes, kept while you use another theme so that going back
+     * to AMOLED brings it back (null = never changed: AMOLED's own cyan).
+     */
+    val amoledAccent: Long? = null,
+    val amoledAccentHsv: Hsv? = null,
     /** Playing tab: the visualizer grows out of an icon's dark parts, in the cover's place. */
     val iconMode: Boolean = false,
     /** The picture used in icon mode: a file in the app's own storage (null = none picked yet). */
@@ -305,6 +311,8 @@ object Json {
         put("bands", t.analyzerBands); put("maxHz", t.maxRefresh); put("wrap", t.spectrumAroundCover)
         put("ring", t.ringLayout.name); put("behind", t.behindLayout.name)
         put("fx", t.effects.name)
+        t.amoledAccent?.let { put("amAccent", it) }
+        t.amoledAccentHsv?.let { put("amHsv", hsvJson(it)) }
         put("icon", t.iconMode); t.iconFile?.let { put("iconFile", it) }
         put("iconThr", t.iconThreshold.toDouble()); put("iconInv", t.iconInvert)
         put("iconHole", t.iconMinHole.toDouble()); put("iconFill", t.iconFill.name)
@@ -351,6 +359,8 @@ object Json {
             hideStatusBar = o.optBoolean("hideStatus", d.hideStatusBar),
             // Cover colours belong to the AMOLED Cover theme only (the separate switch is gone).
             dynamicColors = o.optBoolean("dyn", d.dynamicColors) && o.optBoolean("black", d.pureBlack),
+            amoledAccent = if (o.has("amAccent")) o.optLong("amAccent") else null,
+            amoledAccentHsv = hsvOf(o.optJSONArray("amHsv")),
             iconMode = o.optBoolean("icon", d.iconMode),
             iconFile = o.optString("iconFile", "").ifEmpty { null },
             iconThreshold = o.optDouble("iconThr", d.iconThreshold.toDouble()).toFloat().coerceIn(0f, 1f),

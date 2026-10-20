@@ -67,10 +67,14 @@ object ThemeState {
     private val _activeProfile = MutableStateFlow(0)
     val activeProfile: StateFlow<Int> = _activeProfile
 
-    /** Switch to profile [i]. One that was never used starts from the default look. */
+    /**
+     * Switch to profile [i]. One that was never used starts from the default look. The
+     * visualizer's Detail (how finely the sound is split) is the same in every profile: switching
+     * never changes it.
+     */
     fun selectProfile(i: Int) {
         if (i !in 0 until PROFILE_COUNT || i == _activeProfile.value) return
-        val look = _profiles.value[i] ?: defaultLook
+        val look = (_profiles.value[i] ?: defaultLook).copy(analyzerBands = _config.value.analyzerBands)
         _profiles.value = _profiles.value.toMutableList().also { it[i] = look }
         _activeProfile.value = i
         _config.value = look
@@ -91,7 +95,13 @@ object ThemeState {
      */
     fun presetApplied(p: ThemePreset, cur: ThemeConfig): ThemeConfig {
         val t = themeOf(p).withPersonalFrom(cur)
-        return if (p.config.pureBlack && cur.pureBlack) t.withColoursFrom(cur) else t
+        return when {
+            !p.config.pureBlack -> t
+            cur.pureBlack -> t.withColoursFrom(cur)
+            // Back to AMOLED from another theme: your own AMOLED colour, if you set one.
+            cur.amoledAccent != null -> t.copy(accent = cur.amoledAccent, accentHsv = cur.amoledAccentHsv)
+            else -> t
+        }
     }
 
     /** Whether [cfg] is currently showing preset [p] (on AMOLED, whatever accent you picked). */
@@ -113,6 +123,10 @@ object ThemeState {
     /** [this] theme with the settings that belong to the person, not the theme, taken from [cur]. */
     private fun ThemeConfig.withPersonalFrom(cur: ThemeConfig) = copy(
         animationSpeed = cur.animationSpeed,
+        // Album art glow stays as you set it (off unless you turn it on), whichever theme.
+        artworkBackground = cur.artworkBackground,
+        amoledAccent = cur.amoledAccent,
+        amoledAccentHsv = cur.amoledAccentHsv,
         coverOpacity = cur.coverOpacity,
         cornerDp = cur.cornerDp,
         spectrumStyle = cur.spectrumStyle,
@@ -140,7 +154,12 @@ object ThemeState {
     )
 
     fun update(transform: (ThemeConfig) -> ThemeConfig) {
-        val t = transform(_config.value)
+        val t = transform(_config.value).let {
+            // On the AMOLED themes, remember the colour so it comes back after another theme.
+            if (it.pureBlack && it.accent != amoled.accent) it.copy(amoledAccent = it.accent, amoledAccentHsv = it.accentHsv)
+            else if (it.pureBlack) it.copy(amoledAccent = null, amoledAccentHsv = null)
+            else it
+        }
         _config.value = t
         Store.saveTheme(t)
         // Every change is kept in the selected profile too.
@@ -163,8 +182,22 @@ object ThemeState {
         ThemePreset("Daylight", ThemeConfig(accent = 0xFF5B3DF5, glow = 0xFFD2C6FF, darkMode = false, glassTint = 0.35f)),
     )
 
-    /** Back to the default look (AMOLED, accent hue 180°, saturation and brightness 100%). */
-    fun reset() = update { defaultLook }
+    /** Back to the default look (AMOLED, accent hue 180°, saturation and brightness 100%): everything on the Look tab. */
+    fun reset() {
+        update { defaultLook }
+        com.ltots.app.ui.Smoothness.recheck()
+    }
+
+    /** Every Look profile back to the default: Custom 1 in use, the others empty. */
+    fun resetAll() {
+        val look = defaultLook
+        _profiles.value = List(PROFILE_COUNT) { i -> if (i == 0) look else null }
+        _activeProfile.value = 0
+        _config.value = look
+        Store.saveTheme(look)
+        Store.saveLookProfiles(0, _profiles.value)
+        com.ltots.app.ui.Smoothness.recheck()
+    }
 }
 
 /** A ready-made look. [dynamic] = cover colours on/off for this theme; null leaves them as they are. */

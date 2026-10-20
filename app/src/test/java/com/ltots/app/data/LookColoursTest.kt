@@ -119,4 +119,12 @@ class ThemePresetTest {
         val onAurora = ThemeState.presetApplied(aurora, back)
         assertEquals(aurora.config.accent, onAurora.accent)
     }
+
+    @Test fun albumArtGlowIsOffUnlessTurnedOn() {
+        assertFalse(ThemeConfig().artworkBackground)
+        for (p in ThemeState.presets) assertFalse("${p.name}", ThemeState.presetApplied(p, ThemeState.amoled).artworkBackground)
+        // Once you turn it on, picking another theme keeps it on.
+        val on = ThemeState.presetApplied(ThemeState.presets.first { it.name == "Aurora" }, ThemeState.amoled).copy(artworkBackground = true)
+        assertTrue(ThemeState.presetApplied(ThemeState.presets.first { it.name == "Ocean" }, on).artworkBackground)
+    }
 }

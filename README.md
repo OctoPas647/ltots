@@ -78,16 +78,19 @@ newer APK updates the app and keeps your settings.
   itself and remembers that for the phone:
   - **Full** – real blur everywhere, the bars at the bottom bend the page scrolling under them;
   - **Balanced** – the bars bend the background instead of the page, panels bend without blur,
-    moving colours and visualizer at up to 60 fps;
-  - **Light** – plain frosted panels (no blur or bending), still background, visualizer at up to
+    animations and visualizer at up to 60 fps;
+  - **Light** – plain frosted panels (no blur or bending), animations and visualizer at up to
     30 fps.
   You can also pick a level yourself, or "Measure again from Full".
 - **Look profiles** – Custom 1–5 in the top right of the Look tab, each keeping every Look setting
-  (visualizer refresh rate and detail, Smoothness included) and showing which theme it uses; the
-  one in use saves each change. An empty profile starts as the default look (AMOLED, hue 180°,
+  (visualizer refresh rate, Smoothness and icon mode included) and showing which theme it uses;
+  the one in use saves each change. The visualizer's **Detail** is the same in every profile, so
+  switching never changes it. An empty profile starts as the default look (AMOLED, hue 180°,
   saturation and brightness 100%). Picking a theme changes only its colours, glass and background —
-  your visualizer, corners, refresh rate and bar settings stay — and switching between AMOLED and
-  AMOLED Cover keeps your own hue, saturation and brightness too.
+  your visualizer, corners, refresh rate, bar settings and Album art glow stay (the glow is off
+  until you turn it on) — and your own AMOLED colour comes back when you return to AMOLED or
+  AMOLED Cover from another theme. **Reset** (top right, or at the bottom of the page) puts
+  everything on the Look tab back to the default, for the profile in use or all five.
 - **AMOLED themes** – **AMOLED** (default on new installs): pure black with a cyan accent (hue 180°);
   **AMOLED Cover**: the same pure black, with buttons, sliders and everything you can touch coloured
   from the current song's cover.
@@ -130,8 +133,8 @@ newer APK updates the app and keeps your settings.
     while the EQ is flat), measure only new audio for the wave each frame, and sit above the
     glass rather than inside it, so the glass isn't re-rendered for every frame;
   - the moving background only animates while the app is on screen (and not with Battery
-    Saver); "Moving colours" off stops it. On the AMOLED themes it's grayed out (nothing moves on
-    pure black), and the switch says when Battery Saver or Smoothness: Light is pausing it.
+    Saver); "Animations" off stops it. On the AMOLED themes it's grayed out (nothing moves on
+    pure black), and the switch says when Battery Saver is pausing it.
 
 ## Roadmap
 
