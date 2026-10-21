@@ -107,6 +107,12 @@ class NewControlsUiTest {
         idle(1200)
     }
 
+    /** Taps profile [name] in the open EQ profiles menu (the preset of the same name stays put). */
+    private fun loadProfile(name: String) {
+        rule.onNode(hasText(name) and hasText("Saved · tap to load")).performSemanticsAction(SemanticsActions.OnClick)
+        idle(500)
+    }
+
     private fun click(text: String) {
         rule.onNodeWithText(text).performSemanticsAction(SemanticsActions.OnClick)
         idle(500)
@@ -139,28 +145,35 @@ class NewControlsUiTest {
         val rock = Store.builtInPresets.first { it.name == "Rock" }.eq
         assertTrue(EqTone.sameShape(AudioEngine.effectiveEq.value, rock))
 
-        // Save Rock into Custom 1 (an empty slot saves when tapped).
+        // Save Rock as a new profile: Custom 1 (the "+" row at the bottom of the menu).
         rule.onNodeWithContentDescription("EQ profiles").performClick(); idle()
         screen("11_eq_profiles_menu")
-        click("Custom 1")
+        click("Save as new profile")
+        rule.onNodeWithText("Custom 1").assertExists()
         rule.onNodeWithText("In use").assertExists()
-        // Save the same EQ into Custom 2 as well: still only one profile is in use (the last one).
-        rule.onNodeWithContentDescription("Save the current EQ to Custom 2").performClick(); idle()
+        // Save the same EQ as another profile: still only one profile is in use (the last one).
+        click("Save as new profile")
+        rule.onNodeWithText("Custom 2").assertExists()
         assertEquals("only one EQ profile in use", 1, rule.onAllNodesWithText("In use").fetchSemanticsNodes().size)
         screen("11a_eq_profile_saved")
-        click("Custom 1") // a saved one loads and closes the menu
+        // Every profile in the menu can be renamed and deleted. (The rename box itself is tested on
+        // its own in ProfileDialogsTest: dialogs don't settle inside the whole app under the test runner.)
+        rule.onNodeWithContentDescription("Rename Custom 1").assertExists()
+        rule.onNodeWithContentDescription("Delete Custom 2").assertExists()
+        com.ltots.app.data.EqProfiles.rename(0, "Rock"); idle()
+        loadProfile("Rock") // a saved one loads and closes the menu
 
         // Reset: every gain back to 0 dB.
         rule.onNodeWithContentDescription("Reset EQ: every gain back to 0 dB").performClick(); idle()
         assertTrue("reset flattens the EQ", EqMath.isNeutral(AudioEngine.effectiveEq.value) || AudioEngine.effectiveEq.value.bands.all { !it.type.usesGain || it.gainDb == 0f })
         shot("12_eq_after_reset")
 
-        // Load Custom 1 again: Rock is back.
+        // Load the Rock profile again: Rock is back.
         rule.onNodeWithContentDescription("EQ profiles").performClick(); idle()
-        click("Custom 1")
+        loadProfile("Rock")
         assertTrue("profile loads", EqTone.sameShape(AudioEngine.effectiveEq.value, rock))
 
-        // Undo: the last change was loading Custom 1 (Rock), so one undo returns to the reset EQ.
+        // Undo: the last change was loading the Rock profile, so one undo returns to the reset EQ.
         rule.onNodeWithContentDescription("Undo the last EQ change").performClick(); idle()
         assertTrue("undo goes back one step", !EqTone.sameShape(AudioEngine.effectiveEq.value, rock))
 
@@ -174,11 +187,12 @@ class NewControlsUiTest {
         rule.onAllNodesWithText("Prism edges").fetchSemanticsNodes().let { assertTrue("Prism edges removed", it.isEmpty()) }
         shot("13_look_amoled_grayed")
 
-        // Look profiles, top right: Custom 1 is in use; Custom 2 starts as a copy of this look.
+        // Look profiles, top right: Custom 1 is in use; a new one starts as a copy of this look.
         click("Custom 1")
         screen("14_look_profiles_menu")
-        click("Custom 2"); idle(1500)
+        click("New look profile"); idle(1500)
         assertEquals(1, ThemeState.activeProfile.value)
+        assertEquals("Custom 2", ThemeState.profiles.value[1].name)
         assertTrue(ThemeState.config.value.pureBlack)
 
         // Make Custom 2 Aurora with cover colours off: the glow is in use and can be changed.
@@ -228,13 +242,26 @@ class NewControlsUiTest {
         click("Top & bottom, not mirrored")
         assertEquals(com.ltots.app.data.BehindLayout.BOTH, ThemeState.config.value.behindLayout)
 
+        // Smoothness lives with the other app settings on the Profile tab now.
+        tab("Profile")
         click("Light")
         assertEquals(com.ltots.app.data.EffectsMode.LIGHT, ThemeState.config.value.effects)
+        tab("Look")
         rule.onNode(moving).assertIsEnabled() // still moves on Light, at up to 30 fps (said under it)
         rule.onNodeWithText("The colours behind the glass drift around. Smoothness: Light moves them at up to 30 fps.").assertExists()
         shot("18_look_smoothness_light")
+        tab("Profile")
         click("Automatic")
         assertEquals(com.ltots.app.data.EffectsMode.AUTO, ThemeState.config.value.effects)
+        tab("Look")
+
+        // Freeze when music stops, and Gradient flow: two switches in the Visualizer card.
+        click("Freeze when music stops")
+        assertTrue(ThemeState.config.value.freezeVisualizer)
+        click("Around the cover")
+        click("Gradient flow")
+        assertTrue(ThemeState.config.value.gradientFlow)
+        shot("21_look_freeze_gradient_flow")
 
         // Reset, top right: asks first, then everything is back to the default look.
         ThemeState.update { it.copy(analyzerBands = 160, artworkBackground = true) }; idle()
@@ -308,18 +335,18 @@ class NewControlsUiTest {
         idle()
         tab("EQ")
         click("Genres"); click("Rock")
-        tab("Sound")
+        tab("Profile")
         click("Battery EQ (experimental)")
         idle(1000)
         assertTrue(AudioEngine.settings.value.batteryEq)
         assertTrue("the phone's EQ is doing the work: ${AudioEngine.phoneEq.status.value}", AudioEngine.batteryEqActive.value)
         rule.onNodeWithText("Play a song to see whether it works on this phone.").assertExists()
-        shot("16_sound_battery_eq")
+        shot("16_profile_battery_eq")
         tab("EQ")
         rule.onNodeWithText("Battery EQ is on", substring = true).assertExists()
         shot("17_eq_battery_curve")
         // Off again: LToTS's own EQ is back.
-        tab("Sound")
+        tab("Profile")
         click("Battery EQ (experimental)")
         idle(1000)
         assertTrue(!AudioEngine.batteryEqActive.value)

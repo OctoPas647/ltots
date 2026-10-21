@@ -34,6 +34,7 @@ import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -82,7 +83,6 @@ import com.ltots.app.ui.components.formatFreq
 import com.ltots.app.ui.components.rememberLiveVisual
 import com.ltots.app.ui.components.ProfileMenu
 import com.ltots.app.ui.components.ProfileRow
-import com.ltots.app.ui.components.customName
 import com.ltots.app.ui.glass.GlassCircleButton
 import com.ltots.app.ui.glass.GlassPanel
 import com.ltots.app.ui.glass.glassShape
@@ -222,6 +222,7 @@ fun EqScreen(player: PlayerUi) {
         if (selected != null) {
             BandEditor(
                 band = selected,
+                blended = remember(eq, selected.id) { com.ltots.app.audio.EqSmooth.isBlended(eq, selected.id) },
                 onChange = { nb -> editBand(selected.id) { nb } },
                 onDelete = { edit { s -> s.copy(bands = s.bands.filterNot { it.id == selected.id }) }; selectedId = null },
             )
@@ -401,7 +402,7 @@ private fun BandStrip(
 }
 
 @Composable
-private fun BandEditor(band: EqBand, onChange: (EqBand) -> Unit, onDelete: () -> Unit) {
+private fun BandEditor(band: EqBand, blended: Boolean, onChange: (EqBand) -> Unit, onDelete: () -> Unit) {
     val pal = LocalPalette.current
     GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.07f) {
         Column(Modifier.padding(16.dp)) {
@@ -439,6 +440,14 @@ private fun BandEditor(band: EqBand, onChange: (EqBand) -> Unit, onDelete: () ->
                 val q = EqLimits.MIN_Q * (EqLimits.MAX_Q / EqLimits.MIN_Q).pow(t)
                 onChange(band.copy(q = Math.round(q * 100f) / 100f))
             }, 0f..1f, "Q %.2f".format(Locale.ROOT, band.q) + if (band.type == FilterType.PEAK) "  ·  ${bandwidthOct(band.q)} oct" else "")
+            if (band.type == FilterType.PEAK) {
+                Text(
+                    if (blended) "Blends with its neighbours: the curve runs smoothly through each knob, with no dips in between. " +
+                        "A narrower width (higher Q) gives this band its own separate bump."
+                    else "On its own: a bell of this width. Widen it (lower Q) to blend it smoothly with the knobs next to it.",
+                    color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 4.dp),
+                )
+            }
 
             SwitchRow("Band on", band.enabled, { onChange(band.copy(enabled = it)) })
         }
@@ -507,7 +516,9 @@ private fun LevelCard(eq: EqState, onResetPreamp: () -> Unit, edit: ((EqState) -
 @Composable
 private fun PresetsCard(eq: EqState, onApply: (EqPreset) -> Unit) {
     val pal = LocalPalette.current
-    var userPresets by remember { mutableStateOf(Store.loadUserPresets()) }
+    // Your own presets belong to the user in use.
+    val user by com.ltots.app.data.Users.active.collectAsState()
+    var userPresets by remember(user) { mutableStateOf(Store.loadUserPresets()) }
     var showSave by rememberSaveable { mutableStateOf(false) }
     var toDelete by remember { mutableStateOf<EqPreset?>(null) }
     val all = remember(userPresets) { Store.builtInPresets + userPresets }
@@ -602,56 +613,65 @@ private fun PresetsCard(eq: EqState, onApply: (EqPreset) -> Unit) {
 }
 
 /**
- * The EQ profiles button and its menu: Custom 1-5. Tap a saved one to load it into the EQ you're
- * editing (the default or this song's); tap an empty one, or a save icon, to keep the current EQ there.
+ * The EQ profiles button and its menu: up to 10 named EQs. Tap one to load it into the EQ you're
+ * editing (the default or this song's); the save icon keeps the current EQ in it, and the last
+ * row saves the current EQ as a new profile.
  */
 @Composable
 private fun EqProfiles(eq: EqState, onLoad: (EqState) -> Unit) {
     val pal = LocalPalette.current
-    var slots by remember { mutableStateOf(Store.loadEqProfiles().let { saved -> List(EQ_PROFILES) { saved.getOrNull(it) } }) }
+    val slots by com.ltots.app.data.EqProfiles.items.collectAsState()
     // The one profile picked last. Only it can be "In use", even when two profiles hold the
     // same EQ (both used to light up then).
-    var active by remember { mutableStateOf(Store.loadEqActiveProfile()) }
+    val active by com.ltots.app.data.EqProfiles.active.collectAsState()
     var open by remember { mutableStateOf(false) }
-    fun save(i: Int) {
-        slots = slots.toMutableList().also { it[i] = eq }
-        active = i
-        Store.saveEqProfiles(slots, active)
-    }
-    fun load(i: Int, slot: EqState) {
-        active = i
-        Store.saveEqProfiles(slots, active)
-        onLoad(slot)
-    }
+    var renaming by remember { mutableStateOf<Int?>(null) }
+    var deleting by remember { mutableStateOf<Int?>(null) }
     Box {
         GlassCircleButton({ open = true }, Modifier.size(40.dp)) {
             Icon(Icons.Rounded.Person, "EQ profiles", tint = pal.text, modifier = Modifier.size(22.dp))
         }
-        ProfileMenu(open, { open = false }, "EQ profiles", "Tap one to load it. Tap an empty one, or a save icon, to keep the EQ you have now.") {
-            slots.forEachIndexed { i, slot ->
+        ProfileMenu(
+            open, { open = false }, "EQ profiles",
+            if (slots.isEmpty()) "Save the EQ you have now as a profile, to load it again any time."
+            else "Tap one to load it. The save icon keeps the EQ you have now in it.",
+        ) {
+            slots.forEachIndexed { i, p ->
                 // In use: the one you picked, while the EQ is still what it holds.
-                val inUse = i == active && slot != null && EqTone.sameShape(slot, eq)
+                val inUse = i == active && EqTone.sameShape(p.eq, eq)
                 ProfileRow(
-                    name = customName(i),
-                    status = when {
-                        slot == null -> "Empty · tap to save the current EQ"
-                        inUse -> "In use"
-                        else -> "Saved · tap to load"
-                    },
+                    name = p.name,
+                    status = if (inUse) "In use" else "Saved · tap to load",
                     active = inUse,
-                    onClick = { if (slot == null) save(i) else { load(i, slot); open = false } },
+                    onClick = { com.ltots.app.data.EqProfiles.pick(i)?.let(onLoad); open = false },
                     trailing = {
-                        IconButton(onClick = { save(i) }) {
-                            Icon(Icons.Rounded.Save, "Save the current EQ to ${customName(i)}", tint = pal.textDim)
+                        com.ltots.app.ui.components.ProfileRowActions {
+                            com.ltots.app.ui.components.ProfileIconButton(Icons.Rounded.Save, "Save the current EQ to ${p.name}", {
+                                com.ltots.app.data.EqProfiles.overwrite(i, eq)
+                            })
+                            com.ltots.app.ui.components.ProfileIconButton(Icons.Rounded.Edit, "Rename ${p.name}", { renaming = i })
+                            com.ltots.app.ui.components.ProfileIconButton(Icons.Rounded.Delete, "Delete ${p.name}", { deleting = i })
                         }
                     },
                 )
             }
+            if (slots.size < com.ltots.app.data.EqProfiles.MAX) {
+                com.ltots.app.ui.components.ProfileAddRow("Save as new profile") { com.ltots.app.data.EqProfiles.addCurrent(eq) }
+            }
+        }
+    }
+    renaming?.let { i ->
+        com.ltots.app.ui.components.RenameDialog("Rename EQ profile", slots.getOrNull(i)?.name ?: "", onDismiss = { renaming = null }) {
+            com.ltots.app.data.EqProfiles.rename(i, it)
+        }
+    }
+    deleting?.let { i ->
+        val name = slots.getOrNull(i)?.name ?: ""
+        com.ltots.app.ui.components.DeleteDialog("Delete \"$name\"?", "This EQ profile is removed. The EQ you're using now stays as it is.", onDismiss = { deleting = null }) {
+            com.ltots.app.data.EqProfiles.delete(i)
         }
     }
 }
-
-private const val EQ_PROFILES = 5
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable

@@ -158,7 +158,7 @@ class BiquadCoefs(
 }
 
 object EqMath {
-    /** Total response of the whole EQ (bands only, no preamp) in dB at [freqHz]. */
+    /** Total response of [bands] in dB at [freqHz] (pass the filters from [EqSmooth.filters]). */
     fun responseDb(bands: List<BiquadCoefs>, freqHz: Double, fs: Double): Double {
         var sum = 0.0
         for (c in bands) if (c !== BiquadCoefs.IDENTITY) sum += c.magnitudeDb(freqHz, fs)
@@ -168,7 +168,7 @@ object EqMath {
     /** The largest boost anywhere in the audible range — used for automatic headroom. */
     fun peakBoostDb(state: EqState, fs: Double = 48000.0): Double {
         if (!state.enabled) return 0.0
-        val coefs = state.bands.map { BiquadCoefs.design(it, fs) }
+        val coefs = EqSmooth.filters(state).map { BiquadCoefs.design(it, fs) }
         var peak = 0.0
         val points = 256
         for (i in 0 until points) {

@@ -19,42 +19,107 @@ import java.security.MessageDigest
 /**
  * Small JSON-file store in the app's private storage. Reads are synchronous (tiny files);
  * writes are debounced on a background thread so dragging a slider doesn't hammer the disk.
+ *
+ * Everything that belongs to a person (looks, EQs, settings, each song's own EQ, pitch and speed)
+ * lives in that user's own folder, `users/<id>/`; things about the phone (Smoothness) and the
+ * list of users stay at the top.
  */
 object Store {
     private lateinit var root: File
+    /** The folder of the user in use. */
+    @Volatile private lateinit var userDir: File
     private val io = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val pending = mutableMapOf<String, Job>()
+
+    private class Pending(val file: File, val content: () -> String, val job: Job)
+    private val pending = mutableMapOf<String, Pending>()
     private val profileCache = HashMap<String, SongProfile?>()
+
+    /** Files that make up one user, besides the per-song profiles in `profiles/`. */
+    val userFiles = listOf("theme.json", "settings.json", "default_eq.json", "look_profiles.json", "eq_profiles.json", "presets.json")
 
     fun init(context: Context) {
         root = File(context.filesDir, "ltots").apply { mkdirs() }
-        File(root, "profiles").mkdirs()
+        val users = File(root, "users")
+        if (!File(root, "users.json").exists() && !users.exists()) migrateToFirstUser()
+        userDir = File(users, Users.loadActiveId(root)).apply { mkdirs() }
+        File(userDir, "profiles").mkdirs()
+    }
+
+    /** The app's own folder (where the user list and the users' folders are). */
+    val rootDir: File get() = root
+
+    /** The folder of user [id]. */
+    fun dirOf(id: String): File = File(File(root, "users"), id)
+
+    /**
+     * Before users existed everything lay at the top: it becomes the first user's, untouched.
+     */
+    private fun migrateToFirstUser() {
+        val dir = File(File(root, "users"), Users.FIRST_ID).apply { mkdirs() }
+        for (name in userFiles + "profiles") {
+            val f = File(root, name)
+            if (f.exists()) f.renameTo(File(dir, name))
+        }
+    }
+
+    /**
+     * Uses user [id]'s folder from now on. Changes still waiting to be saved go to the folder
+     * they were made in.
+     */
+    fun useUser(id: String) {
+        flush()
+        userDir = dirOf(id).apply { mkdirs() }
+        File(userDir, "profiles").mkdirs()
+        synchronized(profileCache) { profileCache.clear() }
+    }
+
+    /** Writes every change still waiting, right now. */
+    fun flush() {
+        val all = synchronized(pending) { pending.values.toList().also { pending.clear() } }
+        for (p in all) {
+            p.job.cancel()
+            runCatching { writeNow(p.file, p.content()) }
+        }
     }
 
     // ---- generic helpers -------------------------------------------------------------------
 
-    private fun read(name: String): JSONObject? = runCatching {
-        val f = File(root, name)
+    private fun read(name: String): JSONObject? = readFile(File(userDir, name))
+
+    private fun readFile(f: File): JSONObject? = runCatching {
         if (f.exists()) JSONObject(f.readText()) else null
     }.getOrNull()
 
-    private fun writeDebounced(name: String, content: () -> String) {
+    private fun writeNow(f: File, text: String) {
+        f.parentFile?.mkdirs()
+        val tmp = File(f.parentFile, f.name + ".tmp" + System.nanoTime())
+        tmp.writeText(text)
+        if (!tmp.renameTo(f)) { f.delete(); tmp.renameTo(f) }
+    }
+
+    private fun writeDebounced(name: String, content: () -> String) = writeDebounced(File(userDir, name), content)
+
+    private fun writeDebounced(f: File, content: () -> String) {
         synchronized(pending) {
-            pending[name]?.cancel()
-            pending[name] = io.launch {
+            pending[f.path]?.job?.cancel()
+            lateinit var job: Job
+            job = io.launch {
                 delay(350)
-                val f = File(root, name)
-                val tmp = File(f.parentFile, f.name + ".tmp")
-                tmp.writeText(content())
-                tmp.renameTo(f)
+                writeNow(f, content())
+                synchronized(pending) { if (pending[f.path]?.job === job) pending.remove(f.path) }
             }
+            pending[f.path] = Pending(f, content, job)
         }
     }
 
     private fun deleteFile(name: String) {
-        synchronized(pending) { pending.remove(name)?.cancel() }
-        io.launch { File(root, name).delete() }
+        val f = File(userDir, name)
+        synchronized(pending) { pending.remove(f.path)?.job?.cancel() }
+        io.launch { f.delete() }
     }
+
+    /** Writes [text] to [file] straight away (users' files, imports). */
+    fun writeFileNow(file: File, text: String) = writeNow(file, text)
 
     // ---- theme / settings / default EQ -----------------------------------------------------
 
@@ -72,30 +137,68 @@ object Store {
     fun loadDefaultEq(): EqState = read("default_eq.json")?.let { Json.eq(it) } ?: EqState()
     fun saveDefaultEq(e: EqState) = writeDebounced("default_eq.json") { Json.eq(e).toString() }
 
-    // ---- Custom 1-5: Look profiles and EQ profiles ------------------------------------------
+    // ---- named Look profiles and EQ profiles (up to 10 each) --------------------------------
 
-    /** The selected Look profile and the saved looks (null = never used); null before the first save. */
-    fun loadLookProfiles(): Pair<Int, List<ThemeConfig?>>? = read("look_profiles.json")?.let { o ->
-        val arr = o.optJSONArray("slots") ?: JSONArray()
-        o.optInt("active", 0) to List(arr.length()) { i -> arr.optJSONObject(i)?.let { Json.theme(it) } }
+    /**
+     * The selected Look profile and the saved looks with their names; null before the first save.
+     * Older saves (five fixed slots, some never used) keep the used ones, named Custom 1-5.
+     */
+    fun loadLookProfiles(): Pair<Int, List<Pair<String, ThemeConfig>>>? = read("look_profiles.json")?.let { o ->
+        val items = o.optJSONArray("items")
+        if (items != null) {
+            val list = (0 until items.length()).mapNotNull { i ->
+                val it = items.optJSONObject(i) ?: return@mapNotNull null
+                val look = it.optJSONObject("look") ?: return@mapNotNull null
+                it.optString("name", "").ifBlank { "Custom ${i + 1}" } to Json.theme(look)
+            }
+            o.optInt("active", 0) to list
+        } else {
+            val arr = o.optJSONArray("slots") ?: JSONArray()
+            val oldActive = o.optInt("active", 0)
+            var active = 0
+            val list = ArrayList<Pair<String, ThemeConfig>>()
+            for (i in 0 until arr.length()) {
+                val t = arr.optJSONObject(i)?.let { Json.theme(it) } ?: continue
+                if (i == oldActive) active = list.size
+                list.add("Custom ${i + 1}" to t)
+            }
+            active to list
+        }
     }
 
-    fun saveLookProfiles(active: Int, slots: List<ThemeConfig?>) = writeDebounced("look_profiles.json") {
-        val arr = JSONArray().apply { slots.forEach { t -> put(if (t != null) Json.theme(t) else JSONObject.NULL) } }
-        JSONObject().put("active", active).put("slots", arr).toString()
+    fun saveLookProfiles(active: Int, items: List<Pair<String, ThemeConfig>>) = writeDebounced("look_profiles.json") {
+        val arr = JSONArray().apply { items.forEach { (n, t) -> put(JSONObject().put("name", n).put("look", Json.theme(t))) } }
+        JSONObject().put("v", 2).put("active", active).put("items", arr).toString()
     }
 
-    /** Saved EQ profiles (null = empty slot). */
-    fun loadEqProfiles(): List<EqState?> = read("eq_profiles.json")?.optJSONArray("slots")?.let { arr ->
-        List(arr.length()) { i -> arr.optJSONObject(i)?.let { Json.eq(it) } }
-    } ?: emptyList()
+    /** Saved EQ profiles with their names, and the one picked last (null = none). */
+    fun loadEqProfiles(): Pair<Int?, List<Pair<String, EqState>>> = read("eq_profiles.json")?.let { o ->
+        val items = o.optJSONArray("items")
+        if (items != null) {
+            val list = (0 until items.length()).mapNotNull { i ->
+                val it = items.optJSONObject(i) ?: return@mapNotNull null
+                val eq = it.optJSONObject("eq") ?: return@mapNotNull null
+                it.optString("name", "").ifBlank { "Custom ${i + 1}" } to Json.eq(eq)
+            }
+            o.optInt("active", -1).takeIf { it in list.indices } to list
+        } else {
+            // Older saves: five fixed slots (null = empty).
+            val arr = o.optJSONArray("slots") ?: JSONArray()
+            val oldActive = o.optInt("active", -1)
+            var active: Int? = null
+            val list = ArrayList<Pair<String, EqState>>()
+            for (i in 0 until arr.length()) {
+                val e = arr.optJSONObject(i)?.let { Json.eq(it) } ?: continue
+                if (i == oldActive) active = list.size
+                list.add("Custom ${i + 1}" to e)
+            }
+            active to list
+        }
+    } ?: (null to emptyList())
 
-    /** The EQ profile picked last (null = none), so only that one can show as in use. */
-    fun loadEqActiveProfile(): Int? = read("eq_profiles.json")?.optInt("active", -1)?.takeIf { it >= 0 }
-
-    fun saveEqProfiles(slots: List<EqState?>, active: Int? = null) = writeDebounced("eq_profiles.json") {
-        val arr = JSONArray().apply { slots.forEach { e -> put(if (e != null) Json.eq(e) else JSONObject.NULL) } }
-        JSONObject().put("slots", arr).put("active", active ?: -1).toString()
+    fun saveEqProfiles(items: List<Pair<String, EqState>>, active: Int?) = writeDebounced("eq_profiles.json") {
+        val arr = JSONArray().apply { items.forEach { (n, e) -> put(JSONObject().put("name", n).put("eq", Json.eq(e))) } }
+        JSONObject().put("v", 2).put("items", arr).put("active", active ?: -1).toString()
     }
 
     // ---- smoothness (per phone) --------------------------------------------------------------
@@ -104,11 +207,11 @@ object Store {
      * What Smoothness > Automatic settled on for this phone. Tied to the phone model, so a backup
      * restored onto another phone measures again instead of inheriting the old phone's result.
      */
-    fun loadSmoothness(): String? = read("smoothness.json")?.let { o ->
+    fun loadSmoothness(): String? = readFile(File(root, "smoothness.json"))?.let { o ->
         if (o.optString("device") == android.os.Build.MODEL) o.optString("auto", "FULL") else null
     }
 
-    fun saveSmoothness(auto: String) = writeDebounced("smoothness.json") {
+    fun saveSmoothness(auto: String) = writeDebounced(File(root, "smoothness.json")) {
         JSONObject().put("auto", auto).put("device", android.os.Build.MODEL).toString()
     }
 
@@ -138,7 +241,7 @@ object Store {
     // ---- presets ---------------------------------------------------------------------------
 
     fun loadUserPresets(): List<EqPreset> = runCatching {
-        val f = File(root, "presets.json")
+        val f = File(userDir, "presets.json")
         if (!f.exists()) return emptyList()
         val arr = JSONArray(f.readText())
         List(arr.length()) { i ->

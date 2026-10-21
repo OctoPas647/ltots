@@ -73,8 +73,11 @@ internal fun IconSettings(cfg: ThemeConfig, artwork: Bitmap?, set: ((ThemeConfig
             if (name == null) { problem = "Couldn't read that picture. Try a PNG or JPG."; return@launch }
             problem = null
             set { it.copy(iconFile = name, iconMode = true) }
-            // Pictures no look uses any more are removed.
-            val inUse = (ThemeState.profiles.value.mapNotNull { it?.iconFile } + listOfNotNull(ThemeState.config.value.iconFile)).toSet()
+            // Pictures no look of any user uses any more are removed.
+            val inUse = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                com.ltots.app.data.Users.iconsInUse() +
+                    ThemeState.profiles.value.mapNotNull { it.look.iconFile } + listOfNotNull(ThemeState.config.value.iconFile)
+            }
             IconFiles.cleanUp(context, inUse)
         }
     }

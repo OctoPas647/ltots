@@ -73,18 +73,21 @@ fun EqGraph(
     val curAdd by rememberUpdatedState(onAdd)
     var dragging by remember { mutableLongStateOf(-1L) }
 
-    // Total response, sampled across the graph (recomputed only when the EQ changes).
-    val curve = remember(eq) {
-        val coefs = eq.bands.map { BiquadCoefs.design(it, FS) }
-        FloatArray(240) { i ->
-            val f = 20.0 * 1000.0.pow(i / 239.0)
-            EqMath.responseDb(coefs, f, FS).toFloat()
-        }
-    }
+    // Total response, sampled across the graph (recomputed only when the EQ changes). Drawn from
+    // the filters that actually play: neighbouring knobs blend into one smooth line through them.
+    val curve = remember(eq) { responseCurve(eq) }
     val selectedCurve = remember(eq, selectedId) {
         val band = eq.bands.firstOrNull { it.id == selectedId } ?: return@remember null
-        val c = BiquadCoefs.design(band.copy(enabled = true), FS)
-        FloatArray(240) { i -> c.magnitudeDb(20.0 * 1000.0.pow(i / 239.0), FS).toFloat() }
+        if (!band.enabled) {
+            val c = BiquadCoefs.design(band.copy(enabled = true), FS)
+            return@remember FloatArray(240) { i -> c.magnitudeDb(20.0 * 1000.0.pow(i / 239.0), FS).toFloat() }
+        }
+        // What this knob adds: the curve with it, minus the curve with it at 0 dB (or off).
+        val without = eq.copy(bands = eq.bands.map {
+            if (it.id != band.id) it else if (it.type.usesGain) it.copy(gainDb = 0f) else it.copy(enabled = false)
+        })
+        val rest = responseCurve(without)
+        FloatArray(240) { i -> curve[i] - rest[i] }
     }
 
     val padPx = with(androidx.compose.ui.platform.LocalDensity.current) { 16.dp.toPx() }
@@ -191,6 +194,15 @@ fun EqGraph(
                 drawText(layout, topLeft = Offset(tx, ty))
             }
         }
+    }
+}
+
+/** The EQ's response (bands only) at 240 points from 20 Hz to 20 kHz, as it is heard. */
+private fun responseCurve(eq: EqState): FloatArray {
+    val coefs = com.ltots.app.audio.EqSmooth.filters(eq).map { BiquadCoefs.design(it, FS) }
+    return FloatArray(240) { i ->
+        val f = 20.0 * 1000.0.pow(i / 239.0)
+        EqMath.responseDb(coefs, f, FS).toFloat()
     }
 }
 

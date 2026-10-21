@@ -52,6 +52,18 @@ class LiveVisual(val analyzer: Analyzer) {
     internal var ring: CoverRing? = null
     /** True while the EQ leaves the sound unchanged: the "before" equals the "after". */
     var preMirrorsPost = false
+
+    /** Something is on screen right now (bars that haven't fallen to rest, or a frozen picture). */
+    val showsSomething: Boolean get() = !frame.isAtRest()
+}
+
+/**
+ * The last picture the visualizer showed while music played. With Look > Freeze when music stops
+ * on, a visualizer that opens while the music is stopped (another tab, the app coming back) starts
+ * from it, so the frozen picture stays put instead of vanishing.
+ */
+internal object FrozenFrame {
+    @Volatile var last: SpectrumFrame? = null
 }
 
 /**
@@ -72,7 +84,13 @@ fun rememberLiveVisual(wave: Boolean = true): LiveVisual {
     val cfg = LocalThemeConfig.current
     val saver by rememberBatterySaver()
     val fps = visualizerFps(cfg.visualizerFps, saver, com.ltots.app.ui.LocalEffects.current)
-    val lv = remember(cfg.analyzerBands) { LiveVisual(Analyzer(AudioEngine.tap, cfg.analyzerBands)) }
+    val freeze = cfg.freezeVisualizer
+    val lv = remember(cfg.analyzerBands) {
+        LiveVisual(Analyzer(AudioEngine.tap, cfg.analyzerBands)).also { v ->
+            val last = FrozenFrame.last
+            if (freeze && !AudioEngine.isPlaying.value && last != null) v.frame = v.analyzer.seed(last)
+        }
+    }
     lv.fps = fps
     val ghost = cfg.showPreEqGhost
     // Everything below runs only while the app is visible. Screen off (or app in the
@@ -85,14 +103,14 @@ fun rememberLiveVisual(wave: Boolean = true): LiveVisual {
     WhileOnScreen(wave, songUri) {
         if (wave && songUri != null) com.ltots.app.audio.WaveIndex.request(context, AudioEngine.upcomingUris())
     }
-    WhileOnScreen(lv, fps, ghost, wave) {
+    WhileOnScreen(lv, fps, ghost, wave, freeze) {
         if (fps <= 0) {
             lv.frame = SpectrumFrame(lv.analyzer.bands); lv.tick++
             return@WhileOnScreen
         }
         val release = AudioEngine.tap.watch()
         try {
-            runVisual(lv, fps, ghost, wave)
+            runVisual(lv, fps, ghost, wave, freeze)
         } finally {
             release()
         }
@@ -111,7 +129,7 @@ fun visualizerFps(chosen: Int, batterySaver: Boolean, effects: com.ltots.app.dat
 }
 
 @androidx.annotation.OptIn(UnstableApi::class)
-private suspend fun runVisual(lv: LiveVisual, fps: Int, ghost: Boolean, wave: Boolean): Nothing {
+private suspend fun runVisual(lv: LiveVisual, fps: Int, ghost: Boolean, wave: Boolean, freeze: Boolean): Nothing {
         val intervalNs = 1_000_000_000L / fps
         var last = 0L
         var lastEq: com.ltots.app.audio.EqState? = null
@@ -121,6 +139,13 @@ private suspend fun runVisual(lv: LiveVisual, fps: Int, ghost: Boolean, wave: Bo
             if (!wave) null else AudioEngine.songUri.value?.let { com.ltots.app.audio.WaveIndex.peek(it) }
         while (true) {
             val playing = AudioEngine.isPlaying.value
+            if (freeze && !playing) {
+                // Frozen (Look > Freeze when music stops): the picture stays exactly as it was and
+                // nothing is worked out or drawn until the music plays again.
+                AudioEngine.isPlaying.first { it }
+                last = 0L
+                continue
+            }
             val live = playing && !AudioEngine.direct.value
             // The pre-made wave also moves while the audio chip plays the song directly.
             val waveMoving = playing && indexed() != null
@@ -157,11 +182,12 @@ private suspend fun runVisual(lv: LiveVisual, fps: Int, ghost: Boolean, wave: Bo
                 for (i in f.waveMax.size - 8 until f.waveMax.size) peak = maxOf(peak, -f.waveMin[i], f.waveMax[i])
                 f.peak = peak
             }
+            if (playing) FrozenFrame.last = lv.frame
             lv.tick++
         }
 }
 
-private fun SpectrumFrame.isAtRest(): Boolean {
+internal fun SpectrumFrame.isAtRest(): Boolean {
     for (v in post) if (v > 0.004f) return false
     for (v in pre) if (v > 0.004f) return false
     return true

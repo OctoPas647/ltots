@@ -16,6 +16,7 @@ class LToTSApp : Application(), androidx.work.Configuration.Provider {
         Store.init(this)
         val pkg = packageManager.getPackageInfo(packageName, 0)
         ThemeState.init(freshInstall = pkg.firstInstallTime == pkg.lastUpdateTime)
+        com.ltots.app.data.EqProfiles.load()
         com.ltots.app.audio.WaveIndex.init(this)
         com.ltots.app.lyrics.Lyrics.init(this)
         AudioEngine.init(this)

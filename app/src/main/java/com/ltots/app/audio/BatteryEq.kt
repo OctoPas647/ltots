@@ -78,7 +78,7 @@ object BatteryEqFit {
 
     /** The curve to aim for, in dB on [grid]: the EQ's shape plus its preamp / automatic headroom. */
     private fun target(state: EqState): DoubleArray {
-        val coefs = state.bands.map { BiquadCoefs.design(it, FS) }
+        val coefs = EqSmooth.filters(state).map { BiquadCoefs.design(it, FS) }
         val gain = EqMath.inputGainDb(state, FS)
         return DoubleArray(grid.size) { k -> EqMath.responseDb(coefs, grid[k], FS) + gain }
     }

@@ -103,7 +103,8 @@ class EqProcessor(
     private fun buildPlan(state: EqState, previous: Plan?): Plan {
         val fs = sampleRate.toDouble()
         val old = previous?.sections?.associateBy { it.id }
-        val active = if (state.enabled) state.bands.filter { it.enabled } else emptyList()
+        // The filters that play the smooth curve (see EqSmooth): overlapping knobs blend.
+        val active = if (state.enabled) EqSmooth.filters(state) else emptyList()
         val sections = active.mapNotNull { band ->
             val coefs = BiquadCoefs.design(band, fs)
             if (coefs === BiquadCoefs.IDENTITY) return@mapNotNull null

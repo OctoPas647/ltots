@@ -33,7 +33,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.GraphicEq
-import androidx.compose.material.icons.rounded.Headphones
+import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Palette
@@ -78,6 +78,7 @@ import com.ltots.app.ui.screens.EqScreen
 import com.ltots.app.ui.screens.LibraryScreen
 import com.ltots.app.ui.screens.LookScreen
 import com.ltots.app.ui.screens.NowPlayingScreen
+import com.ltots.app.ui.screens.ProfileScreen
 import com.ltots.app.ui.screens.SoundScreen
 import com.ltots.app.ui.theme.LocalPalette
 
@@ -87,7 +88,7 @@ enum class Tab(val label: String, val icon: ImageVector) {
     EQ("EQ", Icons.Rounded.GraphicEq),
     DOWNLOADS("Get", Icons.Rounded.Download),
     LOOK("Look", Icons.Rounded.Palette),
-    SOUND("Sound", Icons.Rounded.Headphones),
+    PROFILE("Profile", Icons.Rounded.Person),
 }
 
 /**
@@ -105,6 +106,9 @@ fun AppRoot() {
     val controller by PlayerConnection.controller.collectAsState()
     val player = rememberPlayerUi(controller)
     var tab by rememberSaveable { mutableStateOf(Tab.LIBRARY) }
+    // The Sound page (output and signal path) opens from the output chip on the Playing tab, over
+    // the tabs; any tab in the bar closes it.
+    var soundOpen by rememberSaveable { mutableStateOf(false) }
     val artwork = rememberArtwork(player.trackId, player.artworkData)
     val backdrop = rememberLayerBackdrop()
     // The page itself (background + the open tab): the floating bars at the bottom bend and blur
@@ -121,16 +125,19 @@ fun AppRoot() {
     // Shared links open the Downloads tab; notifications can ask for a tab too.
     val shared by Inbox.sharedText.collectAsState()
     val wantTab by Inbox.openTab.collectAsState()
-    LaunchedEffect(shared) { if (shared != null) tab = Tab.DOWNLOADS }
+    LaunchedEffect(shared) { if (shared != null) { tab = Tab.DOWNLOADS; soundOpen = false } }
     LaunchedEffect(wantTab) {
-        wantTab?.let { name -> Tab.entries.firstOrNull { it.name == name }?.let { tab = it } }
+        wantTab?.let { name ->
+            if (name == "SOUND") soundOpen = true
+            else Tab.entries.firstOrNull { it.name == name }?.let { tab = it; soundOpen = false }
+        }
         Inbox.openTab.value = null
     }
 
     Box(Modifier.fillMaxSize()) {
 
         // nav bar 68 + its padding 10+10, mini player 64 + gap 10, system bar, and 32 extra.
-        val miniShown = player.hasMedia && tab != Tab.PLAYER
+        val miniShown = player.hasMedia && (tab != Tab.PLAYER || soundOpen)
         val sysBar = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
         val chrome = sysBar + 88.dp + (if (miniShown) 74.dp else 0.dp) + 32.dp
 
@@ -139,14 +146,15 @@ fun AppRoot() {
             // The glass panels on the pages refract this layer.
             AppBackground(artwork, Modifier.fillMaxSize().layerBackdrop(backdrop))
             Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars.union(WindowInsets.displayCutout.only(WindowInsetsSides.Top)))) {
-                Crossfade(tab, label = "tab") { t ->
+                Crossfade(if (soundOpen) null else tab, label = "tab") { t ->
                     when (t) {
+                        null -> SoundScreen(onBack = { soundOpen = false })
                         Tab.LIBRARY -> LibraryScreen(player, onOpenPlayer = { tab = Tab.PLAYER })
-                        Tab.PLAYER -> NowPlayingScreen(player, artwork, onOpenEq = { tab = Tab.EQ }, onOpenSound = { tab = Tab.SOUND })
+                        Tab.PLAYER -> NowPlayingScreen(player, artwork, onOpenEq = { tab = Tab.EQ }, onOpenSound = { soundOpen = true })
                         Tab.EQ -> EqScreen(player)
                         Tab.DOWNLOADS -> DownloadsScreen(player, onOpenPlayer = { tab = Tab.PLAYER })
                         Tab.LOOK -> LookScreen(artwork)
-                        Tab.SOUND -> SoundScreen()
+                        Tab.PROFILE -> ProfileScreen()
                     }
                 }
             }
@@ -162,13 +170,13 @@ fun AppRoot() {
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 AnimatedVisibility(
-                    visible = player.hasMedia && tab != Tab.PLAYER,
+                    visible = miniShown,
                     enter = fadeIn() + slideInVertically { it / 2 },
                     exit = fadeOut() + slideOutVertically { it / 2 },
                 ) {
-                    MiniPlayer(player, artwork) { tab = Tab.PLAYER }
+                    MiniPlayer(player, artwork) { tab = Tab.PLAYER; soundOpen = false }
                 }
-                NavBar(tab) { tab = it }
+                NavBar(tab) { tab = it; soundOpen = false }
             }
           }
         }

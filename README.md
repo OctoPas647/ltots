@@ -17,12 +17,18 @@ newer APK updates the app and keeps your settings.
 - **Easy-first EQ** – 33 presets in four groups (Basics, Genres, Voice & places, Precise) with a
   one-line description of each, the active preset highlighted, **Quick tone** sliders (Bass / Mids /
   Treble) that work on top of any shape, Undo and Flatten; save your own presets ("Mine").
-  Top right: **EQ profiles** (Custom 1–5), **Undo** (the last change) and **Reset** (every gain back
+  Top right: **EQ profiles** (up to 10, named; save, load, rename, delete), **Undo** (the last change) and **Reset** (every gain back
   to 0 dB). **Reset to 10 bands** in Fine-tune brings back the standard 31 Hz–16 kHz layout,
   keeping your curve's shape; the **Preamp** has its own reset button (back to 0 dB, one undo step).
   Everything below stays one tap away under **Fine-tune**.
 - **Parametric EQ** – any number of bands (1–64); every band has an exact frequency, gain, width (Q)
   and type (peak, low/high shelf, low/high cut). Drag the dots on the curve or type exact values.
+- **Smooth curve** – knobs whose bells overlap (the 10 graphic bands, or any knobs close together)
+  blend into one smooth line that goes exactly through every knob and glides to the next: no dip
+  between two raised knobs, no peak above them. The sound follows that line too (the filters are
+  fitted to it, within a few tenths of a dB), and the graph, headroom and Battery EQ use the same
+  filters, so what you see is what you hear. A narrow knob (high Q) or one far from the others
+  keeps its own bell.
 - **Visualizer around the cover** – on the Playing tab the live spectrum rings a slightly smaller
   cover, in the Bars, Curve or Mirror style: **One loop** (bass at the top, once round clockwise to
   the treble), **Mirrored** (both sides alike, bass at the bottom) or **Mirrored, flipped** (bass at
@@ -30,6 +36,13 @@ newer APK updates the app and keeps your settings.
   down), **From above, flipped** (bass on the right), or both at once: **Top & bottom, mirrored**
   (the top is a mirror image of the bottom) or **Top & bottom, not mirrored** (the top is the bottom
   turned round, bass on the right). Look > Visualizer > "On the Playing tab".
+- **Freeze when music stops** (Look > Visualizer) – when a song is paused or ends, the visualizer
+  stays exactly as it was instead of falling away, also after switching tabs; nothing runs while
+  it's frozen.
+- **Gradient flow** (Look > Visualizer) – like a TV's backlight: the screen round the cover glows in
+  the colours of the cover's edges (each spot along an edge takes the average of the cover's
+  outermost 10 pixels there). On AMOLED it melts into your own colour further out; on the other
+  themes it fades into the background.
 - **Icon mode** – pick a black-and-white picture (PNG works best; JPG and others too) and it takes
   the cover's place. The picture itself is never drawn: the live spectrum grows out of the outline
   of its dark parts, so the shape shows only through the bars. It follows every visualizer setting
@@ -55,25 +68,26 @@ newer APK updates the app and keeps your settings.
   is highlighted and followed, tap any line to jump there. Saved once, then they work offline.
 - **Library preparation** – waveforms for the whole library are made while the phone charges,
   lyrics are fetched whenever you're online; the playing song is always done on the spot. Status
-  and "Prepare now" in Sound.
+  and "Prepare now" on the Sound page.
 - **Per-song EQ** – give any song its own EQ; it loads automatically whenever that song plays.
 - **Pitch & speed** – independent (or linked "tape" mode), remembered per song, powered by the
   Rubber Band R3 engine (studio-grade). Pitch changes are heard live while dragging; speed is
   applied on release. At original pitch and speed the engine is bypassed bit-exactly. Optional
-  battery-saving engine (Rubber Band R2) in Sound.
+  battery-saving engine (Rubber Band R2) in Profile > App settings.
 - **Clean signal path** – 64-bit EQ processing, automatic headroom so boosts never clip, a soft
   limiter just below 0 dBFS, 32-bit float output.
 - **Output awareness** – shows where audio is going, warns when earbuds fall back to LE Audio (LC3)
-  instead of LDAC, and offers **bit-perfect USB output** (Android 14+) for USB DACs.
+  instead of LDAC, and offers **bit-perfect USB output** (Android 14+) for USB DACs. Tap the output
+  chip at the top of the Playing tab for the **Sound** page (output device and signal path).
 - **Liquid glass UI** – real refraction and blur; the bars at the bottom bend and blur the page as
   it scrolls under them (every theme, AMOLED included). Accent, background glow, blur, refraction,
   tint, rim light, corner roundness, background motion, album-art glow and the visualizer are all
   adjustable, and every change shows at once. Colours are set with independent Hue, Saturation
   and Brightness strips: each one changes only itself, at any brightness.
-- **Smooth** – runs at the screen's highest refresh rate (120 Hz; "Highest refresh rate" in Look,
+- **Smooth** – runs at the screen's highest refresh rate (120 Hz; "Highest refresh rate" in Profile,
   the way Metrolist does it), nothing caps the frame rate, the moving background animates every
   frame, and release builds are optimised with R8 (Compose needs it to run smoothly).
-- **Smoothness** (Look > Screen) – the same glass costs some phones far more than others. On
+- **Smoothness** (Profile > App settings) – the same glass costs some phones far more than others. On
   **Automatic** the app watches how long its frames take; if it keeps stuttering it steps down by
   itself and remembers that for the phone:
   - **Full** – real blur everywhere, the bars at the bottom bend the page scrolling under them;
@@ -82,15 +96,25 @@ newer APK updates the app and keeps your settings.
   - **Light** – plain frosted panels (no blur or bending), animations and visualizer at up to
     30 fps.
   You can also pick a level yourself, or "Measure again from Full".
-- **Look profiles** – Custom 1–5 in the top right of the Look tab, each keeping every Look setting
-  (visualizer refresh rate, Smoothness and icon mode included) and showing which theme it uses;
-  the one in use saves each change. The visualizer's **Detail** is the same in every profile, so
-  switching never changes it. An empty profile starts as the default look (AMOLED, hue 180°,
-  saturation and brightness 100%). Picking a theme changes only its colours, glass and background —
+- **Look profiles** – up to 10, named, in the top right of the Look tab (rename, delete, and a "+"
+  until there are 10), each keeping every Look setting (visualizer refresh rate and icon mode
+  included) and showing which theme it uses; the one in use saves each change. The visualizer's
+  **Detail** and the screen settings are the same in every profile, so switching never changes
+  them. A new profile starts as a copy of the one in use. Picking a theme changes only its colours, glass and background —
   your visualizer, corners, refresh rate, bar settings and Album art glow stay (the glow is off
   until you turn it on) — and your own AMOLED colour comes back when you return to AMOLED or
   AMOLED Cover from another theme. **Reset** (top right, or at the bottom of the page) puts
-  everything on the Look tab back to the default, for the profile in use or all five.
+  everything on the Look tab back to the default, for the profile in use or all of them.
+- **Profile tab** – the last tab:
+  - **Users** – up to 3 people on one phone, each with their own looks, EQs, settings and every
+    song's own EQ, pitch and speed. Tap someone to switch; add, rename, delete, export and import.
+  - **Look profiles** and **EQ profiles** – every profile with what it holds (theme, colours, glass,
+    visualizer…; the EQ's curve, bands and level), to use, rename, export, delete, add or import.
+  - **App settings** – the screen (highest refresh rate, Smoothness, hiding the system bars) and
+    quality & battery (power-saving playback, Battery EQ, bit-perfect USB, pitch options).
+  - **Export / import** – a look profile, an EQ profile or a whole user is a small file to keep,
+    send or import on another phone (a look with an icon picture carries the picture). Any Import
+    button takes any of them.
 - **AMOLED themes** – **AMOLED** (default on new installs): pure black with a cyan accent (hue 180°);
   **AMOLED Cover**: the same pure black, with buttons, sliders and everything you can touch coloured
   from the current song's cover.
@@ -112,14 +136,14 @@ newer APK updates the app and keeps your settings.
     what went wrong.
 - Local library with songs, albums, artists and search.
 - **Battery-friendly**
-  - **Power-saving playback** (on by default, in Sound): when the EQ is off or flat and pitch and
+  - **Power-saving playback** (on by default, in Profile > App settings): when the EQ is off or flat and pitch and
     speed are original, the phone's audio chip decodes and plays the file by itself (audio
     offload) and the main processor sleeps between big chunks of audio. Changing the EQ or pitch
-    switches back to LToTS' own sound path instantly. Sound shows whether it's active (the chip
+    switches back to LToTS' own sound path instantly. It shows whether it's active (the chip
     has to support the file's format).
-  - **Battery EQ** (experimental, in Sound): the EQ is played by the phone's own built-in EQ,
+  - **Battery EQ** (experimental, in Profile > App settings): the EQ is played by the phone's own built-in EQ,
     fitted to its few fixed bands, so on phones whose EQ can run on the audio chip the chip keeps
-    playing by itself even with an EQ on. The EQ tab draws the simplified curve dashed; Sound says
+    playing by itself even with an EQ on. The EQ tab draws the simplified curve dashed; the switch says
     live whether it's working on your phone.
   - the player only wakes when the audio output actually needs more sound, instead of every
     10 ms;
@@ -148,7 +172,7 @@ newer APK updates the app and keeps your settings.
   playback quality to **Best quality (990 kbps)**. If LToTS shows **LC3**, the earbuds are using LE
   Audio — turn LE Audio off for them to get LDAC.
 - **HD 599 (wired):** plug in through a USB-C DAC/dongle and turn on **Bit-perfect USB output** in
-  the Sound tab.
+  Profile > App settings.
 
 ## Build setup (for the GitHub Actions release)
 
@@ -184,7 +208,10 @@ GPL-compatible terms.
   outlines and normals, bar reach in narrow gaps and curls, and the spectrum's order along the
   outline — on drawn fixtures and on a reference snake picture that lives only in the tests
   (`app/src/test/resources/icons/`), not in the app;
-- the Smoothness stutter detector (when it steps down, and when it must not).
+- the Smoothness stutter detector (when it steps down, and when it must not);
+- the smooth EQ curve (through every knob, no dips or overshoot, lone bells untouched, speed);
+- look and EQ profiles (names, 10 at most, rename/delete, older saves) and users (each with their
+  own everything, switching, deleting, export and import).
 
 With `-Dltots.live=true` two extra tests talk to the real YouTube Music / YouTube (search and the
 complete download pipeline with the bundled yt-dlp).
@@ -194,12 +221,14 @@ complete download pipeline with the bundled yt-dlp).
 ```
 app/src/main/java/com/ltots/app/
   audio/     EQ maths, the real-time EQ processor, analyzer/FFT, output & bit-perfect handling
-  data/      local library, per-song profiles, presets, theme & settings storage, picked icons
+  data/      local library, per-song profiles, presets, theme & settings storage (per user), users,
+             EQ profiles, picked icons
+  profiles/  switching user, exporting and importing looks, EQs and users
   ytm/       YouTube Music client: search, albums, playlists, artists, song details, links
   download/  yt-dlp engine, download queue, tagging/cover, background service
   playback/  background playback service + connection
-  ui/        glass system, Smoothness (frame-time watcher), screens (Library, Playing, EQ, Look,
-             Sound), components
+  ui/        glass system, Smoothness (frame-time watcher), screens (Library, Playing, EQ, Get, Look,
+             Profile, Sound), components
   ui/components/
     LiveVisual.kt       the analyzer loop (frame rate, Battery Saver, Smoothness, screen-off)
     SpectrumOutline.kt  points + outward normals + reach that a spectrum grows from (shared)

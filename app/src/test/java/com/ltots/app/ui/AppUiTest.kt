@@ -155,15 +155,27 @@ class AppUiTest {
         idle(300)
         assertEquals(60, com.ltots.app.ui.theme.ThemeState.config.value.visualizerFps)
 
-        tab("Sound")
-        rule.onNodeWithText("Natural voices when shifting pitch").assertIsDisplayed()
-        shot("06_sound")
+        // The last tab is the Profile: users, look and EQ profiles, and the app's own settings.
+        tab("Profile")
+        rule.onNodeWithText("Add user").assertExists()
+        rule.onNodeWithText("Natural voices when shifting pitch").assertExists()
+        shot("06_profile")
         rule.onNodeWithText("Battery-saving pitch & speed").performSemanticsAction(SemanticsActions.OnClick)
         idle(400)
         assertTrue(AudioEngine.settings.value.efficientPitch)
         rule.onNodeWithText("Battery-saving pitch & speed").performSemanticsAction(SemanticsActions.OnClick)
         idle(300)
         assertTrue(!AudioEngine.settings.value.efficientPitch)
+
+        // Sound (output and signal path) opens from the output chip on the Playing tab, with a way back.
+        tab("Playing")
+        com.ltots.app.ui.Inbox.openTab.value = "SOUND"
+        idle(1200)
+        rule.onNodeWithText("Decoded").assertExists()
+        shot("07_sound_page")
+        rule.onNodeWithContentDescription("Back").performClick()
+        idle(1200)
+        rule.onNodeWithText("Nothing playing yet").assertIsDisplayed()
     }
 
     // Paused: hangs on CI (runs out of memory after ~35 min) since the waveform/Stem pitch changes.

@@ -183,6 +183,9 @@ fun IconSpectrum(
     var size by remember { mutableStateOf(IntSize.Zero) }
     val layout = rememberIconLayout(shape, size, visual.analyzer.bands)
     Box(modifier.onSizeChanged { size = it }) {
+        // Look > Freeze when music stops: the bars stay as they were, so the icon stays as it plays.
+        @Suppress("NAME_SHADOWING")
+        val playing = playing || (cfg.freezeVisualizer && visual.showsSomething)
         val idleCover = !playing && cfg.iconIdle == IconIdle.COVER
         // The whole cover behind the visualizer stays there, playing or not.
         if (cfg.iconCover == IconCover.FULL && artwork != null && !idleCover) FullSizeCover(artwork, cfg.iconCoverDim)

@@ -1,7 +1,23 @@
 package com.ltots.app.ui.components
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -30,9 +46,6 @@ import com.ltots.app.ui.glass.GlassPanel
 import com.ltots.app.ui.theme.LocalPalette
 import com.ltots.app.ui.theme.LocalThemeConfig
 
-/** Names of the five profile slots, on the Look tab and the EQ tab. */
-fun customName(i: Int) = "Custom ${i + 1}"
-
 /** The glass "Custom 1 ▾" button that opens a profile menu. */
 @Composable
 fun ProfilePill(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
@@ -51,7 +64,7 @@ fun ProfilePill(label: String, onClick: () -> Unit, modifier: Modifier = Modifie
     }
 }
 
-/** Pop-up list of the Custom 1-5 profiles, in the app's colours. Anchor it in a Box with its button. */
+/** Pop-up list of profiles, in the app's colours. Anchor it in a Box with its button. */
 @Composable
 fun ProfileMenu(
     expanded: Boolean,
@@ -80,6 +93,76 @@ fun ProfileMenu(
         }
         content()
     }
+}
+
+/** The "+" row at the bottom of a profile menu, shown until there are as many as allowed. */
+@Composable
+fun ProfileAddRow(label: String, onClick: () -> Unit) {
+    val pal = LocalPalette.current
+    DropdownMenuItem(
+        text = { Text(label, color = pal.accent, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium) },
+        onClick = onClick,
+        leadingIcon = { Icon(Icons.Rounded.Add, null, tint = pal.accent) },
+    )
+}
+
+/** Small icon buttons at the end of a profile row (rename, delete, save…). */
+@Composable
+fun ProfileRowActions(content: @Composable RowScope.() -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically, content = content)
+}
+
+@Composable
+fun ProfileIconButton(icon: ImageVector, description: String, onClick: () -> Unit, tint: Color? = null) {
+    val pal = LocalPalette.current
+    IconButton(onClick = onClick, modifier = Modifier.size(36.dp)) {
+        Icon(icon, description, tint = tint ?: pal.textDim, modifier = Modifier.size(20.dp))
+    }
+}
+
+/** Asks for a new name; [onDone] gets it (only when it isn't blank). */
+@Composable
+fun RenameDialog(title: String, current: String, onDismiss: () -> Unit, onDone: (String) -> Unit) {
+    val pal = LocalPalette.current
+    var name by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(current, androidx.compose.ui.text.TextRange(0, current.length))) }
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Box(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(pal.text.copy(alpha = 0.08f)).padding(12.dp)
+            ) {
+                androidx.compose.foundation.text.BasicTextField(
+                    name, { if (it.text.length <= 30) name = it }, singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(color = pal.text, fontSize = 16.sp),
+                    cursorBrush = SolidColor(pal.accent),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = {
+                        if (name.text.isNotBlank()) { onDone(name.text.trim()); onDismiss() }
+                    }),
+                    modifier = Modifier.fillMaxWidth().focusRequester(focus),
+                )
+            }
+            LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+        },
+        confirmButton = {
+            TextButton(onClick = { if (name.text.isNotBlank()) { onDone(name.text.trim()); onDismiss() } }, enabled = name.text.isNotBlank()) { Text("Rename") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/** "Delete X?" — [onConfirm] runs only if they confirm. */
+@Composable
+fun DeleteDialog(title: String, text: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = { Text(text) },
+        confirmButton = { TextButton(onClick = { onConfirm(); onDismiss() }) { Text("Delete") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 /** One profile slot in a [ProfileMenu]. */

@@ -213,6 +213,13 @@ data class ThemeConfig(
     val iconCoverDim: Float = 0.6f,
     val iconBars: IconBars = IconBars.OUT,
     val iconIdle: IconIdle = IconIdle.NOTHING,
+    /** Keep the visualizer frozen as it was when the music stops, instead of letting it fall away. */
+    val freezeVisualizer: Boolean = false,
+    /**
+     * Gradient flow (Playing tab): light around the cover in the colours of its edges, like a TV's
+     * backlight. On AMOLED it melts into your own colour; on the other themes it fades out.
+     */
+    val gradientFlow: Boolean = false,
 )
 
 data class AppSettings(
@@ -317,6 +324,7 @@ object Json {
         put("iconThr", t.iconThreshold.toDouble()); put("iconInv", t.iconInvert)
         put("iconHole", t.iconMinHole.toDouble()); put("iconFill", t.iconFill.name)
         put("iconCoverMode", t.iconCover.name); put("iconDim", t.iconCoverDim.toDouble()); put("iconBars", t.iconBars.name); put("iconIdle", t.iconIdle.name)
+        put("freeze", t.freezeVisualizer); put("gFlow", t.gradientFlow)
     }
 
     private fun hsvJson(h: Hsv) = JSONArray().put(h.h.toDouble()).put(h.s.toDouble()).put(h.v.toDouble())
@@ -373,6 +381,8 @@ object Json {
             iconCoverDim = o.optDouble("iconDim", d.iconCoverDim.toDouble()).toFloat().coerceIn(0f, 0.9f),
             iconBars = runCatching { IconBars.valueOf(o.optString("iconBars")) }.getOrDefault(d.iconBars),
             iconIdle = runCatching { IconIdle.valueOf(o.optString("iconIdle")) }.getOrDefault(d.iconIdle),
+            freezeVisualizer = o.optBoolean("freeze", d.freezeVisualizer),
+            gradientFlow = o.optBoolean("gFlow", d.gradientFlow),
         )
     }
 

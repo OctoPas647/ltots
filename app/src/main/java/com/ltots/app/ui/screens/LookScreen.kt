@@ -22,6 +22,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.mutableStateOf
@@ -30,7 +32,11 @@ import androidx.compose.ui.draw.alpha
 import com.ltots.app.ui.components.ProfileMenu
 import com.ltots.app.ui.components.ProfilePill
 import com.ltots.app.ui.components.ProfileRow
-import com.ltots.app.ui.components.customName
+import com.ltots.app.ui.components.ProfileAddRow
+import com.ltots.app.ui.components.ProfileIconButton
+import com.ltots.app.ui.components.ProfileRowActions
+import com.ltots.app.ui.components.RenameDialog
+import com.ltots.app.ui.components.DeleteDialog
 import com.ltots.app.ui.theme.DynamicColor
 import com.ltots.app.ui.theme.glowShades
 import androidx.compose.material3.MaterialTheme
@@ -144,8 +150,8 @@ fun LookScreen(artwork: android.graphics.Bitmap? = null) {
                 LabeledSlider("Refraction", cfg.refraction, { v -> set { it.copy(refraction = v) } }, 0f..1f, pct(cfg.refraction),
                     enabled = level != Effects.LIGHT)
                 Text(
-                    if (level == Effects.LIGHT) "Smoothness is on Light (under Screen): the glass is plain frosted, without blur or bending, so these two are off for now."
-                    else if (level == Effects.BALANCED) "Smoothness is on Balanced (under Screen): the glass bends without blurring, so Blur is off for now." +
+                    if (level == Effects.LIGHT) "Smoothness is on Light (Profile tab): the glass is plain frosted, without blur or bending, so these two are off for now."
+                    else if (level == Effects.BALANCED) "Smoothness is on Balanced (Profile tab): the glass bends without blurring, so Blur is off for now." +
                         (if (cfg.pureBlack) " On the AMOLED themes the bars sit on pure black too." else "")
                     else if (cfg.pureBlack) "Blur and Refraction show on the bars at the bottom, bending the page as it scrolls under them. The panels sit on pure black, which looks the same bent or not."
                     else "Blur and Refraction bend what's behind the glass: the animated colours under the panels, and the page scrolling under the bars at the bottom.",
@@ -197,27 +203,6 @@ fun LookScreen(artwork: android.graphics.Bitmap? = null) {
         Spacer(Modifier.height(12.dp))
         GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
             Column(Modifier.padding(16.dp)) {
-                SectionTitle("Screen")
-                SwitchRow(
-                    "Highest refresh rate", cfg.maxRefresh, { on -> set { it.copy(maxRefresh = on) } },
-                    sub = "Runs LToTS at your screen's top refresh rate (120 Hz) so scrolling and animations are as smooth as they can be. " +
-                        "Off lets the phone choose, which may be 60 Hz to save a little battery.",
-                )
-                SmoothnessSetting(cfg.effects) { m -> set { it.copy(effects = m) } }
-                SwitchRow(
-                    "Hide navigation bar", cfg.hideNavBar, { on -> set { it.copy(hideNavBar = on) } },
-                    sub = "Swipe up from the bottom edge to bring it back for a moment.",
-                )
-                SwitchRow(
-                    "Hide status bar", cfg.hideStatusBar, { on -> set { it.copy(hideStatusBar = on) } },
-                    sub = "Clock and battery at the top. Swipe down from the top edge to see them.",
-                )
-            }
-        }
-
-        Spacer(Modifier.height(12.dp))
-        GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
-            Column(Modifier.padding(16.dp)) {
                 SectionTitle("Visualizer")
                 Text("On the Playing tab", color = LocalPalette.current.textDim, style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.height(6.dp))
@@ -256,6 +241,16 @@ fun LookScreen(artwork: android.graphics.Bitmap? = null) {
                     modifier = Modifier.padding(top = 6.dp, bottom = 10.dp),
                 )
                 if (cfg.iconMode) IconSettings(cfg, artwork, ::set)
+                SwitchRow(
+                    "Gradient flow", cfg.gradientFlow, { on -> set { it.copy(gradientFlow = on) } },
+                    enabled = !cfg.iconMode,
+                    sub = when {
+                        cfg.iconMode -> "Works with the cover: pick Around the cover or Behind the cover above."
+                        cfg.pureBlack && !cfg.dynamicColors -> "Lights the screen round the cover in the colours of its edges, like a TV's backlight, and melts into your own colour further out."
+                        else -> "Lights the screen round the cover in the colours of its edges, like a TV's backlight, fading out into the background."
+                    },
+                )
+                Spacer(Modifier.height(6.dp))
                 Text("Style", color = LocalPalette.current.textDim, style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.height(6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -265,6 +260,11 @@ fun LookScreen(artwork: android.graphics.Bitmap? = null) {
                 LabeledSlider("Strength", cfg.spectrumOpacity, { v -> set { it.copy(spectrumOpacity = v) } }, 0.1f..1f, pct(cfg.spectrumOpacity))
                 SwitchRow("Show sound before EQ", cfg.showPreEqGhost, { on -> set { it.copy(showPreEqGhost = on) } },
                     sub = "A faint outline of the original sound, so you can see exactly what the EQ changes.")
+                SwitchRow(
+                    "Freeze when music stops", cfg.freezeVisualizer, { on -> set { it.copy(freezeVisualizer = on) } },
+                    sub = "When a song is paused or ends, the visualizer stays exactly as it was instead of falling away. " +
+                        "Nothing runs while it's frozen, so it costs no battery.",
+                )
                 Spacer(Modifier.height(8.dp))
                 Text("Refresh rate", color = LocalPalette.current.textDim, style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.height(6.dp))
@@ -304,7 +304,7 @@ private fun pct(v: Float) = "%.0f%%".format(Locale.ROOT, v * 100)
  * use the app and steps down by itself if frames keep running late.
  */
 @Composable
-private fun SmoothnessSetting(mode: com.ltots.app.data.EffectsMode, onPick: (com.ltots.app.data.EffectsMode) -> Unit) {
+internal fun SmoothnessSetting(mode: com.ltots.app.data.EffectsMode, onPick: (com.ltots.app.data.EffectsMode) -> Unit) {
     val pal = LocalPalette.current
     val auto by com.ltots.app.ui.Smoothness.auto.collectAsState()
     Spacer(Modifier.height(6.dp))
@@ -448,21 +448,23 @@ private fun ColourChip(name: String, color: Color, selected: Boolean, enabled: B
 @Composable
 private fun ResetLookDialog(onDismiss: () -> Unit) {
     val active by ThemeState.activeProfile.collectAsState()
+    val profiles by ThemeState.profiles.collectAsState()
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Reset the look?") },
         text = {
             Text(
                 "Everything on this page goes back to the default: the AMOLED theme, colours, glass, " +
-                    "background, screen, visualizer and icon settings. Can't be undone."
+                    "background, visualizer and icon settings. Can't be undone." +
+                    if (profiles.size > 1) " Reset all removes your other look profiles too." else ""
             )
         },
         confirmButton = {
-            androidx.compose.material3.TextButton(onClick = { ThemeState.reset(); onDismiss() }) { Text("Reset ${customName(active)}") }
+            androidx.compose.material3.TextButton(onClick = { ThemeState.reset(); onDismiss() }) { Text("Reset ${profiles.getOrNull(active)?.name ?: "this look"}") }
         },
         dismissButton = {
             Row {
-                androidx.compose.material3.TextButton(onClick = { ThemeState.resetAll(); onDismiss() }) { Text("Reset all 5") }
+                if (profiles.size > 1) androidx.compose.material3.TextButton(onClick = { ThemeState.resetAll(); onDismiss() }) { Text("Reset all") }
                 androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Cancel") }
             }
         },
@@ -470,8 +472,8 @@ private fun ResetLookDialog(onDismiss: () -> Unit) {
 }
 
 /**
- * Look profiles, top right: Custom 1-5. Each keeps every setting on this page; the one in use
- * saves each change as you make it, and picking another switches the whole look.
+ * Look profiles, top right: up to 10 named looks. Each keeps every setting on this page; the one
+ * in use saves each change as you make it, and picking another switches the whole look.
  */
 @Composable
 private fun LookProfiles(cfg: ThemeConfig) {
@@ -479,31 +481,50 @@ private fun LookProfiles(cfg: ThemeConfig) {
     val active by ThemeState.activeProfile.collectAsState()
     val profiles by ThemeState.profiles.collectAsState()
     var open by remember { mutableStateOf(false) }
+    var renaming by remember { mutableStateOf<Int?>(null) }
+    var deleting by remember { mutableStateOf<Int?>(null) }
     Box {
-        ProfilePill(customName(active), { open = true })
-        ProfileMenu(open, { open = false }, "Look profiles", "Each keeps everything on this page except the visualizer's Detail, which stays the same in all. Changes save into the one in use.") {
-            profiles.forEachIndexed { i, look ->
+        ProfilePill(profiles.getOrNull(active)?.name ?: "Look", { open = true })
+        ProfileMenu(
+            open, { open = false }, "Look profiles",
+            "Each keeps everything on this page except the visualizer's Detail, which stays the same in all. Changes save into the one in use.",
+        ) {
+            profiles.forEachIndexed { i, p ->
                 val inUse = i == active
                 ProfileRow(
-                    name = customName(i),
-                    status = when {
-                        inUse -> "In use · " + ThemeState.themeName(cfg)
-                        look == null -> "Empty · starts as the default look"
-                        else -> ThemeState.themeName(look) + " · tap to switch"
-                    },
+                    name = p.name,
+                    status = if (inUse) "In use · " + ThemeState.themeName(cfg) else ThemeState.themeName(p.look) + " · tap to switch",
                     active = inUse,
                     onClick = { ThemeState.selectProfile(i); open = false },
-                    leading = { LookDot(if (inUse) cfg else look ?: ThemeState.defaultLook) },
-                    trailing = if (inUse) ({ Icon(Icons.Rounded.Check, null, tint = pal.accent) }) else null,
+                    leading = { LookDot(if (inUse) cfg else p.look) },
+                    trailing = {
+                        ProfileRowActions {
+                            ProfileIconButton(Icons.Rounded.Edit, "Rename ${p.name}", { renaming = i })
+                            if (profiles.size > 1) ProfileIconButton(Icons.Rounded.Delete, "Delete ${p.name}", { deleting = i })
+                            if (inUse) Icon(Icons.Rounded.Check, null, tint = pal.accent, modifier = Modifier.padding(start = 4.dp))
+                        }
+                    },
                 )
             }
+            if (profiles.size < ThemeState.MAX_PROFILES) {
+                ProfileAddRow("New look profile") { ThemeState.addProfile(); open = false }
+            }
+        }
+    }
+    renaming?.let { i ->
+        RenameDialog("Rename look profile", profiles.getOrNull(i)?.name ?: "", onDismiss = { renaming = null }) { ThemeState.renameProfile(i, it) }
+    }
+    deleting?.let { i ->
+        val name = profiles.getOrNull(i)?.name ?: ""
+        DeleteDialog("Delete \"$name\"?", "This look profile and its settings are removed. Can't be undone.", onDismiss = { deleting = null }) {
+            ThemeState.deleteProfile(i)
         }
     }
 }
 
 /** A small round preview of a look: its background glow (black on AMOLED) and its accent. */
 @Composable
-private fun LookDot(t: ThemeConfig) {
+internal fun LookDot(t: ThemeConfig) {
     val pal = LocalPalette.current
     val back = if (t.pureBlack) Color.Black else t.glow.toColor()
     Box(

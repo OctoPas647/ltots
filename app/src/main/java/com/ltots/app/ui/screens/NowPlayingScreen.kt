@@ -54,6 +54,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -222,6 +223,12 @@ private fun CoverWithSpectrum(visual: com.ltots.app.ui.components.LiveVisual, ar
     val coverFraction = if (wrap) COVER_WRAPPED else COVER_FULL
     val coverCorner = if (wrap) 24.dp else 28.dp
     Box(Modifier.fillMaxWidth().aspectRatio(1f), contentAlignment = Alignment.Center) {
+        // Gradient flow (Look tab): light round the cover in its edges' colours, like a TV's
+        // backlight. On AMOLED it melts into your own colour, elsewhere it fades out.
+        if (lookCfg.gradientFlow && artwork != null) {
+            val into = if (lookCfg.pureBlack && !lookCfg.dynamicColors) pal.accent.toArgb() else null
+            com.ltots.app.ui.components.GradientFlowLight(artwork, coverFraction, into, Modifier.matchParentSize())
+        }
         if (wrap) CoverSpectrum(visual, coverFraction, coverCorner, Modifier.fillMaxSize(), intensity = 0.9f)
         else LiveSpectrum(
             visual,

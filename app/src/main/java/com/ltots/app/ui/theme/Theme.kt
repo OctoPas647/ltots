@@ -40,6 +40,7 @@ object ThemeState {
     val defaultLook: ThemeConfig get() = amoled
 
     /**
+     * Loads the look of the user in use (at start, and after switching user).
      * @param freshInstall true on the very first run. New installs start on AMOLED; existing
      *   installs that never picked a theme keep the one they've been seeing.
      */
@@ -50,36 +51,110 @@ object ThemeState {
 
         // Look profiles. The first time, the look you already have becomes Custom 1.
         val stored = Store.loadLookProfiles()
-        val slots = MutableList(PROFILE_COUNT) { i -> stored?.second?.getOrNull(i) }
-        val active = (stored?.first ?: 0).coerceIn(0, PROFILE_COUNT - 1)
-        slots[active] = _config.value
-        _profiles.value = slots
+        val items = stored?.second.orEmpty().take(MAX_PROFILES).toMutableList()
+        if (items.isEmpty()) items.add(customName(0) to _config.value)
+        val active = (stored?.first ?: 0).coerceIn(0, items.size - 1)
+        items[active] = items[active].first to _config.value
+        _profiles.value = items.map { LookProfile(it.first, it.second) }
         _activeProfile.value = active
-        if (stored == null) Store.saveLookProfiles(active, slots)
+        if (stored == null || stored.second.size != items.size) save()
     }
 
-    // ---- Look profiles: Custom 1-5, each a complete look. The selected one saves every change. ----
+    /** Loads the look of a user who just became the one in use (a new user starts on the default look). */
+    fun reloadForUser() = init(freshInstall = true)
 
-    const val PROFILE_COUNT = 5
-    private val _profiles = MutableStateFlow<List<ThemeConfig?>>(List(PROFILE_COUNT) { null })
-    /** Saved looks; null = never used yet. */
-    val profiles: StateFlow<List<ThemeConfig?>> = _profiles
+    // ---- Look profiles: up to 10 named looks. The selected one saves every change. ----
+
+    const val MAX_PROFILES = 10
+    private val _profiles = MutableStateFlow(listOf(LookProfile(customName(0), ThemeConfig())))
+    /** The saved looks, each with its name. */
+    val profiles: StateFlow<List<LookProfile>> = _profiles
     private val _activeProfile = MutableStateFlow(0)
     val activeProfile: StateFlow<Int> = _activeProfile
 
+    private fun save() = Store.saveLookProfiles(_activeProfile.value, _profiles.value.map { it.name to it.look })
+
+    /** "Custom N" with the lowest number no profile is called yet. */
+    fun nextName(names: List<String> = _profiles.value.map { it.name }): String =
+        (1..MAX_PROFILES + 1).map { customName(it - 1) }.first { n -> names.none { it.equals(n, ignoreCase = true) } }
+
+    private fun freeName(wanted: String, except: Int = -1): String {
+        val taken = _profiles.value.filterIndexed { i, _ -> i != except }.map { it.name.lowercase() }.toSet()
+        val base = wanted.trim().take(30).ifBlank { nextName() }
+        if (base.lowercase() !in taken) return base
+        var n = 2
+        while ("$base ($n)".lowercase() in taken) n++
+        return "$base ($n)"
+    }
+
     /**
-     * Switch to profile [i]. One that was never used starts from the default look. The
-     * visualizer's Detail (how finely the sound is split) is the same in every profile: switching
-     * never changes it.
+     * Settings that stay the same whichever look profile is in use: the visualizer's Detail (how
+     * finely the sound is split) and the app-wide screen settings on the Profile tab.
      */
+    fun ThemeConfig.withSharedFrom(cur: ThemeConfig) = copy(
+        analyzerBands = cur.analyzerBands,
+        maxRefresh = cur.maxRefresh,
+        effects = cur.effects,
+        hideNavBar = cur.hideNavBar,
+        hideStatusBar = cur.hideStatusBar,
+    )
+
+    /** Switch to profile [i]. Detail and the screen settings never change by switching. */
     fun selectProfile(i: Int) {
-        if (i !in 0 until PROFILE_COUNT || i == _activeProfile.value) return
-        val look = (_profiles.value[i] ?: defaultLook).copy(analyzerBands = _config.value.analyzerBands)
-        _profiles.value = _profiles.value.toMutableList().also { it[i] = look }
+        if (i !in _profiles.value.indices || i == _activeProfile.value) return
+        val look = _profiles.value[i].look.withSharedFrom(_config.value)
+        _profiles.value = _profiles.value.toMutableList().also { it[i] = it[i].copy(look = look) }
         _activeProfile.value = i
         _config.value = look
         Store.saveTheme(look)
-        Store.saveLookProfiles(i, _profiles.value)
+        save()
+    }
+
+    /** A new profile (a copy of the look in use), switched to at once; null when there are 10. */
+    fun addProfile(): Int? {
+        if (_profiles.value.size >= MAX_PROFILES) return null
+        _profiles.value = _profiles.value + LookProfile(nextName(), _config.value)
+        val i = _profiles.value.size - 1
+        _activeProfile.value = i
+        save()
+        return i
+    }
+
+    /** Adds [look] (from an exported file) as a new profile; false when there are already 10. */
+    fun importProfile(name: String, look: ThemeConfig): Boolean {
+        if (_profiles.value.size >= MAX_PROFILES) return false
+        _profiles.value = _profiles.value + LookProfile(freeName(name), look.withSharedFrom(_config.value))
+        save()
+        return true
+    }
+
+    fun renameProfile(i: Int, name: String) {
+        if (i !in _profiles.value.indices) return
+        val n = freeName(name, except = i)
+        _profiles.value = _profiles.value.toMutableList().also { it[i] = it[i].copy(name = n) }
+        save()
+    }
+
+    /** Deletes profile [i] (never the last one). Deleting the one in use switches to its neighbour. */
+    fun deleteProfile(i: Int) {
+        val list = _profiles.value
+        if (i !in list.indices || list.size <= 1) return
+        val active = _activeProfile.value
+        val rest = list.toMutableList().also { it.removeAt(i) }
+        when {
+            i == active -> {
+                val next = (i - 1).coerceAtLeast(0)
+                val look = rest[next].look.withSharedFrom(_config.value)
+                rest[next] = rest[next].copy(look = look)
+                _profiles.value = rest
+                _activeProfile.value = next
+                _config.value = look
+                Store.saveTheme(look)
+            }
+            i < active -> { _profiles.value = rest; _activeProfile.value = active - 1 }
+            else -> _profiles.value = rest
+        }
+        save()
     }
 
     /**
@@ -151,6 +226,8 @@ object ThemeState {
         iconCoverDim = cur.iconCoverDim,
         iconBars = cur.iconBars,
         iconIdle = cur.iconIdle,
+        freezeVisualizer = cur.freezeVisualizer,
+        gradientFlow = cur.gradientFlow,
     )
 
     fun update(transform: (ThemeConfig) -> ThemeConfig) {
@@ -164,8 +241,8 @@ object ThemeState {
         Store.saveTheme(t)
         // Every change is kept in the selected profile too.
         val i = _activeProfile.value
-        _profiles.value = _profiles.value.toMutableList().also { it[i] = t }
-        Store.saveLookProfiles(i, _profiles.value)
+        _profiles.value = _profiles.value.toMutableList().also { it[i] = it[i].copy(look = t) }
+        save()
     }
 
     val presets: List<ThemePreset> = listOf(
@@ -182,23 +259,31 @@ object ThemeState {
         ThemePreset("Daylight", ThemeConfig(accent = 0xFF5B3DF5, glow = 0xFFD2C6FF, darkMode = false, glassTint = 0.35f)),
     )
 
-    /** Back to the default look (AMOLED, accent hue 180°, saturation and brightness 100%): everything on the Look tab. */
+    /**
+     * Back to the default look (AMOLED, accent hue 180°, saturation and brightness 100%):
+     * everything on the Look tab. The screen settings on the Profile tab stay as they are.
+     */
     fun reset() {
-        update { defaultLook }
-        com.ltots.app.ui.Smoothness.recheck()
+        update { cur -> defaultLook.copy(maxRefresh = cur.maxRefresh, effects = cur.effects, hideNavBar = cur.hideNavBar, hideStatusBar = cur.hideStatusBar) }
     }
 
-    /** Every Look profile back to the default: Custom 1 in use, the others empty. */
+    /** Every Look profile removed but one, Custom 1, back on the default look. */
     fun resetAll() {
-        val look = defaultLook
-        _profiles.value = List(PROFILE_COUNT) { i -> if (i == 0) look else null }
+        val cur = _config.value
+        val look = defaultLook.copy(maxRefresh = cur.maxRefresh, effects = cur.effects, hideNavBar = cur.hideNavBar, hideStatusBar = cur.hideStatusBar)
+        _profiles.value = listOf(LookProfile(customName(0), look))
         _activeProfile.value = 0
         _config.value = look
         Store.saveTheme(look)
-        Store.saveLookProfiles(0, _profiles.value)
-        com.ltots.app.ui.Smoothness.recheck()
+        save()
     }
 }
+
+/** One saved look and its name. */
+data class LookProfile(val name: String, val look: ThemeConfig)
+
+/** Names new profiles get: Custom 1, Custom 2, … */
+fun customName(i: Int) = "Custom ${i + 1}"
 
 /** A ready-made look. [dynamic] = cover colours on/off for this theme; null leaves them as they are. */
 data class ThemePreset(val name: String, val config: ThemeConfig, val dynamic: Boolean? = null)

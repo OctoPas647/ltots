@@ -236,6 +236,20 @@ class Analyzer(private val tap: AnalyzerTap, val bands: Int = 96) {
 
     private fun waveFrames(sr: Int) = (waveSeconds * sr).toInt()
 
+    /**
+     * Starts from [f], a frozen picture (Look > Freeze when music stops): it shows at once, and
+     * the bars move on from it when the music plays again instead of jumping up from nothing.
+     */
+    fun seed(f: SpectrumFrame): SpectrumFrame {
+        if (f.bands == bands) {
+            f.post.copyInto(frame.post); f.pre.copyInto(frame.pre)
+            f.post.copyInto(smoothPost); f.pre.copyInto(smoothPre)
+        }
+        f.waveMin.copyInto(frame.waveMin); f.waveMax.copyInto(frame.waveMax)
+        frame.peak = f.peak
+        return frame
+    }
+
     private fun plan(sr: Int) {
         planRate = sr
         val longHz = sr.toDouble() / long.size

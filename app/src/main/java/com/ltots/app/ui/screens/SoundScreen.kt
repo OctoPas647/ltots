@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -37,8 +38,12 @@ import com.ltots.app.ui.glass.GlassPanel
 import com.ltots.app.ui.theme.LocalPalette
 import java.util.Locale
 
+/**
+ * Sound: the output device and the signal path. Opened from the output chip on the Playing tab
+ * (the switches for quality and battery are on the Profile tab, with the other app settings).
+ */
 @Composable
-fun SoundScreen() {
+fun SoundScreen(onBack: () -> Unit) {
     val pal = LocalPalette.current
     val context = LocalContext.current
     val device by AudioEngine.output.device.collectAsState()
@@ -50,9 +55,18 @@ fun SoundScreen() {
     val phoneEq by AudioEngine.phoneEq.status.collectAsState()
     val bands = (phoneEq as? com.ltots.app.audio.PhoneEq.Status.Ready)?.layout?.bandCount ?: 0
 
+    androidx.activity.compose.BackHandler(onBack = onBack)
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp)) {
-        Text("Sound", style = MaterialTheme.typography.displaySmall, color = pal.text, modifier = Modifier.padding(top = 12.dp))
-        Text("Output, quality and the signal path.", color = pal.textDim, style = MaterialTheme.typography.bodySmall)
+        Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            com.ltots.app.ui.glass.GlassCircleButton(onBack, Modifier.size(40.dp)) {
+                Icon(androidx.compose.material.icons.Icons.AutoMirrored.Rounded.ArrowBack, "Back", tint = pal.text, modifier = Modifier.size(22.dp))
+            }
+            Spacer(Modifier.width(12.dp))
+            Column {
+                Text("Sound", style = MaterialTheme.typography.displaySmall, color = pal.text)
+                Text("Output and the signal path.", color = pal.textDim, style = MaterialTheme.typography.bodySmall)
+            }
+        }
         Spacer(Modifier.height(14.dp))
 
         // Output device
@@ -109,42 +123,10 @@ fun SoundScreen() {
         }
 
         Spacer(Modifier.height(12.dp))
-        GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.06f) {
-            Column(Modifier.padding(16.dp)) {
-                SectionTitle("Quality & battery")
-                SwitchRow(
-                    "Power-saving playback", settings.directPlayback,
-                    { on -> AudioEngine.updateSettings { it.copy(directPlayback = on) } },
-                    sub = "When the EQ is off or flat and pitch and speed are original, the phone's audio chip plays " +
-                        "the music by itself and the processor sleeps — the biggest battery saving there is. " +
-                        "Switches back instantly when you change the EQ or pitch. " +
-                        if (direct) "Active now." else "Not active right now (something needs processing, or the chip can't play this file's format).",
-                )
-                BatteryEqRow(settings, direct, batteryEq, phoneEq)
-                SwitchRow(
-                    "Bit-perfect USB output", settings.bitPerfectUsb, { on -> AudioEngine.updateSettings { it.copy(bitPerfectUsb = on) } },
-                    sub = if (Build.VERSION.SDK_INT >= 34) "For a USB DAC (e.g. HD 599 via a dongle): Android's mixer is bypassed. Use the DAC's or phone's volume as usual. Status: $bitPerfect"
-                    else "Needs Android 14 or newer.",
-                )
-                SwitchRow(
-                    "Remember pitch & speed per song", settings.perSongPitchSpeed,
-                    { on -> AudioEngine.updateSettings { it.copy(perSongPitchSpeed = on) } },
-                    sub = "Off: pitch and speed stay the same across songs.",
-                )
-                SwitchRow(
-                    "Natural voices when shifting pitch", settings.preserveFormants,
-                    { on -> AudioEngine.updateSettings { it.copy(preserveFormants = on) } },
-                    sub = "Keeps singers sounding like themselves instead of chipmunk/giant. Best for vocal tracks; off is a classic key change that suits full songs and instruments.",
-                )
-                SwitchRow(
-                    "Battery-saving pitch & speed", settings.efficientPitch,
-                    { on -> AudioEngine.updateSettings { it.copy(efficientPitch = on) } },
-                    sub = "Uses the lighter Rubber Band engine: about half the processing (and battery) while pitch or speed is changed, with slightly less polished sound. Nothing runs at original pitch and speed either way." +
-                        if (settings.efficientPitch && settings.preserveFormants) " Not used while Natural voices is on: only the full engine keeps voices natural." else "",
-                )
-            }
-        }
-
+        Text(
+            "Power-saving playback, Battery EQ, bit-perfect USB and the pitch options are on the Profile tab, under App settings.",
+            color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 4.dp),
+        )
         Spacer(Modifier.height(12.dp))
         LibraryPrepCard()
 
@@ -202,7 +184,7 @@ private fun LibraryPrepCard() {
 }
 
 @Composable
-private fun PathRow(label: String, value: String) {
+internal fun PathRow(label: String, value: String) {
     val pal = LocalPalette.current
     Row(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
         Text(label, color = pal.textDim, modifier = Modifier.weight(1f))
@@ -210,7 +192,7 @@ private fun PathRow(label: String, value: String) {
     }
 }
 
-private fun appVersion(context: android.content.Context): String =
+internal fun appVersion(context: android.content.Context): String =
     runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: ""
 
 /**
@@ -219,7 +201,7 @@ private fun appVersion(context: android.content.Context): String =
  * song plays, so the line under the switch says, live, whether it's working.
  */
 @Composable
-private fun BatteryEqRow(
+internal fun BatteryEqRow(
     settings: com.ltots.app.data.AppSettings,
     direct: Boolean,
     active: Boolean,

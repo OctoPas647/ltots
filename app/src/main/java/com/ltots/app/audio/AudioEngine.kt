@@ -120,6 +120,25 @@ object AudioEngine : SoundSource {
 
     private fun changed() { versionCounter.incrementAndGet() }
 
+    /**
+     * Another user became the one in use: their settings, default EQ and each song's own EQ,
+     * pitch and speed take over at once (the playing song too).
+     */
+    fun reloadForUser() {
+        if (!initialized) return
+        updateSettings { Store.loadSettings() }
+        defaultEq.value = Store.loadDefaultEq()
+        val item = _player.value?.currentMediaItem
+        if (item != null) onSongChanged(item) else _songProfile.value = _songKey.value?.let { Store.loadProfile(it) }
+        if (!settings.value.perSongPitchSpeed) {
+            loadGlobalPitchSpeed()
+            applySpeedToPlayer()
+        }
+        changed()
+        updateDirect()
+        syncPhoneEq()
+    }
+
     // ---- SoundSource (called on the audio thread) ------------------------------------------
 
     override val version: Int get() = versionCounter.get()
