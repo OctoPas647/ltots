@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.drawscope.inset
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
@@ -374,47 +375,48 @@ fun DrawScope.drawSpectrum(
 }
 
 /**
- * The shape the behind-the-cover spectrum fills, drawn to cut it out of the cover (Look > Cover
- * opacity with bars): same bars, curve or mirror as [drawSpectrum], placed as [drawFrom] places it,
- * in an area given explicitly (the spectrum's area seen from the cover).
+ * Cover opacity with bars: the cover changes opacity only where the behind-the-cover visualizer
+ * is actually drawn, and as strongly as it's drawn there: fully along the bars and the curve's
+ * line, fading away where the visualizer itself fades out (the curve's fill, the bars' lower
+ * ends). Everything else keeps the cover's own opacity. Placed exactly as [drawFrom] places the
+ * spectrum, in an area given explicitly (the spectrum's area seen from the cover).
  */
 object SpectrumMask {
     private val path = Path()
+    private val line = Path()
+    private val black = Color.Black
+    private val out = androidx.compose.ui.graphics.BlendMode.DstOut
+    private val over = androidx.compose.ui.graphics.BlendMode.SrcOver
 
     /**
-     * Gives what's already drawn the opacity [cover] everywhere, and [underBars] where the bars
-     * are: an opacity map (the whole area at [cover], the bars' shape at [underBars]) applied
-     * in one go. Needs to be drawn in a layer of its own (offscreen).
+     * Gives what's already drawn the opacity [cover] everywhere, and [underBars] where the
+     * visualizer is drawn behind it (in between where it's drawn faintly). Needs a layer of its
+     * own (offscreen).
      */
     fun DrawScope.drawOpacity(
         levels: FloatArray, style: SpectrumStyle, from: BehindLayout,
         left: Float, top: Float, w: Float, h: Float, cover: Float, underBars: Float,
     ) {
+        val c0 = cover.coerceIn(0f, 1f); val c1 = underBars.coerceIn(0f, 1f)
+        // Lower under the bars: cut part of the opacity away there. Higher: add some.
+        val lower = c1 < c0
+        val k = if (lower) (if (c0 > 0f) 1f - c1 / c0 else 0f) else (if (c0 < 1f) (c1 - c0) / (1f - c0) else 0f)
         drawIntoCanvas { c ->
             c.saveLayer(Rect(Offset.Zero, size), Paint().apply { blendMode = androidx.compose.ui.graphics.BlendMode.DstIn })
-            drawRect(Color.Black.copy(alpha = cover.coerceIn(0f, 1f)))
-            placed(levels, style, from, left, top, w, h, Color.Black.copy(alpha = underBars.coerceIn(0f, 1f)), androidx.compose.ui.graphics.BlendMode.Src)
+            drawRect(black.copy(alpha = c0))
+            if (k > 0f) placed(levels, style, from, left, top, w, h, k, if (lower) out else over)
             c.restore()
         }
     }
 
-    fun DrawScope.drawMask(
-        levels: FloatArray, style: SpectrumStyle, from: BehindLayout,
-        left: Float, top: Float, w: Float, h: Float, erase: Float,
-    ) {
-        if (erase <= 0f) return
-        placed(levels, style, from, left, top, w, h, Color.Black.copy(alpha = erase.coerceIn(0f, 1f)), androidx.compose.ui.graphics.BlendMode.DstOut)
-    }
-
-    /** The bars' shape, placed as the behind-the-cover spectrum places it, in [color] with [blend]. */
     private fun DrawScope.placed(
         levels: FloatArray, style: SpectrumStyle, from: BehindLayout,
-        left: Float, top: Float, w: Float, h: Float, color: Color, blend: androidx.compose.ui.graphics.BlendMode,
+        left: Float, top: Float, w: Float, h: Float, k: Float, blend: androidx.compose.ui.graphics.BlendMode,
     ) {
         if (levels.isEmpty() || h <= 0f) return
         fun part(t: Float, ph: Float, sx: Float, sy: Float) {
             translate(left, t) {
-                scale(sx, sy, pivot = Offset(w / 2, ph / 2)) { shape(levels, style, w, ph, color, blend) }
+                scale(sx, sy, pivot = Offset(w / 2, ph / 2)) { shape(levels, style, w, ph, k, blend) }
             }
         }
         when (from) {
@@ -428,26 +430,36 @@ object SpectrumMask {
         }
     }
 
-    private fun DrawScope.shape(levels: FloatArray, style: SpectrumStyle, w: Float, h: Float, color: Color, out: androidx.compose.ui.graphics.BlendMode) {
+    /** The visualizer as [drawSpectrum] draws it, with [k] standing for where it's fully drawn. */
+    private fun DrawScope.shape(levels: FloatArray, style: SpectrumStyle, w: Float, h: Float, k: Float, blend: androidx.compose.ui.graphics.BlendMode) {
         val n = levels.size
+        if (levels.all { it < 0.01f }) return
         when (style) {
             SpectrumStyle.CURVE -> {
                 if (n < 2) return
                 fun px(i: Int) = w * i / (n - 1f)
                 fun py(i: Int) = h - levels[i] * h * 0.92f
+                line.reset()
+                line.moveTo(px(0), py(0))
+                for (i in 1 until n) line.quadraticTo(px(i - 1), py(i - 1), (px(i - 1) + px(i)) / 2, (py(i - 1) + py(i)) / 2)
+                line.lineTo(px(n - 1), py(n - 1))
                 path.reset()
-                path.moveTo(px(0), py(0))
-                for (i in 1 until n) path.quadraticTo(px(i - 1), py(i - 1), (px(i - 1) + px(i)) / 2, (py(i - 1) + py(i)) / 2)
-                path.lineTo(px(n - 1), py(n - 1))
-                path.lineTo(w, h); path.lineTo(0f, h); path.close()
-                drawPath(path, color, blendMode = out)
+                path.addPath(line); path.lineTo(w, h); path.lineTo(0f, h); path.close()
+                // The fill fades from the top of the area to nothing at the bottom, like the curve's own.
+                drawPath(path, androidx.compose.ui.graphics.Brush.verticalGradient(listOf(black.copy(alpha = k * 0.75f), black.copy(alpha = 0f)), 0f, h), blendMode = blend)
+                // The line itself, fully (a little wider than drawn, so it reads through the cover).
+                drawPath(line, black.copy(alpha = k), style = Stroke(width = 4.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round), blendMode = blend)
             }
             SpectrumStyle.BARS -> {
                 val bw = w / n
                 for (i in 0 until n) {
                     val bh = levels[i] * h * 0.92f
                     if (bh < 0.5f) continue
-                    drawRoundRect(color, Offset(i * bw + bw * 0.15f, h - bh), Size(bw * 0.7f, bh), CornerRadius(bw * 0.35f), blendMode = out)
+                    // Each bar fully at its top, fading to a quarter at its foot, as drawn.
+                    drawRoundRect(
+                        androidx.compose.ui.graphics.Brush.verticalGradient(listOf(black.copy(alpha = k), black.copy(alpha = k * 0.25f)), h - bh, h),
+                        Offset(i * bw + bw * 0.15f, h - bh), Size(bw * 0.7f, bh), CornerRadius(bw * 0.35f), blendMode = blend,
+                    )
                 }
             }
             SpectrumStyle.MIRROR -> {
@@ -456,7 +468,7 @@ object SpectrumMask {
                 for (i in 0 until n) {
                     val bh = levels[i] * mid * 0.95f
                     if (bh < 0.5f) continue
-                    drawRoundRect(color, Offset(i * bw + bw * 0.15f, mid - bh), Size(bw * 0.7f, bh * 2), CornerRadius(bw * 0.35f), blendMode = out)
+                    drawRoundRect(black.copy(alpha = k), Offset(i * bw + bw * 0.15f, mid - bh), Size(bw * 0.7f, bh * 2), CornerRadius(bw * 0.35f), blendMode = blend)
                 }
             }
         }

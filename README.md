@@ -44,8 +44,10 @@ newer APK updates the app and keeps your settings.
   bass leaves it still. **Beat strength** sets how far it moves. It listens through the visualizer,
   so it rests while the audio chip plays the song by itself (Power-saving playback).
 - **Cover opacity with bars** (Look > Glass) – with the visualizer behind the cover, only the parts
-  of the cover the bars are behind take this opacity; the rest stays exactly at Cover opacity
-  (e.g. a solid cover the bars show through). Its reset makes it follow Cover opacity again.
+  of the cover in front of the bars (or the curve's line and its fading fill) take this opacity,
+  as strongly as the visualizer is drawn there; between the bars and everywhere else the cover
+  stays exactly at Cover opacity (e.g. a solid cover the bars show through). Its reset makes it
+  follow Cover opacity again.
 - **Gradient flow** (Look > Visualizer) – like a TV's backlight: the screen round the cover glows in
   the colours of the cover's edges (each spot along an edge takes the average of the cover's
   outermost 10 pixels there). On AMOLED it melts into your own colour further out; on the other

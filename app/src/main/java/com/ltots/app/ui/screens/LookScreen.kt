@@ -172,7 +172,7 @@ fun LookScreen(artwork: android.graphics.Bitmap? = null) {
                     onReset = { set { it.copy(coverBarsOpacity = null) } }, isDefault = cfg.coverBarsOpacity == null,
                 )
                 Text(
-                    if (behind) "Only the parts of the cover the bars are behind take this opacity; the rest of the cover stays at " +
+                    if (behind) "Only the parts of the cover in front of the bars take this opacity; between the bars and everywhere else the cover stays at " +
                         "Cover opacity. E.g. Cover opacity 100% and this 40%: a solid cover the bars show through. Reset makes it follow Cover opacity."
                     else "Works when the visualizer is behind the cover (Visualizer > Behind the cover).",
                     color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 4.dp),

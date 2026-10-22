@@ -30,43 +30,51 @@ import org.robolectric.annotation.GraphicsMode
 class SpectrumMaskTest {
     @get:Rule val rule = createComposeRule()
 
-    /** Red under bars and away from them, drawn with [cover] / [underBars]. */
-    private fun reds(cover: Float, underBars: Float): Pair<Int, Int> {
+    /**
+     * Red (0..255) at: the top of a loud bar, the gap between two bars, and where there are no bars,
+     * for a red cover drawn with [cover] / [underBars] over black.
+     */
+    private fun reds(cover: Float, underBars: Float): Triple<Int, Int, Int> {
         // Left half of the spectrum loud (reaching up into the cover), right half silent.
-        val levels = FloatArray(48) { if (it < 24) 0.9f else 0f }
+        val levels = FloatArray(12) { if (it < 6) 0.9f else 0f }
         rule.setContent {
-            Box(Modifier.size(200.dp).background(Color.Black)) {
+            Box(Modifier.size(240.dp).background(Color.Black)) {
                 Box(
-                    Modifier.size(200.dp)
+                    Modifier.size(240.dp)
                         .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
                         .background(Color.Red)
                         .drawWithContent {
                             drawContent()
                             with(SpectrumMask) {
-                                drawOpacity(levels, SpectrumStyle.CURVE, BehindLayout.BELOW, 0f, 0f, size.width, size.height, cover, underBars)
+                                drawOpacity(levels, SpectrumStyle.BARS, BehindLayout.BELOW, 0f, 0f, size.width, size.height, cover, underBars)
                             }
                         }
                 )
             }
         }
         val img = rule.onRoot().captureToImage().asAndroidBitmap()
-        val under = (img.getPixel(img.width / 5, img.height * 3 / 4) shr 16) and 0xFF
-        val away = (img.getPixel(img.width * 4 / 5, img.height * 3 / 4) shr 16) and 0xFF
-        println("cover $cover, under bars $underBars: red under bars $under, away $away")
-        return under to away
+        val bw = img.width / 12f
+        fun red(x: Float, y: Float) = (img.getPixel(x.toInt(), y.toInt()) shr 16) and 0xFF
+        val bar = red(bw * 2.5f, img.height * 0.2f)
+        val gap = red(bw * 3f, img.height * 0.2f)
+        val none = red(img.width * 0.8f, img.height * 0.2f)
+        println("cover $cover, under bars $underBars: bar $bar, gap $gap, no bars $none")
+        return Triple(bar, gap, none)
     }
 
-    /** A solid cover the bars show through: only the parts the bars are behind change. */
+    /** A solid cover the bars show through: only where the bars are drawn does it change. */
     @Test fun solidCoverSeeThroughBars() {
-        val (under, away) = reds(cover = 1f, underBars = 0.4f)
-        assertTrue("the cover stays at Cover opacity (100%): $away", away > 245)
-        assertTrue("40% where the bars are: $under", under in 85..120)
+        val (bar, gap, none) = reds(cover = 1f, underBars = 0.4f)
+        assertTrue("the cover stays solid away from the bars: $none", none > 245)
+        assertTrue("and between the bars: $gap", gap > 245)
+        assertTrue("about 40% on the bar: $bar", bar in 90..130)
     }
 
-    /** The other way round too: each part has exactly its own setting. */
+    /** The other way round too. */
     @Test fun seeThroughCoverSolidBars() {
-        val (under, away) = reds(cover = 0.4f, underBars = 1f)
-        assertTrue("the cover stays at Cover opacity (40%): $away", away in 85..120)
-        assertTrue("100% where the bars are: $under", under > 245)
+        val (bar, gap, none) = reds(cover = 0.4f, underBars = 1f)
+        assertTrue("the cover stays at 40% away from the bars: $none", none in 85..120)
+        assertTrue("and between the bars: $gap", gap in 85..120)
+        assertTrue("about solid on the bar: $bar", bar > 235)
     }
 }
