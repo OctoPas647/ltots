@@ -228,6 +228,9 @@ object ThemeState {
         iconIdle = cur.iconIdle,
         freezeVisualizer = cur.freezeVisualizer,
         gradientFlow = cur.gradientFlow,
+        coverBeat = cur.coverBeat,
+        beatStrength = cur.beatStrength,
+        coverBarsOpacity = cur.coverBarsOpacity,
     )
 
     fun update(transform: (ThemeConfig) -> ThemeConfig) {

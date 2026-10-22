@@ -38,4 +38,12 @@ class ThemeJsonTest {
         // The earlier on/off cover switch becomes "inside the icon".
         assertEquals(IconCover.INSIDE, Json.theme(JSONObject().put("iconCover", true)).iconCover)
     }
+
+    @Test fun beatAndCoverWithBarsSurviveSaveAndLoad() {
+        val t = ThemeConfig(coverBeat = true, beatStrength = 0.8f, coverBarsOpacity = 0.4f)
+        assertEquals(t, Json.theme(JSONObject(Json.theme(t).toString())))
+        val old = Json.theme(JSONObject().put("accent", 0xFF8B6CFF))
+        assertEquals(false, old.coverBeat)
+        assertEquals(1f, old.coverBarsOpacity, 0f)
+    }
 }

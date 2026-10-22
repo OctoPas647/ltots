@@ -263,6 +263,18 @@ class NewControlsUiTest {
         assertTrue(ThemeState.config.value.gradientFlow)
         shot("21_look_freeze_gradient_flow")
 
+        // Move with the beat, and its strength.
+        click("Move with the beat")
+        assertTrue(ThemeState.config.value.coverBeat)
+        rule.onNodeWithText("Beat strength").assertExists()
+        // Cover opacity with bars: only with the visualizer behind the cover.
+        val withBars = androidx.compose.ui.test.hasProgressBarRangeInfo(androidx.compose.ui.semantics.ProgressBarRangeInfo(ThemeState.config.value.coverBarsOpacity, 0.1f..1f))
+        rule.onAllNodes(withBars)[1].assertIsNotEnabled()
+        click("Behind the cover")
+        rule.onAllNodes(withBars)[1].assertIsEnabled()
+        ThemeState.update { it.copy(coverBarsOpacity = 0.4f) }; idle()
+        shot("22_look_beat_cover_bars")
+
         // Reset, top right: asks first, then everything is back to the default look.
         ThemeState.update { it.copy(analyzerBands = 160, artworkBackground = true) }; idle()
         rule.onNodeWithContentDescription("Reset the look to default").performClick(); idle()

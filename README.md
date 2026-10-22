@@ -39,6 +39,13 @@ newer APK updates the app and keeps your settings.
 - **Freeze when music stops** (Look > Visualizer) – when a song is paused or ends, the visualizer
   stays exactly as it was instead of falling away, also after switching tabs; nothing runs while
   it's frozen.
+- **Move with the beat** (Look > Visualizer) – the cover pumps on bass hits, hardest on drops and
+  big bass moments (bass that jumps far above what it was doing lately), like remix videos; steady
+  bass leaves it still. **Beat strength** sets how far it moves. It listens through the visualizer,
+  so it rests while the audio chip plays the song by itself (Power-saving playback).
+- **Cover opacity with bars** (Look > Glass) – with the visualizer behind the cover, the cover is
+  this solid only where the bars pass behind it: keep the cover at 100% and still see the bars
+  through it. Cover opacity still sets the rest of the cover.
 - **Gradient flow** (Look > Visualizer) – like a TV's backlight: the screen round the cover glows in
   the colours of the cover's edges (each spot along an edge takes the average of the cover's
   outermost 10 pixels there). On AMOLED it melts into your own colour further out; on the other

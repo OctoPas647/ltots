@@ -55,6 +55,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -222,31 +223,66 @@ private fun CoverWithSpectrum(visual: com.ltots.app.ui.components.LiveVisual, ar
     val wrap = lookCfg.spectrumAroundCover
     val coverFraction = if (wrap) COVER_WRAPPED else COVER_FULL
     val coverCorner = if (wrap) 24.dp else 28.dp
+    // Move with the beat (Look tab): the cover (with its ring, and its Gradient flow light) pumps
+    // on bass hits, hardest on drops. Read while drawing, so only these layers update.
+    val beatOn = lookCfg.coverBeat && visual.fps > 0
+    val beatAmount = 0.12f * lookCfg.beatStrength
+    val beatScale = if (!beatOn) Modifier else Modifier.graphicsLayer {
+        @Suppress("UNUSED_VARIABLE") val t = visual.tick
+        val s = 1f + beatAmount * visual.beat
+        scaleX = s; scaleY = s
+    }
+    // Cover opacity with bars (Look tab): where the bars behind the cover pass, it's this solid.
+    val barsShow = (lookCfg.coverBarsOpacity / coverAlpha).coerceAtMost(1f)
+    val maskBars = !wrap && visual.fps > 0 && barsShow < 0.995f
+    val padTop = if (lookCfg.behindLayout == com.ltots.app.data.BehindLayout.BELOW) 40.dp else 0.dp
+    val padBottom = if (lookCfg.behindLayout == com.ltots.app.data.BehindLayout.ABOVE ||
+        lookCfg.behindLayout == com.ltots.app.data.BehindLayout.ABOVE_FLIPPED) 40.dp else 0.dp
     Box(Modifier.fillMaxWidth().aspectRatio(1f), contentAlignment = Alignment.Center) {
         // Gradient flow (Look tab): light round the cover in its edges' colours, like a TV's
         // backlight. On AMOLED it melts into your own colour, elsewhere it fades out.
         if (lookCfg.gradientFlow && artwork != null) {
             val into = if (lookCfg.pureBlack && !lookCfg.dynamicColors) pal.accent.toArgb() else null
-            com.ltots.app.ui.components.GradientFlowLight(artwork, coverFraction, into, Modifier.matchParentSize())
+            com.ltots.app.ui.components.GradientFlowLight(artwork, coverFraction, into, Modifier.matchParentSize().then(beatScale))
         }
-        if (wrap) CoverSpectrum(visual, coverFraction, coverCorner, Modifier.fillMaxSize(), intensity = 0.9f)
+        if (wrap) CoverSpectrum(visual, coverFraction, coverCorner, Modifier.fillMaxSize().then(beatScale), intensity = 0.9f)
         else LiveSpectrum(
             visual,
             // A little space on the side the spectrum grows towards (below: at the top; above: at
             // the bottom). Top & bottom use the whole height, half each.
-            Modifier.fillMaxSize().padding(
-                top = if (lookCfg.behindLayout == com.ltots.app.data.BehindLayout.BELOW) 40.dp else 0.dp,
-                bottom = if (lookCfg.behindLayout == com.ltots.app.data.BehindLayout.ABOVE ||
-                    lookCfg.behindLayout == com.ltots.app.data.BehindLayout.ABOVE_FLIPPED) 40.dp else 0.dp,
-            ),
+            Modifier.fillMaxSize().padding(top = padTop, bottom = padBottom),
             showWave = false, intensity = 0.8f, from = lookCfg.behindLayout,
         )
+        val style = lookCfg.spectrumStyle
+        val from = lookCfg.behindLayout
         Box(
             Modifier.fillMaxWidth(coverFraction).aspectRatio(1f)
+                .then(beatScale)
                 // Cover opacity (Look tab): lower lets the live spectrum behind show through.
-                .graphicsLayer { alpha = coverAlpha }
+                .graphicsLayer {
+                    alpha = coverAlpha
+                    // Its own layer, so the bars can be cut out of the cover alone.
+                    if (maskBars) compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen
+                }
                 .shadow(28.dp, RoundedCornerShape(coverCorner), ambientColor = pal.accent, spotColor = pal.accent)
-                .clip(RoundedCornerShape(coverCorner)).background(pal.text.copy(alpha = 0.08f)),
+                .clip(RoundedCornerShape(coverCorner)).background(pal.text.copy(alpha = 0.08f))
+                .then(
+                    if (!maskBars) Modifier else Modifier.drawWithContent {
+                        drawContent()
+                        @Suppress("UNUSED_VARIABLE") val t = visual.tick // follow every frame
+                        // The spectrum's area, in the cover's own coordinates.
+                        val whole = size.width / coverFraction
+                        val edge = (whole - size.width) / 2
+                        val top = padTop.toPx(); val bottom = padBottom.toPx()
+                        with(com.ltots.app.ui.components.SpectrumMask) {
+                            drawMask(
+                                visual.frame.post, style, from,
+                                left = -edge, top = top - edge, w = whole, h = whole - top - bottom,
+                                erase = 1f - barsShow,
+                            )
+                        }
+                    }
+                ),
             contentAlignment = Alignment.Center,
         ) {
             if (artwork != null) {

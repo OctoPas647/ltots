@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.inset
 import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.media3.common.util.UnstableApi
 import com.ltots.app.audio.Analyzer
@@ -52,6 +53,19 @@ class LiveVisual(val analyzer: Analyzer) {
     internal var ring: CoverRing? = null
     /** True while the EQ leaves the sound unchanged: the "before" equals the "after". */
     var preMirrorsPost = false
+
+    /** Look > Move with the beat: 0..1, jumps on a bass hit (most on a drop), then falls away. */
+    var beat = 0f
+    internal val beats = com.ltots.app.audio.BeatDetector()
+    private var beatNanos = 0L
+
+    internal fun updateBeat(nowNanos: Long) {
+        val dt = if (beatNanos == 0L) 1f / 60f else ((nowNanos - beatNanos) / 1e9f).coerceIn(0.001f, 0.1f)
+        beatNanos = nowNanos
+        beat = beats.update(frame.post, dt)
+    }
+
+    internal fun stopBeat() { beats.reset(); beat = 0f; beatNanos = 0L }
 
     /** Something is on screen right now (bars that haven't fallen to rest, or a frozen picture). */
     val showsSomething: Boolean get() = !frame.isAtRest()
@@ -142,6 +156,7 @@ private suspend fun runVisual(lv: LiveVisual, fps: Int, ghost: Boolean, wave: Bo
             if (freeze && !playing) {
                 // Frozen (Look > Freeze when music stops): the picture stays exactly as it was and
                 // nothing is worked out or drawn until the music plays again.
+                lv.stopBeat(); lv.tick++
                 AudioEngine.isPlaying.first { it }
                 last = 0L
                 continue
@@ -151,6 +166,7 @@ private suspend fun runVisual(lv: LiveVisual, fps: Int, ghost: Boolean, wave: Bo
             val waveMoving = playing && indexed() != null
             if (!live && !waveMoving && lv.frame.isAtRest()) {
                 // Nothing moving: no frames at all until music plays again.
+                if (lv.beat != 0f) { lv.stopBeat(); lv.tick++ }
                 combine(AudioEngine.isPlaying, AudioEngine.direct, com.ltots.app.audio.WaveIndex.ready) { p, d, _ ->
                     p && (!d || indexed() != null)
                 }.first { it }
@@ -183,6 +199,7 @@ private suspend fun runVisual(lv: LiveVisual, fps: Int, ghost: Boolean, wave: Bo
                 f.peak = peak
             }
             if (playing) FrozenFrame.last = lv.frame
+            lv.updateBeat(last)
             lv.tick++
         }
 }
@@ -347,6 +364,72 @@ fun DrawScope.drawSpectrum(
                         size = Size(bw * 0.7f, bh * 2),
                         cornerRadius = CornerRadius(bw * 0.35f),
                     )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The shape the behind-the-cover spectrum fills, drawn to cut it out of the cover (Look > Cover
+ * opacity with bars): same bars, curve or mirror as [drawSpectrum], placed as [drawFrom] places it,
+ * in an area given explicitly (the spectrum's area seen from the cover).
+ */
+object SpectrumMask {
+    private val path = Path()
+
+    fun DrawScope.drawMask(
+        levels: FloatArray, style: SpectrumStyle, from: BehindLayout,
+        left: Float, top: Float, w: Float, h: Float, erase: Float,
+    ) {
+        if (levels.isEmpty() || erase <= 0f || h <= 0f) return
+        val color = Color.Black.copy(alpha = erase.coerceIn(0f, 1f))
+        fun part(t: Float, ph: Float, sx: Float, sy: Float) {
+            translate(left, t) {
+                scale(sx, sy, pivot = Offset(w / 2, ph / 2)) { shape(levels, style, w, ph, color) }
+            }
+        }
+        when (from) {
+            BehindLayout.BELOW -> part(top, h, 1f, 1f)
+            BehindLayout.ABOVE -> part(top, h, 1f, -1f)
+            BehindLayout.ABOVE_FLIPPED -> part(top, h, -1f, -1f)
+            BehindLayout.BOTH_MIRRORED, BehindLayout.BOTH -> {
+                part(top + h / 2, h / 2, 1f, 1f)
+                part(top, h / 2, if (from == BehindLayout.BOTH) -1f else 1f, -1f)
+            }
+        }
+    }
+
+    private fun DrawScope.shape(levels: FloatArray, style: SpectrumStyle, w: Float, h: Float, color: Color) {
+        val n = levels.size
+        val out = androidx.compose.ui.graphics.BlendMode.DstOut
+        when (style) {
+            SpectrumStyle.CURVE -> {
+                if (n < 2) return
+                fun px(i: Int) = w * i / (n - 1f)
+                fun py(i: Int) = h - levels[i] * h * 0.92f
+                path.reset()
+                path.moveTo(px(0), py(0))
+                for (i in 1 until n) path.quadraticTo(px(i - 1), py(i - 1), (px(i - 1) + px(i)) / 2, (py(i - 1) + py(i)) / 2)
+                path.lineTo(px(n - 1), py(n - 1))
+                path.lineTo(w, h); path.lineTo(0f, h); path.close()
+                drawPath(path, color, blendMode = out)
+            }
+            SpectrumStyle.BARS -> {
+                val bw = w / n
+                for (i in 0 until n) {
+                    val bh = levels[i] * h * 0.92f
+                    if (bh < 0.5f) continue
+                    drawRoundRect(color, Offset(i * bw + bw * 0.15f, h - bh), Size(bw * 0.7f, bh), CornerRadius(bw * 0.35f), blendMode = out)
+                }
+            }
+            SpectrumStyle.MIRROR -> {
+                val bw = w / n
+                val mid = h / 2
+                for (i in 0 until n) {
+                    val bh = levels[i] * mid * 0.95f
+                    if (bh < 0.5f) continue
+                    drawRoundRect(color, Offset(i * bw + bw * 0.15f, mid - bh), Size(bw * 0.7f, bh * 2), CornerRadius(bw * 0.35f), blendMode = out)
                 }
             }
         }

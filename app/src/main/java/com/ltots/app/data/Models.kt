@@ -220,6 +220,15 @@ data class ThemeConfig(
      * backlight. On AMOLED it melts into your own colour; on the other themes it fades out.
      */
     val gradientFlow: Boolean = false,
+    /** Playing tab: the cover moves with the beat, hardest on drops and big bass moments. */
+    val coverBeat: Boolean = false,
+    /** How much the cover moves with the beat, 0..1. */
+    val beatStrength: Float = 0.5f,
+    /**
+     * With the visualizer behind the cover: how solid the cover is where the bars pass behind it,
+     * 0.1..1 (1 = as solid as everywhere else). The rest of the cover keeps [coverOpacity].
+     */
+    val coverBarsOpacity: Float = 1f,
 )
 
 data class AppSettings(
@@ -325,6 +334,7 @@ object Json {
         put("iconHole", t.iconMinHole.toDouble()); put("iconFill", t.iconFill.name)
         put("iconCoverMode", t.iconCover.name); put("iconDim", t.iconCoverDim.toDouble()); put("iconBars", t.iconBars.name); put("iconIdle", t.iconIdle.name)
         put("freeze", t.freezeVisualizer); put("gFlow", t.gradientFlow)
+        put("beat", t.coverBeat); put("beatK", t.beatStrength.toDouble()); put("coverBars", t.coverBarsOpacity.toDouble())
     }
 
     private fun hsvJson(h: Hsv) = JSONArray().put(h.h.toDouble()).put(h.s.toDouble()).put(h.v.toDouble())
@@ -383,6 +393,9 @@ object Json {
             iconIdle = runCatching { IconIdle.valueOf(o.optString("iconIdle")) }.getOrDefault(d.iconIdle),
             freezeVisualizer = o.optBoolean("freeze", d.freezeVisualizer),
             gradientFlow = o.optBoolean("gFlow", d.gradientFlow),
+            coverBeat = o.optBoolean("beat", d.coverBeat),
+            beatStrength = o.optDouble("beatK", d.beatStrength.toDouble()).toFloat().coerceIn(0f, 1f),
+            coverBarsOpacity = o.optDouble("coverBars", d.coverBarsOpacity.toDouble()).toFloat().coerceIn(0.1f, 1f),
         )
     }
 

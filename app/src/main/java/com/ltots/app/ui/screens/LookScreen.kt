@@ -161,6 +161,19 @@ fun LookScreen(artwork: android.graphics.Bitmap? = null) {
                 LabeledSlider("Rim light", cfg.rimLight, { v -> set { it.copy(rimLight = v) } }, 0f..1f, pct(cfg.rimLight))
                 LabeledSlider("Corner roundness", cfg.cornerDp, { v -> set { it.copy(cornerDp = v) } }, 4f..44f, "%.0f dp".format(Locale.ROOT, cfg.cornerDp))
                 LabeledSlider("Cover opacity", cfg.coverOpacity, { v -> set { it.copy(coverOpacity = v) } }, 0.1f..1f, pct(cfg.coverOpacity))
+                // Only where the bars pass behind the cover: the cover can stay solid and still
+                // let the bars show through.
+                val behind = !cfg.iconMode && !cfg.spectrumAroundCover
+                LabeledSlider(
+                    "Cover opacity with bars", cfg.coverBarsOpacity, { v -> set { it.copy(coverBarsOpacity = v) } }, 0.1f..1f,
+                    pct(cfg.coverBarsOpacity), enabled = behind,
+                )
+                Text(
+                    if (behind) "Where the visualizer passes behind the cover, the cover is this solid, so the bars show through it " +
+                        "while the rest of the cover stays at Cover opacity. 100% = off."
+                    else "Works when the visualizer is behind the cover (Visualizer > Behind the cover).",
+                    color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 4.dp),
+                )
             }
         }
 
@@ -241,6 +254,19 @@ fun LookScreen(artwork: android.graphics.Bitmap? = null) {
                     modifier = Modifier.padding(top = 6.dp, bottom = 10.dp),
                 )
                 if (cfg.iconMode) IconSettings(cfg, artwork, ::set)
+                SwitchRow(
+                    "Move with the beat", cfg.coverBeat, { on -> set { it.copy(coverBeat = on) } },
+                    enabled = !cfg.iconMode,
+                    sub = when {
+                        cfg.iconMode -> "Works with the cover: pick Around the cover or Behind the cover above."
+                        cfg.visualizerFps == 0 -> "Needs the visualizer (Refresh rate below isn't Off): it listens through it."
+                        else -> "The cover pumps on bass hits, hardest on drops and big bass moments, like remix videos. " +
+                            "Steady bass leaves it still. While the phone's audio chip plays the song by itself (Power-saving playback) there's nothing to listen to, so it rests."
+                    },
+                )
+                if (cfg.coverBeat && !cfg.iconMode) {
+                    LabeledSlider("Beat strength", cfg.beatStrength, { v -> set { it.copy(beatStrength = v) } }, 0.1f..1f, pct(cfg.beatStrength))
+                }
                 SwitchRow(
                     "Gradient flow", cfg.gradientFlow, { on -> set { it.copy(gradientFlow = on) } },
                     enabled = !cfg.iconMode,
