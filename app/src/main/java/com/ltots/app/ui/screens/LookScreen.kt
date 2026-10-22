@@ -164,13 +164,16 @@ fun LookScreen(artwork: android.graphics.Bitmap? = null) {
                 // Only where the bars pass behind the cover: the cover can stay solid and still
                 // let the bars show through.
                 val behind = !cfg.iconMode && !cfg.spectrumAroundCover
+                val withBars = cfg.coverBarsOpacity ?: cfg.coverOpacity
                 LabeledSlider(
-                    "Cover opacity with bars", cfg.coverBarsOpacity, { v -> set { it.copy(coverBarsOpacity = v) } }, 0.1f..1f,
-                    pct(cfg.coverBarsOpacity), enabled = behind,
+                    "Cover opacity with bars", withBars, { v -> set { it.copy(coverBarsOpacity = v) } }, 0f..1f,
+                    pct(withBars) + if (cfg.coverBarsOpacity == null) " (same)" else "", enabled = behind,
+                    // Back to "the same as Cover opacity".
+                    onReset = { set { it.copy(coverBarsOpacity = null) } }, isDefault = cfg.coverBarsOpacity == null,
                 )
                 Text(
-                    if (behind) "Where the visualizer passes behind the cover, the cover is this solid, so the bars show through it " +
-                        "while the rest of the cover stays at Cover opacity. 100% = off."
+                    if (behind) "Only the parts of the cover the bars are behind take this opacity; the rest of the cover stays at " +
+                        "Cover opacity. E.g. Cover opacity 100% and this 40%: a solid cover the bars show through. Reset makes it follow Cover opacity."
                     else "Works when the visualizer is behind the cover (Visualizer > Behind the cover).",
                     color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 4.dp),
                 )

@@ -232,9 +232,10 @@ private fun CoverWithSpectrum(visual: com.ltots.app.ui.components.LiveVisual, ar
         val s = 1f + beatAmount * visual.beat
         scaleX = s; scaleY = s
     }
-    // Cover opacity with bars (Look tab): where the bars behind the cover pass, it's this solid.
-    val barsShow = (lookCfg.coverBarsOpacity / coverAlpha).coerceAtMost(1f)
-    val maskBars = !wrap && visual.fps > 0 && barsShow < 0.995f
+    // Cover opacity with bars (Look tab): where the bars behind the cover pass, the cover has
+    // exactly this opacity; everywhere else exactly Cover opacity.
+    val barsAlpha = lookCfg.coverBarsOpacity ?: coverAlpha
+    val maskBars = !wrap && visual.fps > 0 && kotlin.math.abs(barsAlpha - coverAlpha) > 0.004f
     val padTop = if (lookCfg.behindLayout == com.ltots.app.data.BehindLayout.BELOW) 40.dp else 0.dp
     val padBottom = if (lookCfg.behindLayout == com.ltots.app.data.BehindLayout.ABOVE ||
         lookCfg.behindLayout == com.ltots.app.data.BehindLayout.ABOVE_FLIPPED) 40.dp else 0.dp
@@ -260,11 +261,12 @@ private fun CoverWithSpectrum(visual: com.ltots.app.ui.components.LiveVisual, ar
                 .then(beatScale)
                 // Cover opacity (Look tab): lower lets the live spectrum behind show through.
                 .graphicsLayer {
-                    alpha = coverAlpha
-                    // Its own layer, so the bars can be cut out of the cover alone.
-                    if (maskBars) compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen
+                    if (maskBars) {
+                        // Its own layer, so the opacity can be set part by part (drawn below).
+                        compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen
+                    } else alpha = coverAlpha
                 }
-                .shadow(28.dp, RoundedCornerShape(coverCorner), ambientColor = pal.accent, spotColor = pal.accent)
+                .shadow(28.dp * (if (maskBars) coverAlpha else 1f), RoundedCornerShape(coverCorner), ambientColor = pal.accent, spotColor = pal.accent)
                 .clip(RoundedCornerShape(coverCorner)).background(pal.text.copy(alpha = 0.08f))
                 .then(
                     if (!maskBars) Modifier else Modifier.drawWithContent {
@@ -275,10 +277,10 @@ private fun CoverWithSpectrum(visual: com.ltots.app.ui.components.LiveVisual, ar
                         val edge = (whole - size.width) / 2
                         val top = padTop.toPx(); val bottom = padBottom.toPx()
                         with(com.ltots.app.ui.components.SpectrumMask) {
-                            drawMask(
+                            drawOpacity(
                                 visual.frame.post, style, from,
                                 left = -edge, top = top - edge, w = whole, h = whole - top - bottom,
-                                erase = 1f - barsShow,
+                                cover = coverAlpha, underBars = barsAlpha,
                             )
                         }
                     }

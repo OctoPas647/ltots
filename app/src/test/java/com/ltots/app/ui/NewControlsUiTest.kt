@@ -268,10 +268,11 @@ class NewControlsUiTest {
         assertTrue(ThemeState.config.value.coverBeat)
         rule.onNodeWithText("Beat strength").assertExists()
         // Cover opacity with bars: only with the visualizer behind the cover.
-        val withBars = androidx.compose.ui.test.hasProgressBarRangeInfo(androidx.compose.ui.semantics.ProgressBarRangeInfo(ThemeState.config.value.coverBarsOpacity, 0.1f..1f))
-        rule.onAllNodes(withBars)[1].assertIsNotEnabled()
+        ThemeState.update { it.copy(coverOpacity = 0.73f) }; idle() // a value no other slider has
+        val withBars = androidx.compose.ui.test.hasProgressBarRangeInfo(androidx.compose.ui.semantics.ProgressBarRangeInfo(ThemeState.config.value.coverOpacity, 0f..1f))
+        rule.onNode(withBars).assertIsNotEnabled()
         click("Behind the cover")
-        rule.onAllNodes(withBars)[1].assertIsEnabled()
+        rule.onNode(withBars).assertIsEnabled()
         ThemeState.update { it.copy(coverBarsOpacity = 0.4f) }; idle()
         shot("22_look_beat_cover_bars")
 

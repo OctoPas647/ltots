@@ -226,9 +226,10 @@ data class ThemeConfig(
     val beatStrength: Float = 0.5f,
     /**
      * With the visualizer behind the cover: how solid the cover is where the bars pass behind it,
-     * 0.1..1 (1 = as solid as everywhere else). The rest of the cover keeps [coverOpacity].
+     * 0..1, on its own. The rest of the cover keeps [coverOpacity]. Null = the same as
+     * [coverOpacity] (nothing different where the bars are).
      */
-    val coverBarsOpacity: Float = 1f,
+    val coverBarsOpacity: Float? = null,
 )
 
 data class AppSettings(
@@ -334,7 +335,7 @@ object Json {
         put("iconHole", t.iconMinHole.toDouble()); put("iconFill", t.iconFill.name)
         put("iconCoverMode", t.iconCover.name); put("iconDim", t.iconCoverDim.toDouble()); put("iconBars", t.iconBars.name); put("iconIdle", t.iconIdle.name)
         put("freeze", t.freezeVisualizer); put("gFlow", t.gradientFlow)
-        put("beat", t.coverBeat); put("beatK", t.beatStrength.toDouble()); put("coverBars", t.coverBarsOpacity.toDouble())
+        put("beat", t.coverBeat); put("beatK", t.beatStrength.toDouble()); t.coverBarsOpacity?.let { put("coverBars", it.toDouble()) }
     }
 
     private fun hsvJson(h: Hsv) = JSONArray().put(h.h.toDouble()).put(h.s.toDouble()).put(h.v.toDouble())
@@ -395,7 +396,8 @@ object Json {
             gradientFlow = o.optBoolean("gFlow", d.gradientFlow),
             coverBeat = o.optBoolean("beat", d.coverBeat),
             beatStrength = o.optDouble("beatK", d.beatStrength.toDouble()).toFloat().coerceIn(0f, 1f),
-            coverBarsOpacity = o.optDouble("coverBars", d.coverBarsOpacity.toDouble()).toFloat().coerceIn(0.1f, 1f),
+            // 100% in version 0.1.48 meant "off": the same as the rest of the cover.
+            coverBarsOpacity = if (o.has("coverBars")) o.optDouble("coverBars").toFloat().coerceIn(0f, 1f).takeIf { it < 0.999f } else null,
         )
     }
 
