@@ -140,6 +140,11 @@ newer APK updates the app and keeps your settings.
   - queue with several downloads at once, background downloading with a notification,
     retry/cancel, history, and playlists you can keep in sync;
   - files saved to `Music/LToTS/Artist/Album/`, visible to any app;
+  - **suggestions**: before you search, "Suggested for you" lists songs like your last few
+    downloads (or, before your first download, the newest songs on your phone), found with
+    YouTube Music's own radio for each and taking turns between them; "New picks" asks again.
+    After a search, "You might also like" under the first results lists songs like the song
+    found. Songs already on the phone, downloaded or queued are left out; tap one to download it;
   - built on yt-dlp (bundled, updatable in-app with "Update engine"); "Test engine" checks the
     whole download engine on the phone, and tapping a failed download shows (and copies) exactly
     what went wrong.

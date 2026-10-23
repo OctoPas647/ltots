@@ -114,6 +114,21 @@ object InnerTube {
     }
 
     /**
+     * Songs like [videoId]: its "radio", the endless queue YouTube Music plays after a song,
+     * without the song itself.
+     */
+    suspend fun radio(videoId: String): List<YtSong> = withContext(Dispatchers.IO) {
+        val body = JSONObject().put("videoId", videoId).put("playlistId", "RDAMVM$videoId").put("isAudioOnly", true)
+        Parser.parseQueue(post("next", body)).filter { it.videoId != videoId }
+    }
+
+    /** The song YouTube Music finds first for [query] (official audio over videos), or null. */
+    suspend fun findSong(query: String): YtSong? {
+        val songs = search(query).sections.flatMap { it.items }.filterIsInstance<YtSong>()
+        return songs.firstOrNull { !it.isVideo } ?: songs.firstOrNull()
+    }
+
+    /**
      * For a music video, finds the official audio release of the same song: YouTube Music's
      * own pairing first, then a "Songs" search matched on title, artist and length.
      * Returns null if there is no confident match (the video is then used as is).

@@ -82,6 +82,7 @@ import com.ltots.app.data.Track
 import com.ltots.app.download.DownloadManager
 import com.ltots.app.download.DownloadTask
 import com.ltots.app.download.Engine
+import com.ltots.app.download.Suggestions
 import com.ltots.app.download.SyncedPlaylist
 import com.ltots.app.download.TaskState
 import com.ltots.app.ui.bottomChrome
@@ -351,11 +352,25 @@ private fun SearchContent(r: SearchResult, params: String?, onChip: (com.ltots.a
             Message("Nothing found. Try other words, or paste a link.", null) {}
             return@Column
         }
+        // Songs like the one found (the first song in the results), shown after the first section.
+        val context = LocalContext.current
+        val seed = remember(r) { r.sections.flatMap { it.items }.filterIsInstance<YtSong>().let { l -> l.firstOrNull { !it.isVideo } ?: l.firstOrNull() } }
+        var alsoLike by remember(r) { mutableStateOf<List<YtSong>>(emptyList()) }
+        LaunchedEffect(seed) { if (seed != null) alsoLike = runCatching { Suggestions.forSong(context, seed) }.getOrDefault(emptyList()) }
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 12.dp)) {
             // Keys include the position: YouTube sometimes lists the same song twice.
             r.sections.forEachIndexed { si, s ->
                 s.title?.let { t -> item(key = "h$si") { SectionTitle(t, Modifier.padding(start = 12.dp, top = 8.dp)) } }
                 itemsIndexed(s.items, key = { idx, it -> "$si-$idx-" + keyOf(it) }) { _, it -> ItemRow(it, onClick = { onOpen(it) }) }
+                if (si == 0 && alsoLike.isNotEmpty() && seed != null) {
+                    item(key = "likeh") {
+                        Column(Modifier.padding(start = 12.dp, top = 8.dp)) {
+                            SectionTitle("You might also like")
+                            Text("Songs like “${seed.title}”", color = pal.textFaint, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                    itemsIndexed(alsoLike, key = { idx, it -> "like-$idx-" + it.videoId }) { _, it -> ItemRow(it, onClick = { onOpen(it) }) }
+                }
             }
             item {
                 Text(
@@ -472,6 +487,14 @@ private fun HomeContent(player: PlayerUi, onOpenPlayer: () -> Unit, onToast: (St
     val active = tasks.filter { !it.state.finished }
     val history = tasks.filter { it.state.finished }
 
+    // Suggestions: songs like the last few downloads (or the newest songs on the phone),
+    // looked up again when a new download finishes.
+    val context = LocalContext.current
+    val suggested by Suggestions.home.collectAsState()
+    var suggesting by remember { mutableStateOf(false) }
+    val lastDone = history.filter { it.state == TaskState.DONE }.maxByOrNull { it.finishedAt }?.id
+    LaunchedEffect(lastDone) { suggesting = true; runCatching { Suggestions.loadHome(context) }; suggesting = false }
+
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 12.dp)) {
         if (active.isNotEmpty()) {
             item("qh") {
@@ -484,6 +507,35 @@ private fun HomeContent(player: PlayerUi, onOpenPlayer: () -> Unit, onToast: (St
                 }
             }
             items(active, key = { "q" + it.id }) { TaskRow(it, player, onOpenPlayer) }
+        }
+
+        val sug = suggested
+        if (sug != null && sug.basedOn.isNotEmpty() || suggesting) {
+            item("sugh") {
+                Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        SectionTitle("Suggested for you")
+                        if (sug != null && sug.basedOn.isNotEmpty()) Text(
+                            "Like " + sug.basedOn.joinToString(", ") { "“$it”" },
+                            color = pal.textFaint, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (suggesting) CircularProgressIndicator(color = pal.accent, strokeWidth = 2.5.dp, modifier = Modifier.size(22.dp))
+                    else Pill("New picks", false, {
+                        scope.launch { suggesting = true; runCatching { Suggestions.loadHome(context, force = true) }; suggesting = false }
+                    })
+                }
+            }
+            if (sug != null && sug.songs.isEmpty() && !suggesting && sug.basedOn.isNotEmpty()) item("sug0") {
+                Text("No suggestions right now. Check your connection and tap New picks.", color = pal.textDim,
+                    style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+            }
+            if (sug != null) items(sug.songs, key = { "sg" + it.videoId }) { song ->
+                ItemRow(song, onClick = {
+                    val n = DownloadManager.enqueueSong(song)
+                    onToast(if (n > 0) "Downloading “${song.title}”" else "Already downloaded or in the queue")
+                })
+            }
         }
 
         if (synced.isNotEmpty()) {

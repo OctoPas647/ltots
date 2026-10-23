@@ -372,6 +372,28 @@ object Parser {
     }
 
     /**
+     * Every song in a watch queue (a song's "radio"), in order. Only the version YouTube Music
+     * would play is kept: the twins tucked under "counterpart" are skipped.
+     */
+    fun parseQueue(root: JSONObject): List<YtSong> {
+        val panels = mutableListOf<JSONObject>()
+        fun walk(n: Any?) {
+            when (n) {
+                is JSONObject -> {
+                    n.optJSONObject("playlistPanelVideoRenderer")?.let { panels += it; return }
+                    for (k in n.keys()) if (k != "counterpart") walk(n.opt(k))
+                }
+                is JSONArray -> for (i in 0 until n.length()) walk(n.opt(i))
+            }
+        }
+        walk(root)
+        return panels.mapNotNull { p ->
+            val id = p.optString("videoId").ifBlank { return@mapNotNull null }
+            parseNext(id, JSONObject().put("contents", JSONObject().put("playlistPanelVideoRenderer", p)))
+        }.distinctBy { it.videoId }
+    }
+
+    /**
      * When a music video has an official-audio twin, YouTube Music pairs them in the watch
      * queue ("counterpart"). Returns the audio version, or null.
      */
