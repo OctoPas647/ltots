@@ -29,6 +29,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.ltots.app.audio.AudioEngine
+import com.ltots.app.ui.topInset
 import com.ltots.app.audio.OutputDevice
 import com.ltots.app.ui.bottomChrome
 import com.ltots.app.ui.components.Pill
@@ -56,7 +57,7 @@ fun SoundScreen(onBack: () -> Unit) {
     val bands = (phoneEq as? com.ltots.app.audio.PhoneEq.Status.Ready)?.layout?.bandCount ?: 0
 
     androidx.activity.compose.BackHandler(onBack = onBack)
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = topInset()).padding(horizontal = 14.dp)) {
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             com.ltots.app.ui.glass.GlassCircleButton(onBack, Modifier.size(40.dp)) {
                 Icon(androidx.compose.material.icons.Icons.AutoMirrored.Rounded.ArrowBack, "Back", tint = pal.text, modifier = Modifier.size(22.dp))

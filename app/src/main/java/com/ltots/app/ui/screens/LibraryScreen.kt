@@ -72,6 +72,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.ltots.app.audio.AudioEngine
+import com.ltots.app.ui.topInset
 import com.ltots.app.data.LocalLibrary
 import com.ltots.app.data.Mix
 import com.ltots.app.data.Mixes
@@ -206,7 +207,7 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
         }
     }
 
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+    Column(Modifier.fillMaxSize().padding(top = topInset()).padding(horizontal = 16.dp)) {
         if (headerGlass) {
             GlassPanel(Modifier.fillMaxWidth().padding(top = 8.dp), tintBoost = 0.04f) {
                 Column(Modifier.padding(start = 14.dp, end = 14.dp, bottom = 4.dp), content = top)

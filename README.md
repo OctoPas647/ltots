@@ -143,7 +143,8 @@ newer APK updates the app and keeps your settings.
   **AMOLED Cover**: the same pure black, with buttons, sliders and everything you can touch coloured
   from the current song's cover.
 - **Full screen** – the navigation bar is hidden inside the app (swipe up from the bottom edge to
-  bring it back); the status bar can be hidden too.
+  bring it back); the status bar can be hidden too. The status bar is transparent: pages scroll on underneath it
+  instead of stopping at a black band.
 - **Dynamic colours** – the accent and background glow follow the average colour of the
   current song's cover, switching with the song (switch in Look).
 - **Downloads ("Get" tab)** – search YouTube Music or paste/share a link to a song, album,

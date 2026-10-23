@@ -30,6 +30,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.draw.alpha
 import com.ltots.app.ui.components.ProfileMenu
+import com.ltots.app.ui.topInset
 import com.ltots.app.ui.components.ProfilePill
 import com.ltots.app.ui.components.ProfileRow
 import com.ltots.app.ui.components.ProfileAddRow
@@ -87,7 +88,7 @@ fun LookScreen(artwork: android.graphics.Bitmap? = null) {
     fun set(t: (ThemeConfig) -> ThemeConfig) = ThemeState.update(t)
     var resetAsk by remember { mutableStateOf(false) }
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = topInset()).padding(horizontal = 14.dp)) {
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Look", style = MaterialTheme.typography.displaySmall, color = pal.text)

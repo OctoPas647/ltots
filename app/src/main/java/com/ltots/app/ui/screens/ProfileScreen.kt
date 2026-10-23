@@ -54,6 +54,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ltots.app.audio.AudioEngine
+import com.ltots.app.ui.topInset
 import com.ltots.app.audio.BiquadCoefs
 import com.ltots.app.audio.EqDefaults
 import com.ltots.app.audio.EqMath
@@ -128,7 +129,7 @@ fun ProfileScreen() {
         }
     }
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = topInset()).padding(horizontal = 14.dp)) {
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Profile", style = MaterialTheme.typography.displaySmall, color = pal.text)

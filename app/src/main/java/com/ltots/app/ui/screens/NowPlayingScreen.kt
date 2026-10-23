@@ -66,6 +66,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.Player
 import com.ltots.app.audio.AudioEngine
+import com.ltots.app.ui.topInset
 import com.ltots.app.audio.OutputDevice
 import com.ltots.app.ui.bottomChrome
 import com.ltots.app.ui.PlayerUi
@@ -92,7 +93,7 @@ fun NowPlayingScreen(player: PlayerUi, artwork: Bitmap?, onOpenEq: () -> Unit, o
     val visual = rememberLiveVisual(wave = false) // no waveform on this screen
 
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = PAGE_PAD),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = topInset()).padding(horizontal = PAGE_PAD),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         // Output chip

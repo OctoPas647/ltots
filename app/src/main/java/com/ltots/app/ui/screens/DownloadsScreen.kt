@@ -79,6 +79,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ltots.app.data.Track
+import com.ltots.app.ui.topInset
 import com.ltots.app.download.DownloadManager
 import com.ltots.app.download.DownloadTask
 import com.ltots.app.download.Engine
@@ -203,7 +204,7 @@ fun DownloadsScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
         submit(s, fromShare = true)
     }
 
-    Column(Modifier.fillMaxSize().padding(horizontal = 14.dp)) {
+    Column(Modifier.fillMaxSize().padding(top = topInset()).padding(horizontal = 14.dp)) {
         // Header
         Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             if (stack.isNotEmpty()) {
