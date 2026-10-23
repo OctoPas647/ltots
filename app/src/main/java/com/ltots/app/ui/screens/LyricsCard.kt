@@ -40,7 +40,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.ltots.app.lyrics.LyricsDoc
+import com.ltots.app.lyrics.LyricLine
+import com.ltots.app.lyrics.Lrc
 import com.ltots.app.lyrics.Lyrics
 import com.ltots.app.lyrics.LyricsState
 import com.ltots.app.lyrics.SongQuery
@@ -87,7 +88,7 @@ fun LyricsCard(player: PlayerUi) {
         Column(Modifier.padding(top = 14.dp, start = 16.dp, end = 16.dp, bottom = 12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 SectionTitle("Lyrics", Modifier.weight(1f))
-                if (state is LyricsState.Found && !state.doc.synced.isNullOrEmpty()) {
+                if (state is LyricsState.Found && (!state.doc.synced.isNullOrEmpty() || !state.doc.plain.isNullOrBlank())) {
                     Pill(if (big) "Smaller" else "Bigger", false, { big = !big })
                 }
                 Pill("Import .lrc", false, { lrcPicker.launch(arrayOf("text/*", "application/octet-stream")) })
@@ -95,9 +96,13 @@ fun LyricsCard(player: PlayerUi) {
             when (state) {
                 is LyricsState.Found -> {
                     val doc = state.doc
-                    Box(Modifier.fillMaxWidth().height(if (doc.synced != null) height else 340.dp)) {
+                    // Plain lyrics (no times anywhere) get guessed times from the song's length,
+                    // so they still follow along and can be tapped.
+                    val estimated = remember(doc, player.durationMs) { if (doc.synced == null) Lrc.estimate(doc.plain, player.durationMs) else null }
+                    val lines = doc.synced ?: estimated
+                    Box(Modifier.fillMaxWidth().height(if (lines != null) height else 340.dp)) {
                         when {
-                            doc.synced != null -> SyncedLyrics(doc, player)
+                            lines != null -> SyncedLyrics(lines, player)
                             doc.instrumental && doc.plain.isNullOrBlank() -> Message("♪  Instrumental")
                             else -> Text(
                                 doc.plain.orEmpty(), color = pal.text, fontSize = 17.sp, lineHeight = 26.sp,
@@ -108,7 +113,8 @@ fun LyricsCard(player: PlayerUi) {
                     Text(
                         buildString {
                             append("Lyrics from ").append(doc.source.ifBlank { "LRCLIB" })
-                            if (doc.synced == null && !doc.instrumental) append(" · not time-synced for this song")
+                            if (estimated != null) append(" · timing estimated (no time-synced lyrics for this song)")
+                            else if (doc.synced == null && !doc.instrumental) append(" · not time-synced for this song")
                         },
                         color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp),
                     )
@@ -134,10 +140,9 @@ private fun Message(text: String) {
 }
 
 @Composable
-private fun SyncedLyrics(doc: LyricsDoc, player: PlayerUi) {
+private fun SyncedLyrics(lines: List<LyricLine>, player: PlayerUi) {
     val pal = LocalPalette.current
-    val lines = doc.synced ?: return
-    val now = doc.lineAt(player.positionMs + LEAD_MS)
+    val now = Lrc.lineAt(lines, player.positionMs + LEAD_MS)
     val list = rememberLazyListState()
     // Follow the song unless you've just scrolled yourself (then wait a few seconds).
     var userScrolledAt by remember { mutableLongStateOf(0L) }
@@ -147,7 +152,7 @@ private fun SyncedLyrics(doc: LyricsDoc, player: PlayerUi) {
             if (scrolling && !autoScrolling) userScrolledAt = System.currentTimeMillis()
         }
     }
-    LaunchedEffect(now, doc) {
+    LaunchedEffect(now, lines) {
         if (System.currentTimeMillis() - userScrolledAt < 4000) return@LaunchedEffect
         autoScrolling = true
         try { list.animateScrollToItem(max(0, now - 1)) } finally { autoScrolling = false }

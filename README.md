@@ -79,7 +79,9 @@ newer APK updates the app and keeps your settings.
 - **Lyrics** – found automatically for every song on the phone (LRCLIB, a free database of
   time-synced lyrics; matched by title, artist and length, with "Artist - Title" file names and
   "(Official Video)"-style clutter handled) and shown under the player like Spotify: the sung line
-  is highlighted and followed, tap any line to jump there. Saved once, then they work offline.
+  is highlighted and followed, tap any line to jump there. When a song only has plain (untimed) lyrics anywhere, the
+  lines get estimated times from the song's length (longer lines longer, a pause at each verse
+  break), so they still follow along and can be tapped; the card says the timing is estimated. Saved once, then they work offline.
 - **Library preparation** – waveforms for the whole library are made while the phone charges,
   lyrics are fetched whenever you're online; the playing song is always done on the spot. Status
   and "Prepare now" on the Sound page.
