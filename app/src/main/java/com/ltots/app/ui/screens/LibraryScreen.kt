@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -70,6 +71,8 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.ltots.app.audio.AudioEngine
 import com.ltots.app.data.LocalLibrary
+import com.ltots.app.data.Mix
+import com.ltots.app.data.Mixes
 import com.ltots.app.data.SongSort
 import com.ltots.app.data.SongSorter
 import com.ltots.app.data.Track
@@ -83,7 +86,7 @@ import com.ltots.app.ui.glass.glass
 import com.ltots.app.ui.theme.LocalPalette
 import java.util.Locale
 
-private enum class LibView { SONGS, ALBUMS, ARTISTS }
+private enum class LibView { SONGS, ALBUMS, ARTISTS, MIXES }
 
 private data class Group(val title: String, val subtitle: String, val tracks: List<Track>)
 
@@ -173,6 +176,7 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
             Pill("Songs", view == LibView.SONGS, { view = LibView.SONGS; openGroup = null })
             Pill("Albums", view == LibView.ALBUMS, { view = LibView.ALBUMS; openGroup = null })
             Pill("Artists", view == LibView.ARTISTS, { view = LibView.ARTISTS; openGroup = null })
+            Pill("Mixes", view == LibView.MIXES, { view = LibView.MIXES; openGroup = null })
             Spacer(Modifier.weight(1f))
             if (filtered.isNotEmpty()) {
                 Box(
@@ -202,6 +206,9 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
                         remember(filtered, sortBy, if (sortBy == SongSort.COLOR) colors else null) { SongSorter.sort(filtered, sortBy, colors) },
                         player, bottom, onOpenPlayer,
                     )
+                }
+                view == LibView.MIXES -> MixGrid(remember(filtered) { Mixes.build(filtered) }, bottom) { m ->
+                    openGroup = Group(m.title, "${m.kind.label} · ${m.subtitle}", m.tracks)
                 }
                 view == LibView.ALBUMS -> AlbumGrid(
                     remember(filtered) {
@@ -324,6 +331,39 @@ private fun AlbumGrid(groups: List<Group>, bottom: Dp, onOpen: (Group) -> Unit) 
                 Spacer(Modifier.height(6.dp))
                 Text(g.title, color = pal.text, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(g.subtitle, color = pal.textDim, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+/**
+ * Playlists the app made from the library (see [Mixes]), in sections: games & soundtracks,
+ * decades, genres. Each card shows its first song's cover.
+ */
+@Composable
+private fun MixGrid(mixes: List<Mix>, bottom: Dp, onOpen: (Mix) -> Unit) {
+    val pal = LocalPalette.current
+    if (mixes.isEmpty()) {
+        EmptyState(
+            "No mixes yet",
+            "Mixes appear by themselves once there are ${Mixes.MIN_SONGS} or more songs from the same game or soundtrack, the same decade or the same genre.",
+            null,
+        ) {}
+        return
+    }
+    LazyVerticalGrid(GridCells.Adaptive(150.dp), Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 2.dp, end = 2.dp, top = 4.dp, bottom = bottom),
+        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        for ((kind, group) in mixes.groupBy { it.kind }) {
+            item(key = "head:${kind.name}", span = { GridItemSpan(maxLineSpan) }) {
+                Text(kind.label, color = pal.text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 6.dp))
+            }
+            items(group, key = { it.id }) { m ->
+                Column(Modifier.clip(RoundedCornerShape(14.dp)).clickable { onOpen(m) }) {
+                    Box(Modifier.fillMaxWidth().aspectRatio(1f)) { BigThumb(m.tracks.first().id) }
+                    Spacer(Modifier.height(6.dp))
+                    Text(m.title, color = pal.text, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(m.subtitle, color = pal.textDim, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                }
             }
         }
     }

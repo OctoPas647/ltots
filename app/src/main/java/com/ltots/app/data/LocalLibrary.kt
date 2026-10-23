@@ -27,6 +27,10 @@ data class Track(
     val mime: String?,
     /** The genre tag of the file, if it has one. */
     val genre: String? = null,
+    /** Release year, if the file says. */
+    val year: Int? = null,
+    /** Track number on its album (disc × 1000 + track, as Android stores it), if the file says. */
+    val trackNo: Int? = null,
 ) {
     /**
      * Key used for this song's saved EQ / pitch / speed. Based on artist + title, so the same
@@ -116,6 +120,8 @@ object LocalLibrary {
             add(MediaStore.Audio.Media.DURATION)
             add(MediaStore.Audio.Media.MIME_TYPE)
             add(MediaStore.Audio.Media.GENRE)
+            add(MediaStore.Audio.Media.YEAR)
+            add(MediaStore.Audio.Media.TRACK)
             if (android.os.Build.VERSION.SDK_INT >= 34) {
                 add(MediaStore.Audio.Media.SAMPLERATE)
                 add(MediaStore.Audio.Media.BITS_PER_SAMPLE)
@@ -135,6 +141,8 @@ object LocalLibrary {
             val iDur = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
             val iMime = c.getColumnIndexOrThrow(MediaStore.Audio.Media.MIME_TYPE)
             val iGenre = c.getColumnIndex(MediaStore.Audio.Media.GENRE)
+            val iYear = c.getColumnIndex(MediaStore.Audio.Media.YEAR)
+            val iTrackNo = c.getColumnIndex(MediaStore.Audio.Media.TRACK)
             val iRate = c.getColumnIndex("samplerate")
             val iBits = c.getColumnIndex("bits_per_sample")
             while (c.moveToNext()) {
@@ -151,6 +159,8 @@ object LocalLibrary {
                     bitsPerSample = if (iBits >= 0 && !c.isNull(iBits)) c.getInt(iBits) else null,
                     mime = c.getString(iMime),
                     genre = if (iGenre >= 0) c.getString(iGenre) else null,
+                    year = if (iYear >= 0 && !c.isNull(iYear)) c.getInt(iYear).takeIf { it > 0 } else null,
+                    trackNo = if (iTrackNo >= 0 && !c.isNull(iTrackNo)) c.getInt(iTrackNo).takeIf { it > 0 } else null,
                 )
             }
         }

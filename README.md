@@ -144,6 +144,14 @@ newer APK updates the app and keeps your settings.
     whole download engine on the phone, and tapping a failed download shows (and copies) exactly
     what went wrong.
 - Local library with songs, albums, artists and search.
+- **Mixes** (Library > Mixes) – playlists the app builds by itself from the songs on the phone:
+  - **Games & soundtracks** – every song from one game, film or series together, also across
+    several albums ("Halo 3 (Original Soundtrack) Vol. 1" and "Halo 3 OST, Disc 2") and single
+    songs like "Snake Eater (From \"Metal Gear Solid 3\")"; a song counts when its genre (Soundtrack,
+    Video Game…), album (OST, Soundtrack…) or title says so; in album and track order;
+  - **Through the years** – the 80s, the 90s, the 2000s… from each song's release year;
+  - **Genres** – one per genre family (Rock, Hip-hop, R&B & soul…), or per genre when it fits none.
+  A mix needs at least 3 songs; open one to play it. They follow the search box.
 - **Song order** (Profile > App settings > library) – **A–Z**, **Genre** (songs of one genre play
   one after the other, related genres side by side: metal next to rock, soul next to R&B; old
   numbered ID3 genres are read too; songs without a genre tag last), **Colour** (by the main colour

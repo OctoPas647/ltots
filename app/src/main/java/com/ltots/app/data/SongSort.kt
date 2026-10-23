@@ -91,6 +91,15 @@ object SongSorter {
         listOf("classical", "orchestra", "opera", "baroque", "piano", "soundtrack", "score", "instrumental", "film"),
     )
 
+    /** A name for each of [FAMILIES], for playlists. */
+    private val FAMILY_NAMES = listOf(
+        "Metal", "Punk", "Rock", "Pop", "Dance & electronic", "Chill", "Hip-hop", "R&B & soul",
+        "Latin & reggae", "Jazz & blues", "Country & folk", "Classical & soundtracks",
+    )
+
+    /** The family [raw] belongs to (e.g. "Rock" for "Hard Rock"); null when it fits none. */
+    fun familyName(raw: String?): String? = FAMILY_NAMES.getOrNull(familyIndex(raw))
+
     /** Where a genre's family comes in [FAMILIES]; other genres after them, no genre last. */
     fun familyIndex(raw: String?): Int {
         val g = genreName(raw)?.lowercase(Locale.ROOT) ?: return FAMILIES.size + 1
