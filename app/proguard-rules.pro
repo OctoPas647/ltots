@@ -25,3 +25,8 @@
 
 # Apache Commons Compress (used by the download engine) can use XZ when it's present; it isn't.
 -dontwarn org.tukaani.xz.**
+
+# Vosk (on-device lyrics timing) talks to its native library through JNA, which finds classes by name.
+-keep class org.vosk.** { *; }
+-keep class com.sun.jna.** { *; }
+-dontwarn java.awt.**

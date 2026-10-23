@@ -40,6 +40,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ltots.app.audio.AudioEngine
+import com.ltots.app.lyrics.AiSync
 import com.ltots.app.lyrics.LyricLine
 import com.ltots.app.lyrics.Lrc
 import com.ltots.app.lyrics.Lyrics
@@ -118,6 +120,7 @@ fun LyricsCard(player: PlayerUi) {
                         },
                         color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp),
                     )
+                    if (estimated != null && key != null && player.trackId >= 0) AiTiming(key, player.trackId, doc, player.durationMs)
                 }
                 LyricsState.Searching, LyricsState.Idle -> Message("Looking for lyrics…")
                 LyricsState.NotFound -> {
@@ -128,6 +131,46 @@ fun LyricsCard(player: PlayerUi) {
                     Message(state.message)
                     Pill("Try again", false, { query()?.let { Lyrics.retry(context, it) } })
                 }
+            }
+        }
+    }
+}
+
+/**
+ * For lyrics with estimated timing: the on-device AI listens to the song and times them for
+ * real. Runs by itself once the speech model is installed (Profile > App settings), or on a tap.
+ */
+@Composable
+private fun AiTiming(key: String, trackId: Long, doc: com.ltots.app.lyrics.LyricsDoc, durationMs: Long) {
+    val context = LocalContext.current
+    val pal = LocalPalette.current
+    val status by AiSync.status.collectAsState()
+    val ready by AiSync.modelReady.collectAsState()
+    val settings by AudioEngine.settings.collectAsState()
+    var asking by remember(key) { mutableStateOf(false) }
+    LaunchedEffect(key, ready, settings.aiLyrics) {
+        if (ready && settings.aiLyrics) AiSync.request(context, key, trackId, doc, durationMs)
+    }
+    val s = status
+    val line = when {
+        s is AiSync.Status.Listening && s.key == key -> "AI is listening to the song to time the lyrics… ${(s.progress * 100).toInt()}%"
+        s is AiSync.Status.Listening -> "AI is timing another song's lyrics; this one is next."
+        s is AiSync.Status.DownloadingModel -> "Downloading the speech model… ${(s.progress * 100).toInt()}%"
+        s is AiSync.Status.Failed && (s.key == key || s.key == null) -> s.message
+        asking -> "The on-device AI listens to the song and matches the words it hears to these lyrics. " +
+            "It needs a speech model (English, ${AiSync.MODEL_SIZE}) downloaded once; after that it works offline."
+        else -> null
+    }
+    Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(line ?: "Let the on-device AI time these lyrics by listening to the song.", color = pal.textDim,
+            style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+        val busy = s is AiSync.Status.Listening || s is AiSync.Status.DownloadingModel
+        if (!busy) {
+            when {
+                ready -> Pill(if (s is AiSync.Status.Failed && s.key == key) "Try again" else "Time with AI", true,
+                    { AiSync.request(context, key, trackId, doc, durationMs, again = true) })
+                asking -> Pill("Download & time", true, { AiSync.request(context, key, trackId, doc, durationMs, download = true, again = true) })
+                else -> Pill("Time with AI", true, { asking = true })
             }
         }
     }

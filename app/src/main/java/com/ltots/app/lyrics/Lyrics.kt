@@ -142,6 +142,16 @@ object Lyrics {
         return true
     }
 
+    /**
+     * Saves lyrics that the on-device AI timed ([AiSync]): [doc]'s words with [lines]' times,
+     * shown at once if it's the song on screen.
+     */
+    fun saveAiSynced(key: String, doc: LyricsDoc, lines: List<LyricLine>) {
+        val synced = doc.copy(synced = lines, source = doc.source.ifBlank { "LRCLIB" } + " · timed by on-device AI")
+        save(key, synced)
+        if (_current.value?.first == key) _current.value = key to LyricsState.Found(synced)
+    }
+
     /** Forget the saved result for [key] and search again. */
     fun retry(context: Context, q: SongQuery) {
         runCatching { file(q.key).delete() }

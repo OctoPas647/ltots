@@ -81,7 +81,15 @@ newer APK updates the app and keeps your settings.
   "(Official Video)"-style clutter handled) and shown under the player like Spotify: the sung line
   is highlighted and followed, tap any line to jump there. When a song only has plain (untimed) lyrics anywhere, the
   lines get estimated times from the song's length (longer lines longer, a pause at each verse
-  break), so they still follow along and can be tapped; the card says the timing is estimated. Saved once, then they work offline.
+  break), so they still follow along and can be tapped; the card says the timing is estimated.
+  **Lyrics AI** (Profile > App settings > lyrics AI): an on-device speech recognizer (Vosk, fully
+  offline; English model, 40 MB, downloaded once) listens to such a song, told to expect only the
+  words of its lyrics, and the words it hears are lined up with the lyrics in order (misheard,
+  missed and extra words allowed), so every line gets its real time. Lines it couldn't hear are
+  placed between their neighbours; if too little matched (another language, no vocals) the
+  estimate stays. Runs for the playing song and, while charging, for the whole library; the result
+  is saved like synced lyrics ("timed by on-device AI"). "Time with AI" on the lyrics card runs it
+  by hand. Saved once, then they work offline.
 - **Library preparation** – waveforms for the whole library are made while the phone charges,
   lyrics are fetched whenever you're online; the playing song is always done on the spot. Status
   and "Prepare now" on the Sound page.

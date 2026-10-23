@@ -18,6 +18,8 @@ import androidx.work.workDataOf
 import com.ltots.app.audio.WaveIndex
 import com.ltots.app.data.LocalLibrary
 import com.ltots.app.data.Track
+import com.ltots.app.audio.AudioEngine
+import com.ltots.app.lyrics.AiSync
 import com.ltots.app.lyrics.LrcLib
 import com.ltots.app.lyrics.Lyrics
 import com.ltots.app.lyrics.SongQuery
@@ -95,6 +97,11 @@ class WaveWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         for (t in tracks) {
             if (isStopped) return Result.retry()
             if (!WaveIndex.has(t.uri)) WaveIndex.build(ctx, t.uri)
+            // Plain lyrics get timed by the on-device AI too, when it's set up and switched on.
+            if (AiSync.modelReady.value && AudioEngine.settings.value.aiLyrics) {
+                val doc = Lyrics.saved(t.profileKey) as? com.ltots.app.lyrics.LyricsDoc
+                if (doc != null && doc.synced == null && !doc.plain.isNullOrBlank()) runCatching { AiSync.sync(ctx, t.profileKey, t.id, doc, t.durationMs) }
+            }
             done++
             if (done % 10 == 0) setProgress(workDataOf("done" to done, "total" to tracks.size))
         }

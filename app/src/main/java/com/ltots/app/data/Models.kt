@@ -260,6 +260,8 @@ data class AppSettings(
     val batteryEq: Boolean = false,
     /** Order of the Songs list, and so of what plays next (the Library page can pick another for now). */
     val songSort: SongSort = SongSort.TITLE,
+    /** Time plain lyrics with the on-device AI by itself (the playing song, and the library while charging). */
+    val aiLyrics: Boolean = true,
 )
 
 /** Hand-written JSON (de)serialisation — no reflection, so it survives R8 untouched. */
@@ -416,6 +418,7 @@ object Json {
         put("direct", s.directPlayback)
         put("batteryEq", s.batteryEq)
         put("sort", s.songSort.name)
+        put("aiLyrics", s.aiLyrics)
     }
 
     fun settings(o: JSONObject) = AppSettings(
@@ -430,5 +433,6 @@ object Json {
         directPlayback = o.optBoolean("direct", true),
         batteryEq = o.optBoolean("batteryEq", false),
         songSort = runCatching { SongSort.valueOf(o.optString("sort")) }.getOrDefault(SongSort.TITLE),
+        aiLyrics = o.optBoolean("aiLyrics", true),
     )
 }
