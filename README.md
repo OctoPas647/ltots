@@ -35,7 +35,8 @@ newer APK updates the app and keeps your settings.
   the top). Or behind the full-size cover: **From below** (the original), **From above** (hanging
   down), **From above, flipped** (bass on the right), or both at once: **Top & bottom, mirrored**
   (the top is a mirror image of the bottom) or **Top & bottom, not mirrored** (the top is the bottom
-  turned round, bass on the right). Look > Visualizer > "On the Playing tab".
+  turned round, bass on the right); both top & bottom layouts span the whole width of the screen.
+  Look > Visualizer > "On the Playing tab".
 - **Freeze when music stops** (Look > Visualizer) – when a song is paused or ends, the visualizer
   stays exactly as it was instead of falling away, also after switching tabs; nothing runs while
   it's frozen.
