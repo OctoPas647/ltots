@@ -51,7 +51,9 @@ newer APK updates the app and keeps your settings.
   follow Cover opacity again.
 - **Glass Library top** (Look > Glass, on by default) – the whole top of the Library page (title,
   search, the Songs / Albums / Artists / Mixes buttons and the sort buttons) sits on one liquid-glass
-  panel; off puts them straight on the background as before. Kept per Look profile and when
+  panel that floats over the page like the bars at the bottom: the songs scroll on under it and
+  its glass blurs and bends them as they pass; off puts them straight on the background above the
+  list. Kept per Look profile and when
   switching themes.
 - **Gradient flow** (Look > Visualizer) – like a TV's backlight: the screen round the cover glows in
   the colours of the cover's edges (each spot along an edge takes the average of the cover's

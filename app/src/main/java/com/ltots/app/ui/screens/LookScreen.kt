@@ -162,7 +162,7 @@ fun LookScreen(artwork: android.graphics.Bitmap? = null) {
                 LabeledSlider("Rim light", cfg.rimLight, { v -> set { it.copy(rimLight = v) } }, 0f..1f, pct(cfg.rimLight))
                 SwitchRow(
                     "Glass Library top", cfg.libraryHeaderGlass, { on -> set { it.copy(libraryHeaderGlass = on) } },
-                    sub = "The top of the Library page (title, search, buttons) sits on one glass panel. Off: they sit straight on the background.",
+                    sub = "The top of the Library page (title, search, buttons) floats on one glass panel, like the bars at the bottom: the songs scroll on under it, blurred. Off: it sits straight on the background above the list.",
                 )
                 LabeledSlider("Corner roundness", cfg.cornerDp, { v -> set { it.copy(cornerDp = v) } }, 4f..44f, "%.0f dp".format(Locale.ROOT, cfg.cornerDp))
                 LabeledSlider("Cover opacity", cfg.coverOpacity, { v -> set { it.copy(coverOpacity = v) } }, 0.1f..1f, pct(cfg.coverOpacity))
