@@ -48,6 +48,10 @@ newer APK updates the app and keeps your settings.
   as strongly as the visualizer is drawn there; between the bars and everywhere else the cover
   stays exactly at Cover opacity (e.g. a solid cover the bars show through). Its reset makes it
   follow Cover opacity again.
+- **Glass Library top** (Look > Glass, on by default) – the whole top of the Library page (title,
+  search, the Songs / Albums / Artists / Mixes buttons and the sort buttons) sits on one liquid-glass
+  panel; off puts them straight on the background as before. Kept per Look profile and when
+  switching themes.
 - **Gradient flow** (Look > Visualizer) – like a TV's backlight: the screen round the cover glows in
   the colours of the cover's edges (each spot along an edge takes the average of the cover's
   outermost 10 pixels there). On AMOLED it melts into your own colour further out; on the other

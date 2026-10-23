@@ -230,6 +230,8 @@ data class ThemeConfig(
      * [coverOpacity] (nothing different where the bars are).
      */
     val coverBarsOpacity: Float? = null,
+    /** The Library page's top (title, search, buttons) sits on one liquid-glass panel. */
+    val libraryHeaderGlass: Boolean = true,
 )
 
 data class AppSettings(
@@ -338,6 +340,7 @@ object Json {
         put("iconCoverMode", t.iconCover.name); put("iconDim", t.iconCoverDim.toDouble()); put("iconBars", t.iconBars.name); put("iconIdle", t.iconIdle.name)
         put("freeze", t.freezeVisualizer); put("gFlow", t.gradientFlow)
         put("beat", t.coverBeat); put("beatK", t.beatStrength.toDouble()); t.coverBarsOpacity?.let { put("coverBars", it.toDouble()) }
+        put("libGlass", t.libraryHeaderGlass)
     }
 
     private fun hsvJson(h: Hsv) = JSONArray().put(h.h.toDouble()).put(h.s.toDouble()).put(h.v.toDouble())
@@ -400,6 +403,7 @@ object Json {
             beatStrength = o.optDouble("beatK", d.beatStrength.toDouble()).toFloat().coerceIn(0f, 1f),
             // 100% in version 0.1.48 meant "off": the same as the rest of the cover.
             coverBarsOpacity = if (o.has("coverBars")) o.optDouble("coverBars").toFloat().coerceIn(0f, 1f).takeIf { it < 0.999f } else null,
+            libraryHeaderGlass = o.optBoolean("libGlass", d.libraryHeaderGlass),
         )
     }
 

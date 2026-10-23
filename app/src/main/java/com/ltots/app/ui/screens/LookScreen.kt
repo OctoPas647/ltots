@@ -159,6 +159,10 @@ fun LookScreen(artwork: android.graphics.Bitmap? = null) {
                 )
                 LabeledSlider("Frost / tint", cfg.glassTint, { v -> set { it.copy(glassTint = v) } }, 0f..0.7f, pct(cfg.glassTint / 0.7f))
                 LabeledSlider("Rim light", cfg.rimLight, { v -> set { it.copy(rimLight = v) } }, 0f..1f, pct(cfg.rimLight))
+                SwitchRow(
+                    "Glass Library top", cfg.libraryHeaderGlass, { on -> set { it.copy(libraryHeaderGlass = on) } },
+                    sub = "The top of the Library page (title, search, buttons) sits on one glass panel. Off: they sit straight on the background.",
+                )
                 LabeledSlider("Corner roundness", cfg.cornerDp, { v -> set { it.copy(cornerDp = v) } }, 4f..44f, "%.0f dp".format(Locale.ROOT, cfg.cornerDp))
                 LabeledSlider("Cover opacity", cfg.coverOpacity, { v -> set { it.copy(coverOpacity = v) } }, 0.1f..1f, pct(cfg.coverOpacity))
                 // Only where the bars pass behind the cover: the cover can stay solid and still

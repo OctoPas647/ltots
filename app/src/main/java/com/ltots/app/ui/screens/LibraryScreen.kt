@@ -11,7 +11,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -84,6 +86,7 @@ import com.ltots.app.ui.components.formatTime
 import com.ltots.app.ui.glass.GlassPanel
 import com.ltots.app.ui.glass.glass
 import com.ltots.app.ui.theme.LocalPalette
+import com.ltots.app.ui.theme.LocalThemeConfig
 import java.util.Locale
 
 private enum class LibView { SONGS, ALBUMS, ARTISTS, MIXES }
@@ -138,7 +141,12 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
         }
     }
 
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+    // The top of the page: on one liquid-glass panel (Look > Glass > Glass Library top), or
+    // straight on the background. On the panel, the search box and shuffle button are plain
+    // tinted shapes rather than glass on glass.
+    val headerGlass = LocalThemeConfig.current.libraryHeaderGlass
+    val inner = pal.text.copy(alpha = 0.08f)
+    val top: @Composable ColumnScope.() -> Unit = {
         // Header
         Row(Modifier.padding(top = 12.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             Logo(40.dp)
@@ -153,7 +161,12 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
         }
 
         // Search
-        GlassPanel(Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(26.dp), strength = 0.8f) {
+        val searchShape = RoundedCornerShape(26.dp)
+        val searchBox: @Composable (@Composable BoxScope.() -> Unit) -> Unit = { content ->
+            if (headerGlass) Box(Modifier.fillMaxWidth().height(52.dp).clip(searchShape).background(inner), content = content)
+            else GlassPanel(Modifier.fillMaxWidth().height(52.dp), shape = searchShape, strength = 0.8f, content = content)
+        }
+        searchBox {
             Row(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Rounded.Search, null, tint = pal.textDim)
                 Spacer(Modifier.width(10.dp))
@@ -180,12 +193,26 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
             Spacer(Modifier.weight(1f))
             if (filtered.isNotEmpty()) {
                 Box(
-                    Modifier.glass(CircleShape, strength = 0.6f).clip(CircleShape)
+                    (if (headerGlass) Modifier.clip(CircleShape).background(inner) else Modifier.glass(CircleShape, strength = 0.6f)).clip(CircleShape)
                         .clickable { player.play(filtered, (filtered.indices).random(), shuffle = true); onOpenPlayer() }
                         .padding(9.dp)
                 ) { Icon(Icons.Rounded.Shuffle, "Shuffle all", tint = pal.text) }
             }
         }
+
+        if (hasPerm && tracks.isNotEmpty() && openGroup == null && view == LibView.SONGS) {
+            val readingColors = remember(tracks, colors, sortBy) { sortBy == SongSort.COLOR && tracks.any { it.id !in colors } }
+            SortBar(sortBy, quickSort, readingColors)
+        }
+    }
+
+    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+        if (headerGlass) {
+            GlassPanel(Modifier.fillMaxWidth().padding(top = 8.dp), tintBoost = 0.04f) {
+                Column(Modifier.padding(start = 14.dp, end = 14.dp, bottom = 4.dp), content = top)
+            }
+            Spacer(Modifier.height(8.dp))
+        } else Column(content = top)
 
         // The list is the rest of the page: no box around it. It runs down behind the mini player
         // and the nav bar, and ends with enough room for the last song to scroll clear of them.
@@ -199,14 +226,10 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
                 ) { launcher.launch(arrayOf(audioPerm)) }
                 tracks.isEmpty() -> EmptyState("No songs found", "Put some music files on your phone (any folder) and they'll show up here.", null) {}
                 openGroup != null -> GroupDetail(openGroup!!, player, bottom, onBack = { openGroup = null }, onPlayed = onOpenPlayer)
-                view == LibView.SONGS -> Column(Modifier.fillMaxSize()) {
-                    val readingColors = remember(tracks, colors, sortBy) { sortBy == SongSort.COLOR && tracks.any { it.id !in colors } }
-                    SortBar(sortBy, quickSort, readingColors)
-                    SongList(
-                        remember(filtered, sortBy, if (sortBy == SongSort.COLOR) colors else null) { SongSorter.sort(filtered, sortBy, colors) },
-                        player, bottom, onOpenPlayer,
-                    )
-                }
+                view == LibView.SONGS -> SongList(
+                    remember(filtered, sortBy, if (sortBy == SongSort.COLOR) colors else null) { SongSorter.sort(filtered, sortBy, colors) },
+                    player, bottom, onOpenPlayer,
+                )
                 view == LibView.MIXES -> MixGrid(remember(filtered) { Mixes.build(filtered) }, bottom) { m ->
                     openGroup = Group(m.title, "${m.kind.label} · ${m.subtitle}", m.tracks)
                 }
