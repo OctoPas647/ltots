@@ -61,6 +61,7 @@ import com.ltots.app.audio.EqSmooth
 import com.ltots.app.audio.EqState
 import com.ltots.app.audio.EqTone
 import com.ltots.app.data.EqProfiles
+import com.ltots.app.data.SongSort
 import com.ltots.app.data.ThemeConfig
 import com.ltots.app.data.Users
 import com.ltots.app.profiles.ProfileTransfer
@@ -68,6 +69,7 @@ import com.ltots.app.profiles.UserSwitch
 import com.ltots.app.ui.bottomChrome
 import com.ltots.app.ui.components.DeleteDialog
 import com.ltots.app.ui.components.Pill
+import com.ltots.app.ui.components.PillRow
 import com.ltots.app.ui.components.RenameDialog
 import com.ltots.app.ui.components.SectionTitle
 import com.ltots.app.ui.components.SwitchRow
@@ -462,6 +464,23 @@ private fun AppSettingsCard() {
             )
             Text(
                 "These stay the same whichever look profile is in use.",
+                color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 10.dp),
+            )
+
+            SectionTitle("App settings · library")
+            Text("Sort songs by", color = pal.text, style = MaterialTheme.typography.bodyMedium)
+            PillRow(
+                SongSort.entries.map { it to it.label }, settings.songSort,
+                { s -> AudioEngine.updateSettings { it.copy(songSort = s) } },
+                Modifier.padding(vertical = 8.dp),
+            )
+            Text(
+                when (settings.songSort) {
+                    SongSort.TITLE -> "Songs in alphabetical order."
+                    SongSort.GENRE -> "Songs of the same genre play one after the other, related genres side by side (rock next to metal, soul next to R&B). Songs without a genre tag come last."
+                    SongSort.COLOR -> "Songs whose covers have the same colour play one after the other, from red round the rainbow to pink, then black, grey and white."
+                    SongSort.RANDOM -> "A new random order every time the app starts."
+                } + " The Colour and Genre buttons on the Library page sort differently just until the app restarts, without changing this.",
                 color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 10.dp),
             )
 

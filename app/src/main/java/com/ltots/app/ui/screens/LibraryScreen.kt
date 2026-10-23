@@ -68,7 +68,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.ltots.app.audio.AudioEngine
 import com.ltots.app.data.LocalLibrary
+import com.ltots.app.data.SongSort
+import com.ltots.app.data.SongSorter
 import com.ltots.app.data.Track
 import com.ltots.app.ui.bottomChrome
 import com.ltots.app.ui.PlayerUi
@@ -115,6 +118,14 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
     var view by rememberSaveable { mutableStateOf(LibView.SONGS) }
     var openGroup by remember { mutableStateOf<Group?>(null) }
     BackHandler(enabled = openGroup != null) { openGroup = null }
+
+    // The order of the Songs list (and so what plays next): a button's pick on this page, kept
+    // until the app restarts, or else the one in App settings. Neither changes the other.
+    val settings by AudioEngine.settings.collectAsState()
+    val quickSort by SongSorter.quick.collectAsState()
+    val sortBy = quickSort ?: settings.songSort
+    val colors by SongSorter.colors.collectAsState()
+    if (sortBy == SongSort.COLOR) LaunchedEffect(tracks) { SongSorter.findColors(context, tracks) }
 
     val filtered = remember(tracks, query) {
         val q = query.trim().lowercase(Locale.ROOT)
@@ -184,7 +195,14 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
                 ) { launcher.launch(arrayOf(audioPerm)) }
                 tracks.isEmpty() -> EmptyState("No songs found", "Put some music files on your phone (any folder) and they'll show up here.", null) {}
                 openGroup != null -> GroupDetail(openGroup!!, player, bottom, onBack = { openGroup = null }, onPlayed = onOpenPlayer)
-                view == LibView.SONGS -> SongList(filtered, player, bottom, onOpenPlayer)
+                view == LibView.SONGS -> Column(Modifier.fillMaxSize()) {
+                    val readingColors = remember(tracks, colors, sortBy) { sortBy == SongSort.COLOR && tracks.any { it.id !in colors } }
+                    SortBar(sortBy, quickSort, readingColors)
+                    SongList(
+                        remember(filtered, sortBy, if (sortBy == SongSort.COLOR) colors else null) { SongSorter.sort(filtered, sortBy, colors) },
+                        player, bottom, onOpenPlayer,
+                    )
+                }
                 view == LibView.ALBUMS -> AlbumGrid(
                     remember(filtered) {
                         filtered.groupBy { it.albumId }.values.map { g ->
@@ -221,6 +239,31 @@ private fun EmptyState(title: String, body: String, action: String?, onAction: (
         if (action != null) {
             Spacer(Modifier.height(16.dp))
             Pill(action, selected = true, onClick = onAction)
+        }
+    }
+}
+
+/**
+ * Above the songs: how they're sorted, and the Colour and Genre buttons to sort by that just
+ * for now (tap the lit one again to go back to the order from App settings).
+ */
+@Composable
+private fun SortBar(sortBy: SongSort, quick: SongSort?, readingColors: Boolean) {
+    val pal = LocalPalette.current
+    Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Sorted by ${sortBy.label}", color = pal.textDim, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                when {
+                    readingColors -> "Reading cover colours…"
+                    quick != null -> "Just for now"
+                    else -> "From settings"
+                },
+                color = pal.textFaint, style = MaterialTheme.typography.labelSmall, maxLines = 1,
+            )
+        }
+        for (s in listOf(SongSort.COLOR, SongSort.GENRE)) {
+            Pill(s.label, sortBy == s, { SongSorter.setQuick(if (quick == s) null else s) })
         }
     }
 }

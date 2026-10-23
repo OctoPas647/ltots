@@ -144,6 +144,14 @@ newer APK updates the app and keeps your settings.
     whole download engine on the phone, and tapping a failed download shows (and copies) exactly
     what went wrong.
 - Local library with songs, albums, artists and search.
+- **Song order** (Profile > App settings > library) – **A–Z**, **Genre** (songs of one genre play
+  one after the other, related genres side by side: metal next to rock, soul next to R&B; old
+  numbered ID3 genres are read too; songs without a genre tag last), **Colour** (by the main colour
+  of each cover, round the rainbow from red to pink, then black, grey and white; each cover is
+  looked at once and remembered) or **Random**. Playing a song from the list plays the rest in that
+  order. Above the songs, the **Colour** and **Genre** buttons sort by that just for now: it stays
+  until the app restarts (or the lit button is tapped again) and never changes the setting, nor
+  does changing the setting undo it.
 - **Battery-friendly**
   - **Power-saving playback** (on by default, in Profile > App settings): when the EQ is off or flat and pitch and
     speed are original, the phone's audio chip decodes and plays the file by itself (audio

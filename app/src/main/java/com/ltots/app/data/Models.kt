@@ -256,6 +256,8 @@ data class AppSettings(
      * EQ, so the audio chip can keep playing by itself with an EQ on, on phones that allow it.
      */
     val batteryEq: Boolean = false,
+    /** Order of the Songs list, and so of what plays next (the Library page can pick another for now). */
+    val songSort: SongSort = SongSort.TITLE,
 )
 
 /** Hand-written JSON (de)serialisation — no reflection, so it survives R8 untouched. */
@@ -409,6 +411,7 @@ object Json {
         put("gPitch", s.globalPitchCents); put("gSpeed", s.globalSpeed.toDouble()); put("gTape", s.globalTape)
         put("direct", s.directPlayback)
         put("batteryEq", s.batteryEq)
+        put("sort", s.songSort.name)
     }
 
     fun settings(o: JSONObject) = AppSettings(
@@ -422,5 +425,6 @@ object Json {
         globalTape = o.optBoolean("gTape", false),
         directPlayback = o.optBoolean("direct", true),
         batteryEq = o.optBoolean("batteryEq", false),
+        songSort = runCatching { SongSort.valueOf(o.optString("sort")) }.getOrDefault(SongSort.TITLE),
     )
 }
