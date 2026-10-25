@@ -45,6 +45,17 @@ class MainActivity : ComponentActivity() {
     // Smoothness > Automatic: frame timings are only watched while the app is in front.
     private var stopWatching: (() -> Unit)? = null
 
+    // The home-screen icon swaps colour only while LToTS is in the background.
+    override fun onStart() {
+        super.onStart()
+        com.ltots.app.ui.IconColor.onForeground(true)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (!isChangingConfigurations) com.ltots.app.ui.IconColor.onForeground(false)
+    }
+
     override fun onResume() {
         super.onResume()
         stopWatching?.invoke()

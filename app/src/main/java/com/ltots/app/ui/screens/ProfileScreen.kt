@@ -452,6 +452,12 @@ private fun AppSettingsCard() {
                     "Off lets the phone choose, which may be 60 Hz to save a little battery.",
             )
             SmoothnessSetting(cfg.effects) { m -> set { it.copy(effects = m) } }
+            val iconFollows by com.ltots.app.ui.IconColor.enabled.collectAsState()
+            SwitchRow(
+                "Icon follows the song colour", iconFollows, { on -> com.ltots.app.ui.IconColor.setEnabled(on) },
+                sub = "The home-screen icon takes the same colour as the app (from the song's cover), in 20 shades. " +
+                    "It changes after you leave LToTS. Off keeps the original icon.",
+            )
             SwitchRow(
                 "Hide navigation bar", cfg.hideNavBar, { on -> set { it.copy(hideNavBar = on) } },
                 sub = "Swipe up from the bottom edge to bring it back for a moment.",
