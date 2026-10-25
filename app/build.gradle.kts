@@ -114,7 +114,9 @@ android {
             test.dependsOn(buildHostRubberBand)
             test.systemProperty("java.library.path", hostLibDir.get().asFile.absolutePath)
             test.systemProperty("roborazzi.test.record", "true")
-            System.getProperty("ltots.live")?.let { test.systemProperty("ltots.live", it) }
+            // Live tests (-Dltots.live=true) and their local files (-Dltots.models=…, -Dltots.clips=…).
+            System.getProperties().stringPropertyNames().filter { it.startsWith("ltots.") }
+                .forEach { test.systemProperty(it, System.getProperty(it)) }
             test.maxHeapSize = "2g"
             // A native library can only be loaded by one class loader per JVM, and Robolectric
             // tests use their own; so every test class gets a fresh JVM.
@@ -166,7 +168,13 @@ dependencies {
     implementation("io.github.junkfood02.youtubedl-android:library:$ytdl")
     implementation("io.github.junkfood02.youtubedl-android:ffmpeg:$ytdl")
 
+    // Song finder: on-device AI (music separation model) runs on ONNX Runtime.
+    val ort = "1.31.0"
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:$ort")
+
     testImplementation("junit:junit:4.13.2")
+    // The same ONNX Runtime for the desktop, so separation tests run the real model.
+    testImplementation("com.microsoft.onnxruntime:onnxruntime:$ort")
     // UI tests on the desktop JVM: Robolectric runs the real Android/Compose code, Roborazzi
     // captures screenshots from the app.
     testImplementation("org.robolectric:robolectric:4.17")

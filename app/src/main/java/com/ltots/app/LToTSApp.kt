@@ -21,6 +21,7 @@ class LToTSApp : Application(), androidx.work.Configuration.Provider {
         com.ltots.app.lyrics.Lyrics.init(this)
         AudioEngine.init(this)
         com.ltots.app.download.DownloadManager.init(this)
+        com.ltots.app.identify.SongFinder.init(this)
         // Waveforms (while charging) and lyrics (when online) for the whole library. Not in the
         // desktop UI tests: there the background-job service keeps the simulated phone from
         // ever going idle.

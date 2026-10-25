@@ -65,7 +65,10 @@ class MainActivity : ComponentActivity() {
     private fun handleIntent(intent: android.content.Intent?) {
         intent ?: return
         if (intent.action == android.content.Intent.ACTION_SEND) {
-            intent.getStringExtra(android.content.Intent.EXTRA_TEXT)?.let { Inbox.sharedText.value = it }
+            val stream = androidx.core.content.IntentCompat.getParcelableExtra(intent, android.content.Intent.EXTRA_STREAM, android.net.Uri::class.java)
+            val type = intent.type.orEmpty()
+            if (stream != null && (type.startsWith("video/") || type.startsWith("audio/"))) Inbox.sharedFile.value = stream
+            else intent.getStringExtra(android.content.Intent.EXTRA_TEXT)?.let { Inbox.sharedText.value = it }
         }
         intent.getStringExtra(EXTRA_TAB)?.let { Inbox.openTab.value = it }
     }

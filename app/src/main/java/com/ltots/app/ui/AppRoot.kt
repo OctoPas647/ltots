@@ -126,6 +126,8 @@ fun AppRoot() {
     val shared by Inbox.sharedText.collectAsState()
     val wantTab by Inbox.openTab.collectAsState()
     LaunchedEffect(shared) { if (shared != null) { tab = Tab.DOWNLOADS; soundOpen = false } }
+    val sharedFile by Inbox.sharedFile.collectAsState()
+    LaunchedEffect(sharedFile) { if (sharedFile != null) { tab = Tab.DOWNLOADS; soundOpen = false } }
     LaunchedEffect(wantTab) {
         wantTab?.let { name ->
             if (name == "SOUND") soundOpen = true

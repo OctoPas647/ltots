@@ -84,6 +84,9 @@ import com.ltots.app.download.DownloadTask
 import com.ltots.app.download.Engine
 import com.ltots.app.download.SyncedPlaylist
 import com.ltots.app.download.TaskState
+import com.ltots.app.identify.ClipSource
+import com.ltots.app.identify.FinderState
+import com.ltots.app.identify.SongFinder
 import com.ltots.app.ui.bottomChrome
 import com.ltots.app.ui.Inbox
 import com.ltots.app.ui.PlayerUi
@@ -170,10 +173,17 @@ fun DownloadsScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
         }
     }
 
+    fun findSong(link: String) {
+        stack.clear()
+        SongFinder.start(ClipSource.Link(link))
+    }
+
     fun submit(text: String, fromShare: Boolean = false) {
         val t = text.trim()
         if (t.isEmpty()) return
         focus.clearFocus()
+        // TikTok, Shorts, Instagram…: find the song in the clip.
+        if (SongFinder.isClipLink(t)) { SongFinder.linkIn(t)?.let(::findSong); if (fromShare) input = ""; return }
         when (val link = Links.parse(t)) {
             is LinkTarget.Song -> scope.launch {
                 toast = "Looking up the song…"
@@ -187,10 +197,20 @@ fun DownloadsScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
             is LinkTarget.Playlist -> stack += Page.PlaylistPage(link.playlistId)
             is LinkTarget.Artist -> stack += Page.Artist(link.channelId)
             null -> {
-                if (t.startsWith("http")) { toast = "That link isn't a YouTube or YouTube Music link"; return }
+                SongFinder.linkIn(t)?.let { findSong(it); return }
                 stack.clear(); stack += Page.Search(t)
             }
         }
+    }
+
+    val finder by SongFinder.state.collectAsState()
+    // A video file shared to LToTS ("Find song with LToTS").
+    val sharedFile by Inbox.sharedFile.collectAsState()
+    LaunchedEffect(sharedFile) {
+        val f = sharedFile ?: return@LaunchedEffect
+        Inbox.sharedFile.value = null
+        stack.clear()
+        SongFinder.start(ClipSource.LocalFile(f, null))
     }
 
     // A link shared to LToTS from another app.
@@ -220,7 +240,7 @@ fun DownloadsScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
                 Icon(Icons.Rounded.Search, null, tint = pal.textDim)
                 Spacer(Modifier.width(10.dp))
                 Box(Modifier.weight(1f)) {
-                    if (input.isEmpty()) Text("Search or paste a YouTube Music link", color = pal.textFaint, maxLines = 1)
+                    if (input.isEmpty()) Text("Search, or paste a YouTube Music or TikTok link", color = pal.textFaint, maxLines = 1)
                     BasicTextField(
                         input, { input = it }, singleLine = true,
                         textStyle = TextStyle(color = pal.text, fontSize = 15.sp),
@@ -249,15 +269,22 @@ fun DownloadsScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
             )
         }
 
+        if (stack.isEmpty()) FinderTools(input, onToast = { toast = it })
+
         Spacer(Modifier.height(10.dp))
-        if (loaded == null) {
+        if (loaded == null && finder == FinderState.Idle) {
             Intro()
             Spacer(Modifier.height(10.dp))
         }
 
         GlassPanel(Modifier.fillMaxWidth().weight(1f), tintBoost = 0.06f) {
             when (val l = loaded) {
-                null -> HomeContent(player, onOpenPlayer, onToast = { toast = it })
+                null -> if (finder != FinderState.Idle) FinderContent(
+                    finder, player, onOpenPlayer,
+                    onOpenAlbum = { stack += Page.AlbumPage(it) },
+                    onOpenArtist = { stack += Page.Artist(it) },
+                    onToast = { toast = it },
+                ) else HomeContent(player, onOpenPlayer, onToast = { toast = it })
                 Loaded.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = pal.accent) }
                 is Loaded.Error -> Message(l.message, "Try again") { reload++ }
                 is Loaded.Results -> SearchContent(l.result, (page as? Page.Search)?.params,
@@ -512,6 +539,7 @@ private fun HomeContent(player: PlayerUi, onOpenPlayer: () -> Unit, onToast: (St
             items(history.take(150), key = { "h" + it.id }) { TaskRow(it, player, onOpenPlayer) }
         }
 
+        item("finder-ai") { FinderModelsCard() }
         item("engine") { EngineCard(onToast) }
     }
 }
@@ -525,6 +553,7 @@ private fun Intro() {
         listOf(
             "Search above, or paste a link to a song, album, playlist or artist.",
             "Or share straight from the YouTube Music app: Share → LToTS.",
+            "Hear a song in a TikTok or Short? Share it to LToTS, or tap Find song from link, From a video or Listen — you get the best matches, most likely first.",
             "Songs keep YouTube's original audio (Opus) with no re-encoding, plus full album tags and the full-size cover.",
             "Music videos are swapped for the official audio release when there is one.",
         ).forEach { Text("•  $it", color = pal.textDim, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 3.dp)) }

@@ -14,6 +14,8 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- Battery EQ: the phone's own built-in EQ on LToTS's audio. -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- Song finder: "Listen" mode. Asked for only when you tap Listen. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <application
         android:name=".LToTSApp"
@@ -34,11 +36,19 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- "Share → LToTS" from YouTube Music, YouTube or a browser -->
-            <intent-filter android:label="Download with LToTS">
+            <!-- "Share → LToTS" from YouTube Music, YouTube, TikTok or a browser:
+                 music links download, TikToks and Shorts open the song finder. -->
+            <intent-filter android:label="LToTS: get the song">
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
+            </intent-filter>
+            <!-- "Share → LToTS" for a saved video or recording: find the song in it. -->
+            <intent-filter android:label="Find the song with LToTS">
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="video/*" />
+                <data android:mimeType="audio/*" />
             </intent-filter>
         </activity>
 

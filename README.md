@@ -143,6 +143,23 @@ newer APK updates the app and keeps your settings.
   - built on yt-dlp (bundled, updatable in-app with "Update engine"); "Test engine" checks the
     whole download engine on the phone, and tapping a failed download shows (and copies) exactly
     what went wrong.
+- **Song finder ("Get" tab)** – Shazam for TikToks and Shorts. Share a TikTok, Short, Instagram
+  reel or a saved video to LToTS, paste its link, pick a video file, or tap **Listen** to use the
+  microphone. LToTS then:
+  - reads the video's own music tag (TikTok's music label) when it has a real song;
+  - with the **music separator** AI (UVR MDX-Net, 67 MB, on the phone), pulls the song out from
+    talking, voice-overs and noise;
+  - fingerprints the best moments — of the clip and of the separated music — and matches them
+    with Shazam (only the fingerprint is sent, never the audio);
+  - if nothing matches, tries again at the speeds TikTok edits use (sped up / slowed, 0.73–1.47×);
+  - if that fails too, the **lyrics listener** AI (Whisper small, 190 MB, on the phone) writes
+    down the sung words and searches YouTube Music by lyrics;
+  - finds every candidate on YouTube Music and shows the **best matches, most likely first**,
+    with how sure it is and why — the version the video plays (e.g. sped up) and the original
+    right after it. Tap a match for **Download**, **Download & play**, **Preview**, **Open album**
+    or **Artist**.
+  The two AI models are downloaded once from the Get tab ("Song finder AI"). Shazam's service is
+  unofficial here and may change; the music tag and the lyrics listener still work without it.
 - Local library with songs, albums, artists and search.
 - **Battery-friendly**
   - **Power-saving playback** (on by default, in Profile > App settings): when the EQ is off or flat and pitch and
@@ -203,6 +220,11 @@ LToTS includes the [Rubber Band Library](https://breakfastquay.com/rubberband/) 
 in `app/src/main/cpp/rubberband`. Anyone distributing the app therefore has to do so under
 GPL-compatible terms.
 
+The song finder uses [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (MIT, fetched at
+build time), [ONNX Runtime](https://onnxruntime.ai) (MIT), a port of the Shazam signature code
+from [shazamio-core](https://github.com/shazamio/shazamio-core) (MIT), and downloads the UVR
+MDX-Net "Inst HQ 3" and Whisper models on first use. Matching uses Shazam's unofficial endpoint.
+
 ## Tests
 
 `./gradlew :app:testDebugUnitTest` runs, on the desktop JVM:
@@ -220,7 +242,14 @@ GPL-compatible terms.
 - the Smoothness stutter detector (when it steps down, and when it must not);
 - the smooth EQ curve (through every knob, no dips or overshoot, lone bells untouched, speed);
 - look and EQ profiles (names, 10 at most, rename/delete, older saves) and users (each with their
-  own everything, switching, deleting, export and import).
+  own everything, switching, deleting, export and import);
+- the song finder: the Shazam fingerprint against a reference made by shazamio-core, the FFT and
+  resampler, ranking (clues adding up, sped-up edits, other versions, artist spellings), picking
+  the moments to listen to, link detection and TikTok's music tag.
+
+With `-Dltots.live=true -Dltots.models=<dir> -Dltots.clips=<dir>` the song finder runs for real:
+the separation model (checked against the Python reference), Shazam, and the whole pipeline on a
+sped-up clip and on a clip with someone talking over the music.
 
 With `-Dltots.live=true` two extra tests talk to the real YouTube Music / YouTube (search and the
 complete download pipeline with the bundled yt-dlp).
@@ -235,6 +264,8 @@ app/src/main/java/com/ltots/app/
   profiles/  switching user, exporting and importing looks, EQs and users
   ytm/       YouTube Music client: search, albums, playlists, artists, song details, links
   download/  yt-dlp engine, download queue, tagging/cover, background service
+  identify/  song finder: clip audio (link/file/mic), music separator (ONNX), Shazam signature +
+             client, Whisper lyrics listener (JNI), ranking, the finder's state, AI model downloads
   playback/  background playback service + connection
   ui/        glass system, Smoothness (frame-time watcher), screens (Library, Playing, EQ, Get, Look,
              Profile, Sound), components
@@ -246,6 +277,6 @@ app/src/main/java/com/ltots/app/
     IconRing.kt         icon mode: the outlines placed on screen, bar reach/width, band order
     IconSpectrum.kt     icon mode: loading/caching, drawing, fills, idle states
   ui/screens/LookIconSettings.kt  the icon controls in Look
-app/src/main/cpp/  Rubber Band (pitch/speed engine) + CMake build
+app/src/main/cpp/  Rubber Band (pitch/speed engine), whisper.cpp JNI bridge + CMake build
 app/src/test/  audio-chain tests, YouTube Music parser tests, colour tests, icon-mode tests, UI tests
 ```

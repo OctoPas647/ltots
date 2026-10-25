@@ -25,3 +25,6 @@
 
 # Apache Commons Compress (used by the download engine) can use XZ when it's present; it isn't.
 -dontwarn org.tukaani.xz.**
+
+# Song finder: whisper.cpp's JNI looks up these native methods by name.
+-keep class com.ltots.app.identify.WhisperNative { *; }
