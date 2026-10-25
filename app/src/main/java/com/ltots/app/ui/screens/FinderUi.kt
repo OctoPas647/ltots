@@ -1,7 +1,6 @@
 package com.ltots.app.ui.screens
 
 import android.Manifest
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -40,7 +39,6 @@ import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ErrorOutline
-import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.RemoveCircleOutline
@@ -87,9 +85,12 @@ import com.ltots.app.ui.components.SectionTitle
 import com.ltots.app.ui.theme.LocalPalette
 import kotlinx.coroutines.launch
 
-/** The three ways to start the song finder, under the search box on the Get tab. */
+/**
+ * The song finder's other ways in, under the search box on the Get tab (a video link goes
+ * straight into the search box).
+ */
 @Composable
-fun FinderTools(input: String, onToast: (String) -> Unit) {
+fun FinderTools(onToast: (String) -> Unit) {
     val context = LocalContext.current
     val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         if (ok) SongFinder.start(ClipSource.Mic) else onToast("LToTS needs the microphone to listen")
@@ -104,15 +105,6 @@ fun FinderTools(input: String, onToast: (String) -> Unit) {
         ToolPill(Icons.Rounded.Mic, "Listen") {
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) SongFinder.start(ClipSource.Mic)
             else micPermission.launch(Manifest.permission.RECORD_AUDIO)
-        }
-        ToolPill(Icons.Rounded.Link, "Find song from link") {
-            val typed = SongFinder.linkIn(input)
-            val link = typed ?: run {
-                val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                cb.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()?.let(SongFinder::linkIn)
-            }
-            if (link == null) onToast("Copy a TikTok or Shorts link first, or paste it above")
-            else SongFinder.start(ClipSource.Link(link))
         }
         ToolPill(Icons.Rounded.VideoFile, "From a video") { runCatching { picker.launch(arrayOf("video/*", "audio/*")) } }
     }

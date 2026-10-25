@@ -86,6 +86,7 @@ import com.ltots.app.download.SyncedPlaylist
 import com.ltots.app.download.TaskState
 import com.ltots.app.identify.ClipSource
 import com.ltots.app.identify.FinderState
+import com.ltots.app.identify.LinkRoute
 import com.ltots.app.identify.SongFinder
 import com.ltots.app.ui.bottomChrome
 import com.ltots.app.ui.Inbox
@@ -182,9 +183,12 @@ fun DownloadsScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
         val t = text.trim()
         if (t.isEmpty()) return
         focus.clearFocus()
-        // TikTok, Shorts, Instagram…: find the song in the clip.
-        if (SongFinder.isClipLink(t)) { SongFinder.linkIn(t)?.let(::findSong); if (fromShare) input = ""; return }
-        when (val link = Links.parse(t)) {
+        // One box for everything: YouTube Music links download/open as before, a video link from
+        // any platform (TikTok, Shorts, YouTube, Instagram…) starts the song finder, words search.
+        val route = LinkRoute.of(t)
+        if (route is LinkRoute.FindSong) { findSong(route.url); if (fromShare) input = ""; return }
+        if (route is LinkRoute.Search) { stack.clear(); stack += Page.Search(route.text); return }
+        when (val link = (route as LinkRoute.Music).target) {
             is LinkTarget.Song -> scope.launch {
                 toast = "Looking up the song…"
                 val s = runCatching { InnerTube.song(link.videoId) }.getOrNull()
@@ -196,10 +200,6 @@ fun DownloadsScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
             is LinkTarget.Album -> stack += Page.AlbumPage(link.browseId)
             is LinkTarget.Playlist -> stack += Page.PlaylistPage(link.playlistId)
             is LinkTarget.Artist -> stack += Page.Artist(link.channelId)
-            null -> {
-                SongFinder.linkIn(t)?.let { findSong(it); return }
-                stack.clear(); stack += Page.Search(t)
-            }
         }
     }
 
@@ -240,7 +240,7 @@ fun DownloadsScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
                 Icon(Icons.Rounded.Search, null, tint = pal.textDim)
                 Spacer(Modifier.width(10.dp))
                 Box(Modifier.weight(1f)) {
-                    if (input.isEmpty()) Text("Search, or paste a YouTube Music or TikTok link", color = pal.textFaint, maxLines = 1)
+                    if (input.isEmpty()) Text("Search, or paste a song or video link", color = pal.textFaint, maxLines = 1)
                     BasicTextField(
                         input, { input = it }, singleLine = true,
                         textStyle = TextStyle(color = pal.text, fontSize = 15.sp),
@@ -269,7 +269,7 @@ fun DownloadsScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
             )
         }
 
-        if (stack.isEmpty()) FinderTools(input, onToast = { toast = it })
+        if (stack.isEmpty()) FinderTools(onToast = { toast = it })
 
         Spacer(Modifier.height(10.dp))
         if (loaded == null && finder == FinderState.Idle) {
@@ -551,9 +551,10 @@ private fun Intro() {
         Text("Download from YouTube Music", style = MaterialTheme.typography.titleMedium, color = pal.text)
         Spacer(Modifier.height(6.dp))
         listOf(
-            "Search above, or paste a link to a song, album, playlist or artist.",
+            "Search above, or paste a YouTube Music link to a song, album, playlist or artist.",
             "Or share straight from the YouTube Music app: Share → LToTS.",
-            "Hear a song in a TikTok or Short? Share it to LToTS, or tap Find song from link, From a video or Listen — you get the best matches, most likely first.",
+            "Hear a song in a video? Paste its link above — TikTok, YouTube Shorts, YouTube, Instagram or any video site — or share it to LToTS. You get the best matches, most likely first.",
+            "No link? Tap Listen to use the microphone, or From a video for a saved clip.",
             "Songs keep YouTube's original audio (Opus) with no re-encoding, plus full album tags and the full-size cover.",
             "Music videos are swapped for the official audio release when there is one.",
         ).forEach { Text("•  $it", color = pal.textDim, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 3.dp)) }

@@ -143,9 +143,11 @@ newer APK updates the app and keeps your settings.
   - built on yt-dlp (bundled, updatable in-app with "Update engine"); "Test engine" checks the
     whole download engine on the phone, and tapping a failed download shows (and copies) exactly
     what went wrong.
-- **Song finder ("Get" tab)** – Shazam for TikToks and Shorts. Share a TikTok, Short, Instagram
-  reel or a saved video to LToTS, paste its link, pick a video file, or tap **Listen** to use the
-  microphone. LToTS then:
+- **Song finder ("Get" tab)** – Shazam for TikToks and Shorts. Paste a video link from any
+  platform (TikTok, YouTube Shorts, YouTube, Instagram, Facebook, …) into the same search/paste
+  box you use for YouTube Music links, or share the video to LToTS, pick a saved video
+  (**From a video**), or tap **Listen** to use the microphone. YouTube Music links still download
+  or open as before. LToTS then:
   - reads the video's own music tag (TikTok's music label) when it has a real song;
   - with the **music separator** AI (UVR MDX-Net, 67 MB, on the phone), pulls the song out from
     talking, voice-overs and noise;
