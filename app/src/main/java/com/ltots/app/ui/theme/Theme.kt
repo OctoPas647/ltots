@@ -230,6 +230,7 @@ object ThemeState {
         gradientFlow = cur.gradientFlow,
         coverBeat = cur.coverBeat,
         beatStrength = cur.beatStrength,
+        beatSource = cur.beatSource,
         coverBarsOpacity = cur.coverBarsOpacity,
     )
 

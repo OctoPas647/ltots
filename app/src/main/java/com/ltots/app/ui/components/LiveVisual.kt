@@ -58,7 +58,7 @@ class LiveVisual(val analyzer: Analyzer) {
     /** True while the EQ leaves the sound unchanged: the "before" equals the "after". */
     var preMirrorsPost = false
 
-    /** Look > Move with the beat: 0..1, jumps on a bass hit (most on a drop), then falls away. */
+    /** Look > Move with the beat: 0..1, jumps on a hit in the chosen part of the sound (most on a drop), then falls away with the bars. */
     var beat = 0f
     internal val beats = com.ltots.app.audio.BeatDetector()
     private var beatNanos = 0L

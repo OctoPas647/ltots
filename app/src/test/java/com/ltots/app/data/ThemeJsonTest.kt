@@ -40,10 +40,11 @@ class ThemeJsonTest {
     }
 
     @Test fun beatAndCoverWithBarsSurviveSaveAndLoad() {
-        val t = ThemeConfig(coverBeat = true, beatStrength = 0.8f, coverBarsOpacity = 0.4f)
+        val t = ThemeConfig(coverBeat = true, beatStrength = 0.8f, coverBarsOpacity = 0.4f, beatSource = com.ltots.app.data.BeatSource.HIGHS)
         assertEquals(t, Json.theme(JSONObject(Json.theme(t).toString())))
         val old = Json.theme(JSONObject().put("accent", 0xFF8B6CFF))
         assertEquals(false, old.coverBeat)
+        assertEquals("moves with the whole song unless set", com.ltots.app.data.BeatSource.SONG, old.beatSource)
         assertEquals("follows Cover opacity unless set", null, old.coverBarsOpacity)
         // 100% from 0.1.48 meant "off".
         assertEquals(null, Json.theme(JSONObject().put("coverBars", 1.0)).coverBarsOpacity)

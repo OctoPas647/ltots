@@ -203,8 +203,11 @@ class Analyzer(private val tap: AnalyzerTap, val bands: Int = 96) {
      * @param pre analyse the signal before the EQ separately (otherwise it mirrors the result).
      * @param wave keep the scrolling waveform up to date.
      */
+    /** The time source for smoothing (tests drive it frame by frame). */
+    internal var clock: () -> Long = System::nanoTime
+
     fun update(positionUs: Long, playing: Boolean, pre: Boolean = true, wave: Boolean = true): SpectrumFrame {
-        val now = System.nanoTime()
+        val now = clock()
         val dt = if (lastNanos == 0L) 1f / 60f else ((now - lastNanos) / 1e9f).coerceIn(0.001f, 0.1f)
         lastNanos = now
         val sr = tap.sampleRate

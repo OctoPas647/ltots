@@ -226,10 +226,13 @@ private fun CoverWithSpectrum(visual: com.ltots.app.ui.components.LiveVisual, ar
     // Move with the beat (Look tab): the cover (with its ring, and its Gradient flow light) pumps
     // on bass hits, hardest on drops. Read while drawing, so only these layers update.
     val beatOn = lookCfg.coverBeat && visual.fps > 0
-    val beatAmount = 0.12f * lookCfg.beatStrength
+    // Up to +30 % at full strength (+15 % at the default): clearly visible, like remix videos.
+    val beatAmount = 0.30f * lookCfg.beatStrength
+    androidx.compose.runtime.SideEffect { visual.beats.source = lookCfg.beatSource }
     val beatScale = if (!beatOn) Modifier else Modifier.graphicsLayer {
         @Suppress("UNUSED_VARIABLE") val t = visual.tick
-        val s = 1f + beatAmount * visual.beat
+        // A gentle curve lifts small hits so they show too; full hits still reach the maximum.
+        val s = 1f + beatAmount * kotlin.math.sqrt(visual.beat)
         scaleX = s; scaleY = s
     }
     // Cover opacity with bars (Look tab): where the bars behind the cover pass, the cover has

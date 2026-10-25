@@ -39,10 +39,15 @@ newer APK updates the app and keeps your settings.
 - **Freeze when music stops** (Look > Visualizer) – when a song is paused or ends, the visualizer
   stays exactly as it was instead of falling away, also after switching tabs; nothing runs while
   it's frozen.
-- **Move with the beat** (Look > Visualizer) – the cover pumps on bass hits, hardest on drops and
-  big bass moments (bass that jumps far above what it was doing lately), like remix videos; steady
-  bass leaves it still. **Beat strength** sets how far it moves. It listens through the visualizer,
-  so it rests while the audio chip plays the song by itself (Power-saving playback).
+- **Move with the beat** (Look > Visualizer) – the cover pumps on the hits, hardest on drops and
+  big moments, like remix videos; steady sound leaves it still. **Move with** picks what it
+  follows: the whole **Song** (default: whichever hits hardest, leaning on the lows), or only the
+  **Lows** (kicks, 808s), **Mids** (snares, vocals) or **Highs** (hi-hats, cymbals). It moves in
+  step with the visualizer: a pulse starts in the frame the bars jump and falls as fast as they
+  do. **Beat strength** goes up to +30 % size (+15 % by default). It listens through the
+  visualizer, so it rests while the audio chip plays the song by itself (Power-saving playback).
+- **Home-screen icon colour** (Profile > App settings) – the launcher icon takes the app's colour
+  (from the song's cover) in 20 shades; it changes after you leave LToTS.
 - **Cover opacity with bars** (Look > Glass) – with the visualizer behind the cover, only the parts
   of the cover in front of the bars (or the curve's line and its fading fill) take this opacity,
   as strongly as the visualizer is drawn there; between the bars and everywhere else the cover

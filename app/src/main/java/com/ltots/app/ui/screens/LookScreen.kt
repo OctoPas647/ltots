@@ -263,11 +263,27 @@ fun LookScreen(artwork: android.graphics.Bitmap? = null) {
                     sub = when {
                         cfg.iconMode -> "Works with the cover: pick Around the cover or Behind the cover above."
                         cfg.visualizerFps == 0 -> "Needs the visualizer (Refresh rate below isn't Off): it listens through it."
-                        else -> "The cover pumps on bass hits, hardest on drops and big bass moments, like remix videos. " +
-                            "Steady bass leaves it still. While the phone's audio chip plays the song by itself (Power-saving playback) there's nothing to listen to, so it rests."
+                        else -> "The cover pumps on the hits, hardest on drops and big moments, like remix videos, in step with the visualizer. " +
+                            "Steady sound leaves it still. While the phone's audio chip plays the song by itself (Power-saving playback) there's nothing to listen to, so it rests."
                     },
                 )
                 if (cfg.coverBeat && !cfg.iconMode) {
+                    Text("Move with", color = LocalPalette.current.text, modifier = Modifier.padding(top = 6.dp, bottom = 6.dp))
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        com.ltots.app.data.BeatSource.entries.forEach { s ->
+                            Pill(s.label, cfg.beatSource == s, { set { it.copy(beatSource = s) } })
+                        }
+                    }
+                    Text(
+                        when (cfg.beatSource) {
+                            com.ltots.app.data.BeatSource.SONG -> "The whole song: whichever hits hardest — kicks, snares or hi-hats — leaning on the beat in the lows."
+                            com.ltots.app.data.BeatSource.LOWS -> "Only the lows (below 140 Hz): kick drums, 808s and bass drops."
+                            com.ltots.app.data.BeatSource.MIDS -> "Only the mids (250 Hz–4 kHz): snares, claps, vocals and chords."
+                            com.ltots.app.data.BeatSource.HIGHS -> "Only the highs (above 4 kHz): hi-hats, cymbals and shakers — a quick, busy movement."
+                        },
+                        color = LocalPalette.current.textFaint, style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 6.dp, bottom = 6.dp),
+                    )
                     LabeledSlider("Beat strength", cfg.beatStrength, { v -> set { it.copy(beatStrength = v) } }, 0.1f..1f, pct(cfg.beatStrength))
                 }
                 SwitchRow(

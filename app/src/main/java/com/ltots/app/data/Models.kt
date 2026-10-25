@@ -93,6 +93,14 @@ enum class IconCover(val label: String) {
 }
 
 /** Icon mode: which way the bars grow from the outline of the dark parts. */
+/** Move with the beat: which part of the sound the cover moves with. */
+enum class BeatSource(val label: String, val loHz: Double, val hiHz: Double) {
+    SONG("Song", 20.0, 20000.0),
+    LOWS("Lows", 20.0, 250.0),
+    MIDS("Mids", 250.0, 4000.0),
+    HIGHS("Highs", 4000.0, 20000.0),
+}
+
 enum class IconBars(val label: String) { OUT("Outward"), IN("Inward"), BOTH("Both ways") }
 
 /** Icon mode: what the icon's place shows while nothing is playing. */
@@ -224,6 +232,8 @@ data class ThemeConfig(
     val coverBeat: Boolean = false,
     /** How much the cover moves with the beat, 0..1. */
     val beatStrength: Float = 0.5f,
+    /** What the cover moves with: the whole song (default), or only its lows, mids or highs. */
+    val beatSource: BeatSource = BeatSource.SONG,
     /**
      * With the visualizer behind the cover: how solid the cover is where the bars pass behind it,
      * 0..1, on its own. The rest of the cover keeps [coverOpacity]. Null = the same as
@@ -335,7 +345,7 @@ object Json {
         put("iconHole", t.iconMinHole.toDouble()); put("iconFill", t.iconFill.name)
         put("iconCoverMode", t.iconCover.name); put("iconDim", t.iconCoverDim.toDouble()); put("iconBars", t.iconBars.name); put("iconIdle", t.iconIdle.name)
         put("freeze", t.freezeVisualizer); put("gFlow", t.gradientFlow)
-        put("beat", t.coverBeat); put("beatK", t.beatStrength.toDouble()); t.coverBarsOpacity?.let { put("coverBars", it.toDouble()) }
+        put("beat", t.coverBeat); put("beatK", t.beatStrength.toDouble()); put("beatSrc", t.beatSource.name); t.coverBarsOpacity?.let { put("coverBars", it.toDouble()) }
     }
 
     private fun hsvJson(h: Hsv) = JSONArray().put(h.h.toDouble()).put(h.s.toDouble()).put(h.v.toDouble())
@@ -396,6 +406,7 @@ object Json {
             gradientFlow = o.optBoolean("gFlow", d.gradientFlow),
             coverBeat = o.optBoolean("beat", d.coverBeat),
             beatStrength = o.optDouble("beatK", d.beatStrength.toDouble()).toFloat().coerceIn(0f, 1f),
+            beatSource = runCatching { BeatSource.valueOf(o.optString("beatSrc")) }.getOrDefault(d.beatSource),
             // 100% in version 0.1.48 meant "off": the same as the rest of the cover.
             coverBarsOpacity = if (o.has("coverBars")) o.optDouble("coverBars").toFloat().coerceIn(0f, 1f).takeIf { it < 0.999f } else null,
         )

@@ -59,4 +59,44 @@ class BeatDetectorTest {
         assertTrue("the drop is a full hit: $dropPeak", dropPeak > 0.95f)
         assertTrue("bigger than the kicks once the drop goes on: $dropPeak vs $laterPeak", dropPeak > laterPeak + 0.1f)
     }
+
+    /** A frame with [band] (lows/mids/highs) at [level] and the rest steady at 0.4. */
+    private fun partFrame(lo: Double, hi: Double, level: Float) =
+        FloatArray(n) { i -> val f = SpectrumFrame.bandFreq(i, n); if (f in lo..hi) level else 0.4f }
+
+    private fun pattern(lo: Double, hi: Double): (Float) -> FloatArray = { t ->
+        val phase = t % (60f / 128f)
+        partFrame(lo, hi, 0.45f + 0.35f * kotlin.math.exp(-phase / 0.05f))
+    }
+
+    private fun peakAfterSettling(source: com.ltots.app.data.BeatSource, frames: (Float) -> FloatArray): Float {
+        val d = BeatDetector(source)
+        val steps = (6f / dt).toInt()
+        return (0 until steps).map { k -> d.update(frames(k * dt), dt) }.drop(300).maxOrNull()!!
+    }
+
+    @Test fun eachPartListensOnlyToItsOwnSound() {
+        val hats = pattern(6000.0, 16000.0)
+        val snares = pattern(500.0, 2500.0)
+        val kicks = pattern(20.0, 120.0)
+        assertTrue(peakAfterSettling(com.ltots.app.data.BeatSource.HIGHS, hats) > 0.3f)
+        assertEquals(0f, peakAfterSettling(com.ltots.app.data.BeatSource.LOWS, hats), 0.01f)
+        assertTrue(peakAfterSettling(com.ltots.app.data.BeatSource.MIDS, snares) > 0.3f)
+        assertEquals(0f, peakAfterSettling(com.ltots.app.data.BeatSource.HIGHS, snares), 0.01f)
+        assertTrue(peakAfterSettling(com.ltots.app.data.BeatSource.LOWS, kicks) > 0.3f)
+        assertEquals(0f, peakAfterSettling(com.ltots.app.data.BeatSource.MIDS, kicks), 0.01f)
+        // The whole song catches all of them.
+        for (p in listOf(hats, snares, kicks)) assertTrue(peakAfterSettling(com.ltots.app.data.BeatSource.SONG, p) > 0.25f)
+    }
+
+    @Test fun pulseFallsAsFastAsTheBars() {
+        val d = BeatDetector(com.ltots.app.data.BeatSource.LOWS)
+        run(d, 2f) { 0.3f }
+        d.update(frame(0.95f), dt)
+        val top = d.pulse
+        // 100 ms later (bars fall in ~70 ms) the cover is mostly back.
+        repeat((0.1f / dt).toInt()) { d.update(frame(0.95f), dt) }
+        assertTrue("top $top", top > 0.9f)
+        assertTrue("after 100 ms: ${d.pulse}", d.pulse < 0.35f * top)
+    }
 }
