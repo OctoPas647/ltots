@@ -47,7 +47,8 @@ newer APK updates the app and keeps your settings.
   do. **Beat strength** goes up to +30 % size (+15 % by default). It listens through the
   visualizer, so it rests while the audio chip plays the song by itself (Power-saving playback).
 - **Home-screen icon colour** (Profile > App settings) – the launcher icon takes the app's colour
-  (from the song's cover) in 20 shades; it changes after you leave LToTS.
+  (from the song's cover) in 20 shades; it changes after you leave LToTS. Grey covers keep the original
+  icon; turning the setting off brings it back.
 - **Cover opacity with bars** (Look > Glass) – with the visualizer behind the cover, only the parts
   of the cover in front of the bars (or the curve's line and its fading fill) take this opacity,
   as strongly as the visualizer is drawn there; between the bars and everywhere else the cover
