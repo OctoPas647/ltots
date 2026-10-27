@@ -23,6 +23,8 @@ data class Identity(
     val clues: List<Clue> = emptyList(),
     /** Already-known YouTube Music song (lyrics search finds songs directly). */
     val ytSong: YtSong? = null,
+    /** Where in the clip its sound was recognised (seconds), for clips with several songs. */
+    val heardAt: List<Double> = emptyList(),
 ) {
     val key: String get() = Ranking.key(title, artist)
     val score: Double get() = Ranking.score(clues)
@@ -43,6 +45,10 @@ data class Suggestion(
     val version: String? = null,
     val previewUrl: String? = null,
     val identityKey: String,
+    /** Which song of the clip this is (1, 2, …) when the clip plays more than one; else null. */
+    val part: Int? = null,
+    /** Where in the clip that song plays (seconds), for the "at 0:45" label. */
+    val heardAt: List<Double> = emptyList(),
 )
 
 object Ranking {
@@ -98,6 +104,7 @@ object Ranking {
                 speed = prev.speed ?: i.speed,
                 ytSong = prev.ytSong ?: i.ytSong,
                 clues = prev.clues + i.clues,
+                heardAt = (prev.heardAt + i.heardAt).distinct().sorted(),
             )
         }
         return out.values.sortedByDescending { it.score }
@@ -126,6 +133,7 @@ object Ranking {
      * [found] maps an identity key to YouTube Music search results for it.
      */
     fun suggestions(identities: List<Identity>, found: Map<String, List<YtSong>>, maxRows: Int = 12): List<Suggestion> {
+        val parts = parts(identities)
         val rows = ArrayList<Suggestion>()
         val seen = HashSet<String>()
         for (id in identities) {
@@ -152,6 +160,8 @@ object Ranking {
                     version = main?.let { versionOf(it.title) },
                     previewUrl = id.previewUrl,
                     identityKey = id.key,
+                    part = parts[id.key],
+                    heardAt = id.heardAt,
                 )
             }
             // Other versions of the same song: original vs. sped up, remixes, the music video.
@@ -176,7 +186,31 @@ object Ranking {
                 alts++
             }
         }
-        return rows.sortedByDescending { it.confidence }.take(maxRows)
+        if (parts.size < 2) return rows.sortedByDescending { it.confidence }.take(maxRows)
+        // Several songs in the clip: each one's best row first, in the order they play, then
+        // their other versions, then everything else.
+        val mains = rows.filter { it.part != null }.sortedBy { it.part }
+        val rest = rows.filter { it.part == null }.sortedWith(compareBy<Suggestion> { parts[it.identityKey] ?: Int.MAX_VALUE }.thenByDescending { it.confidence })
+        return (mains + rest).take(maxRows.coerceAtLeast(mains.size))
+    }
+
+    /**
+     * Songs heard at different moments of the clip — a video that plays one song and then
+     * another. Key → 1, 2, … in the order they play. Empty unless there are at least two that
+     * were each recognised at moments where the other wasn't.
+     */
+    fun parts(identities: List<Identity>): Map<String, Int> {
+        val heard = identities.filter { it.heardAt.isNotEmpty() && confidence(it.score) >= 0.45 }
+        if (heard.size < 2) return emptyMap()
+        // Keep songs whose moments don't overlap one already kept (a mix-up Shazam made on the same
+        // moment is not a second song).
+        val kept = ArrayList<Identity>()
+        for (id in heard.sortedByDescending { it.score }) {
+            if (kept.none { k -> k.heardAt.any { a -> id.heardAt.any { b -> abs(a - b) < 6 } } }) kept += id
+            if (kept.size == 4) break
+        }
+        if (kept.size < 2) return emptyMap()
+        return kept.sortedBy { it.heardAt.first() }.mapIndexed { i, id -> id.key to i + 1 }.toMap()
     }
 
     /** A clip played this fast is a sped-up / slowed edit. */

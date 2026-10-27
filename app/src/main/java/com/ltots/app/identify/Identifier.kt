@@ -67,7 +67,7 @@ class Identifier(
     fun soundRunning(detail: String) = set(Step.SOUND, StepState.RUNNING, detail)
 
     /** Hits Shazam made, with the window/source/speed they came from. */
-    private data class SoundHit(val hit: ShazamHit, val window: Int, val ai: Boolean, val speed: Double)
+    private data class SoundHit(val hit: ShazamHit, val window: Int, val ai: Boolean, val speed: Double, val atSec: Double)
 
     suspend fun run(clip: ClipAudio): List<Suggestion> = withContext(Dispatchers.Default) {
         set(Step.SOUND, StepState.DONE, "%.0f s of sound".format(clip.seconds))
@@ -124,6 +124,14 @@ class Identifier(
         val rawWindows = if (instrument || voiceStem == null) emptyList()
             else pickWindows(pcm, null, null, forStem = false).filter { w -> origWindows.take(2).all { abs(it.start - w.start) >= 6 * ClipAudio.RATE } }
         val stemWindows = musicStem?.let { pickWindows(it, it, voiceStem, forStem = true) }.orEmpty()
+        // Moments spread over the whole clip, so a video that plays two songs gets both heard,
+        // not just the loudest one twice.
+        // (The separator only covers the first $SEPARATE_SECONDS s; past that, the untouched sound.)
+        val spanFromStem = voiceHeavy && musicStem != null && musicStem.size >= pcm.size - ClipAudio.RATE
+        val spanWindows = spanWindows(
+            (if (spanFromStem) musicStem else pcm)!!.size,
+            (origWindows.take(2) + rawWindows.take(1) + stemWindows.take(2)).map { it.start },
+        )
 
         // 3. Shazam at normal speed
         set(Step.MATCH, StepState.RUNNING, "Asking Shazam…")
@@ -132,15 +140,16 @@ class Identifier(
         origWindows.take(2).indices.forEach { plan += Triple(it, Src.ORIG, 1.0) }
         rawWindows.take(1).indices.forEach { plan += Triple(it, Src.RAW, 1.0) }
         stemWindows.take(2).indices.forEach { plan += Triple(it, Src.STEM, 1.0) }
+        spanWindows.indices.forEach { plan += Triple(it, Src.SPAN, 1.0) }
         val errorCount = java.util.concurrent.atomic.AtomicInteger()
         val lastErr = java.util.concurrent.atomic.AtomicReference<String?>(null)
-        fun windowsOf(src: Src) = when (src) { Src.ORIG -> origWindows; Src.RAW -> rawWindows; Src.STEM -> stemWindows }
+        fun windowsOf(src: Src) = when (src) { Src.ORIG -> origWindows; Src.RAW -> rawWindows; Src.STEM -> stemWindows; Src.SPAN -> spanWindows }
         suspend fun ask(q: List<Triple<Int, Src, Double>>) = coroutineScope {
             val gate = Semaphore(3)
             q.map { (w, from, speed) ->
                 async(Dispatchers.IO) {
                     gate.withPermit {
-                        val ai = from == Src.STEM
+                        val ai = from == Src.STEM || (from == Src.SPAN && spanFromStem)
                         val src = if (ai) musicStem!! else pcm
                         val win = windowsOf(from)[w]
                         val seg = src.copyOfRange(win.start, win.start + win.length)
@@ -148,15 +157,18 @@ class Identifier(
                         val clipped = if (audio.size > SEG * ClipAudio.RATE) audio.copyOf(SEG * ClipAudio.RATE) else audio
                         runCatching { Shazam.recognize(ShazamSignature.from(ClipLoader.normalize(clipped))) }
                             .onFailure { errorCount.incrementAndGet(); lastErr.set(it.message) }
-                            .getOrNull()?.let { SoundHit(it, w, ai, speed) }
+                            .getOrNull()?.let { SoundHit(it, w, ai, speed, win.start / ClipAudio.RATE.toDouble()) }
                     }
                 }
             }.awaitAll().filterNotNull()
         }
         hits += ask(plan)
         val errors = errorCount.get()
+        val songsAt = hits.groupBy { Ranking.key(it.hit.title, it.hit.artist) }
         set(Step.MATCH, if (hits.isEmpty() && errors == plan.size) StepState.FAILED else StepState.DONE,
             when {
+                songsAt.size >= 2 && songsAt.values.map { g -> g.map { it.atSec } }.let { ts -> ts.all { a -> ts.all { b -> a === b || a.none { x -> b.any { y -> abs(x - y) < 6 } } } } } ->
+                    "${songsAt.size} different songs at different moments"
                 hits.isNotEmpty() -> "${hits.distinctBy { Ranking.key(it.hit.title, it.hit.artist) }.size} match(es) from ${hits.size} of ${plan.size} listens"
                 errors == plan.size -> lastErr.get() ?: "Couldn't reach Shazam"
                 else -> "No match at normal speed"
@@ -197,7 +209,7 @@ class Identifier(
             }
             identities += Identity(
                 h.hit.title, h.hit.artist, album = h.hit.album, year = h.hit.year, coverUrl = h.hit.coverUrl,
-                previewUrl = h.hit.previewUrl, speed = h.speed.takeIf { it != 1.0 },
+                previewUrl = h.hit.previewUrl, speed = h.speed.takeIf { it != 1.0 }, heardAt = listOf(h.atSec),
                 clues = listOf(Clue(kind, (if (kind == Clue.Kind.SOUND_SPEED) 1.7 else 2.0) * skewFactor(h.hit), note)),
             )
         }
@@ -288,6 +300,8 @@ class Identifier(
         RAW,
         /** The music the AI separated out. */
         STEM,
+        /** Moments spread over the whole clip (the separated music when voices cover it). */
+        SPAN,
     }
 
     companion object {
@@ -327,6 +341,28 @@ class Identifier(
         internal fun skewFactor(h: ShazamHit): Double =
             1.0 - minOf(0.4, (abs(h.frequencySkew) + abs(h.timeSkew)) * 4.0)
         const val SEPARATE_SECONDS = 75
+
+        /**
+         * Extra 12-second moments every ~15 s across a clip of [size] samples, skipping those
+         * within 6 s of a moment already listened to ([taken], sample starts). At most [max].
+         */
+        internal fun spanWindows(size: Int, taken: List<Int>, max: Int = 6): List<Window> {
+            val rate = ClipAudio.RATE
+            val len = SEG * rate
+            if (size < 30 * rate) return emptyList()
+            val out = ArrayList<Window>()
+            var s = 0
+            while (s + len <= size) {
+                if ((taken + out.map { it.start }).all { abs(it - s) >= 6 * rate }) out += Window(s, len, 0.0)
+                s += 15 * rate
+            }
+            // Always the very end too: the second song is often the last few seconds.
+            val last = size - len
+            if ((taken + out.map { it.start }).all { abs(it - last) >= 6 * rate }) out += Window(last, len, 0.0)
+            if (out.size <= max) return out
+            // Too many: keep them evenly spread, first and last included.
+            return List(max) { i -> out[(i * (out.size - 1).toDouble() / (max - 1)).toInt()] }
+        }
         const val LYRICS_SECONDS = 28
         /** Clip speed vs. the record, in the order TikTok edits are common. Shazam tolerates ±5 %. */
         val SPEEDS = listOf(1.26, 0.86, 1.17, 1.36, 0.93, 0.79, 1.08, 1.47, 0.73)

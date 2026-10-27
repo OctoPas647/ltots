@@ -106,6 +106,22 @@ class RankingTest {
         assertTrue(!Identifier.instrumentLike(sing, music))
     }
 
+    @Test fun twoSongsInOneVideo() {
+        val a = Identity("Song A", "X", clues = listOf(Clue(Clue.Kind.SOUND, 2.0, "s"), Clue(Clue.Kind.SOUND, 2.0, "s")), heardAt = listOf(0.0, 15.0))
+        val b = Identity("Song B", "Y", clues = listOf(Clue(Clue.Kind.SOUND, 2.0, "s")), heardAt = listOf(60.0))
+        // Shazam naming something else at a moment song A plays is a mix-up, not a third song.
+        val c = Identity("Song C", "Z", clues = listOf(Clue(Clue.Kind.SOUND, 2.0, "s")), heardAt = listOf(15.0))
+        val parts = Ranking.parts(Ranking.merge(listOf(a, b, c)))
+        assertEquals(mapOf(a.key to 1, b.key to 2), parts)
+        assertTrue(Ranking.parts(listOf(a)).isEmpty())
+        val rows = Ranking.suggestions(Ranking.merge(listOf(a, b, c)), emptyMap())
+        assertEquals(listOf(1, 2), rows.take(2).map { it.part })
+        // Moments spread over a 90 s clip, away from ones already used.
+        val w = Identifier.spanWindows(90 * ClipAudio.RATE, listOf(20 * ClipAudio.RATE, 35 * ClipAudio.RATE))
+        assertTrue(w.isNotEmpty() && w.none { kotlin.math.abs(it.start - 20 * ClipAudio.RATE) < 6 * ClipAudio.RATE })
+        assertTrue(Identifier.spanWindows(20 * ClipAudio.RATE, emptyList()).isEmpty())
+    }
+
     @Test fun lyricsCleanup() {
         val t = Lyricist.cleanup(listOf("♪ I got a feeling ♪", "Thanks for watching!", "I got a feeling", "that tonight's gonna be a good night"))
         assertEquals("I got a feeling / that tonight's gonna be a good night", t)
