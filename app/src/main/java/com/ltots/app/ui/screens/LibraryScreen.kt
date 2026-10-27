@@ -11,7 +11,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -24,6 +26,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -45,6 +48,14 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.ltots.app.ui.glass.LocalBackdrop
+import com.ltots.app.ui.glass.LocalGlassOverContent
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -68,7 +79,13 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.ltots.app.audio.AudioEngine
+import com.ltots.app.ui.topInset
 import com.ltots.app.data.LocalLibrary
+import com.ltots.app.data.Mix
+import com.ltots.app.data.Mixes
+import com.ltots.app.data.SongSort
+import com.ltots.app.data.SongSorter
 import com.ltots.app.data.Track
 import com.ltots.app.ui.bottomChrome
 import com.ltots.app.ui.PlayerUi
@@ -78,9 +95,10 @@ import com.ltots.app.ui.components.formatTime
 import com.ltots.app.ui.glass.GlassPanel
 import com.ltots.app.ui.glass.glass
 import com.ltots.app.ui.theme.LocalPalette
+import com.ltots.app.ui.theme.LocalThemeConfig
 import java.util.Locale
 
-private enum class LibView { SONGS, ALBUMS, ARTISTS }
+private enum class LibView { SONGS, ALBUMS, ARTISTS, MIXES }
 
 private data class Group(val title: String, val subtitle: String, val tracks: List<Track>)
 
@@ -116,6 +134,14 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
     var openGroup by remember { mutableStateOf<Group?>(null) }
     BackHandler(enabled = openGroup != null) { openGroup = null }
 
+    // The order of the Songs list (and so what plays next): a button's pick on this page, kept
+    // until the app restarts, or else the one in App settings. Neither changes the other.
+    val settings by AudioEngine.settings.collectAsState()
+    val quickSort by SongSorter.quick.collectAsState()
+    val sortBy = quickSort ?: settings.songSort
+    val colors by SongSorter.colors.collectAsState()
+    if (sortBy == SongSort.COLOR) LaunchedEffect(tracks) { SongSorter.findColors(context, tracks) }
+
     val filtered = remember(tracks, query) {
         val q = query.trim().lowercase(Locale.ROOT)
         if (q.isEmpty()) tracks else tracks.filter {
@@ -124,7 +150,12 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
         }
     }
 
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+    // The top of the page: on one liquid-glass panel (Look > Glass > Glass Library top), or
+    // straight on the background. On the panel, the search box and shuffle button are plain
+    // tinted shapes rather than glass on glass.
+    val headerGlass = LocalThemeConfig.current.libraryHeaderGlass
+    val inner = pal.text.copy(alpha = 0.08f)
+    val top: @Composable ColumnScope.() -> Unit = {
         // Header
         Row(Modifier.padding(top = 12.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             Logo(40.dp)
@@ -139,7 +170,12 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
         }
 
         // Search
-        GlassPanel(Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(26.dp), strength = 0.8f) {
+        val searchShape = RoundedCornerShape(26.dp)
+        val searchBox: @Composable (@Composable BoxScope.() -> Unit) -> Unit = { content ->
+            if (headerGlass) Box(Modifier.fillMaxWidth().height(52.dp).clip(searchShape).background(inner), content = content)
+            else GlassPanel(Modifier.fillMaxWidth().height(52.dp), shape = searchShape, strength = 0.8f, content = content)
+        }
+        searchBox {
             Row(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Rounded.Search, null, tint = pal.textDim)
                 Spacer(Modifier.width(10.dp))
@@ -162,55 +198,98 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
             Pill("Songs", view == LibView.SONGS, { view = LibView.SONGS; openGroup = null })
             Pill("Albums", view == LibView.ALBUMS, { view = LibView.ALBUMS; openGroup = null })
             Pill("Artists", view == LibView.ARTISTS, { view = LibView.ARTISTS; openGroup = null })
+            Pill("Mixes", view == LibView.MIXES, { view = LibView.MIXES; openGroup = null })
             Spacer(Modifier.weight(1f))
             if (filtered.isNotEmpty()) {
                 Box(
-                    Modifier.glass(CircleShape, strength = 0.6f).clip(CircleShape)
+                    (if (headerGlass) Modifier.clip(CircleShape).background(inner) else Modifier.glass(CircleShape, strength = 0.6f)).clip(CircleShape)
                         .clickable { player.play(filtered, (filtered.indices).random(), shuffle = true); onOpenPlayer() }
                         .padding(9.dp)
                 ) { Icon(Icons.Rounded.Shuffle, "Shuffle all", tint = pal.text) }
             }
         }
 
-        // The list is the rest of the page: no box around it. It runs down behind the mini player
-        // and the nav bar, and ends with enough room for the last song to scroll clear of them.
+        if (hasPerm && tracks.isNotEmpty() && openGroup == null && view == LibView.SONGS) {
+            val readingColors = remember(tracks, colors, sortBy) { sortBy == SongSort.COLOR && tracks.any { it.id !in colors } }
+            SortBar(sortBy, quickSort, readingColors)
+        }
+    }
+
+    // The list is the rest of the page: no box around it. It runs down behind the mini player
+    // and the nav bar, and ends with enough room for the last song to scroll clear of them.
+    val list: @Composable () -> Unit = {
         val bottom = bottomChrome()
-        Box(Modifier.fillMaxWidth().weight(1f)) {
-            when {
-                !hasPerm -> EmptyState(
-                    "LToTS needs access to your music",
-                    "Allow \"Music and audio\" so the app can find songs on your phone.",
-                    "Allow access",
-                ) { launcher.launch(arrayOf(audioPerm)) }
-                tracks.isEmpty() -> EmptyState("No songs found", "Put some music files on your phone (any folder) and they'll show up here.", null) {}
-                openGroup != null -> GroupDetail(openGroup!!, player, bottom, onBack = { openGroup = null }, onPlayed = onOpenPlayer)
-                view == LibView.SONGS -> SongList(filtered, player, bottom, onOpenPlayer)
-                view == LibView.ALBUMS -> AlbumGrid(
-                    remember(filtered) {
-                        filtered.groupBy { it.albumId }.values.map { g ->
-                            Group(g.first().album.ifBlank { "Unknown album" }, g.first().artist.takeIf { it != Track.UNKNOWN } ?: "", g)
-                        }.sortedBy { it.title.lowercase(Locale.ROOT) }
-                    },
-                    bottom,
-                ) { openGroup = it }
-                else -> ArtistList(
-                    remember(filtered) {
-                        filtered.groupBy { if (it.artist == Track.UNKNOWN) "Unknown artist" else it.artist }.map { (a, g) ->
-                            Group(a, "${g.size} song${if (g.size == 1) "" else "s"}", g)
-                        }.sortedBy { it.title.lowercase(Locale.ROOT) }
-                    },
-                    bottom,
-                ) { openGroup = it }
+        when {
+            !hasPerm -> EmptyState(
+                "LToTS needs access to your music",
+                "Allow \"Music and audio\" so the app can find songs on your phone.",
+                "Allow access",
+            ) { launcher.launch(arrayOf(audioPerm)) }
+            tracks.isEmpty() -> EmptyState("No songs found", "Put some music files on your phone (any folder) and they'll show up here.", null) {}
+            openGroup != null -> GroupDetail(openGroup!!, player, bottom, onBack = { openGroup = null }, onPlayed = onOpenPlayer)
+            view == LibView.SONGS -> SongList(
+                remember(filtered, sortBy, if (sortBy == SongSort.COLOR) colors else null) { SongSorter.sort(filtered, sortBy, colors) },
+                player, bottom, onOpenPlayer,
+            )
+            view == LibView.MIXES -> MixGrid(remember(filtered) { Mixes.build(filtered) }, bottom) { m ->
+                openGroup = Group(m.title, "${m.kind.label} · ${m.subtitle}", m.tracks)
             }
+            view == LibView.ALBUMS -> AlbumGrid(
+                remember(filtered) {
+                    filtered.groupBy { it.albumId }.values.map { g ->
+                        Group(g.first().album.ifBlank { "Unknown album" }, g.first().artist.takeIf { it != Track.UNKNOWN } ?: "", g)
+                    }.sortedBy { it.title.lowercase(Locale.ROOT) }
+                },
+                bottom,
+            ) { openGroup = it }
+            else -> ArtistList(
+                remember(filtered) {
+                    filtered.groupBy { if (it.artist == Track.UNKNOWN) "Unknown artist" else it.artist }.map { (a, g) ->
+                        Group(a, "${g.size} song${if (g.size == 1) "" else "s"}", g)
+                    }.sortedBy { it.title.lowercase(Locale.ROOT) }
+                },
+                bottom,
+            ) { openGroup = it }
+        }
+    }
+
+    if (headerGlass) {
+        // The top floats over the page like the bars at the bottom: the songs scroll on under it
+        // (and under the status bar), and its glass blurs and bends them as they pass.
+        val density = LocalDensity.current
+        var headerHeight by remember { mutableStateOf(0.dp) }
+        val listLayer = rememberLayerBackdrop()
+        val headerTop = topInset() + 8.dp
+        Box(Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxSize().layerBackdrop(listLayer).padding(horizontal = 16.dp)) {
+                CompositionLocalProvider(LocalListTop provides headerTop + headerHeight + 8.dp, content = list)
+            }
+            CompositionLocalProvider(LocalBackdrop provides listLayer, LocalGlassOverContent provides true) {
+                GlassPanel(
+                    Modifier.padding(horizontal = 16.dp).padding(top = headerTop).fillMaxWidth()
+                        .onSizeChanged { headerHeight = with(density) { it.height.toDp() } },
+                    tintBoost = 0.04f,
+                ) {
+                    Column(Modifier.padding(start = 14.dp, end = 14.dp, bottom = 4.dp), content = top)
+                }
+            }
+        }
+    } else {
+        Column(Modifier.fillMaxSize().padding(top = topInset()).padding(horizontal = 16.dp)) {
+            Column(content = top)
+            Box(Modifier.fillMaxWidth().weight(1f)) { list() }
         }
     }
 }
+
+/** Room above a list for the floating top of the page (0 when the top isn't floating). */
+private val LocalListTop = compositionLocalOf { 0.dp }
 
 @Composable
 private fun EmptyState(title: String, body: String, action: String?, onAction: () -> Unit) {
     val pal = LocalPalette.current
     Column(
-        Modifier.fillMaxSize().padding(bottom = bottomChrome()).padding(28.dp),
+        Modifier.fillMaxSize().padding(top = LocalListTop.current, bottom = bottomChrome()).padding(28.dp),
         verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Icon(Icons.Rounded.MusicNote, null, tint = pal.accent, modifier = Modifier.size(48.dp))
@@ -225,9 +304,34 @@ private fun EmptyState(title: String, body: String, action: String?, onAction: (
     }
 }
 
+/**
+ * Above the songs: how they're sorted, and the Colour and Genre buttons to sort by that just
+ * for now (tap the lit one again to go back to the order from App settings).
+ */
+@Composable
+private fun SortBar(sortBy: SongSort, quick: SongSort?, readingColors: Boolean) {
+    val pal = LocalPalette.current
+    Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Sorted by ${sortBy.label}", color = pal.textDim, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                when {
+                    readingColors -> "Reading cover colours…"
+                    quick != null -> "Just for now"
+                    else -> "From settings"
+                },
+                color = pal.textFaint, style = MaterialTheme.typography.labelSmall, maxLines = 1,
+            )
+        }
+        for (s in listOf(SongSort.COLOR, SongSort.GENRE)) {
+            Pill(s.label, sortBy == s, { SongSorter.setQuick(if (quick == s) null else s) })
+        }
+    }
+}
+
 @Composable
 private fun SongList(tracks: List<Track>, player: PlayerUi, bottom: Dp, onPlayed: () -> Unit) {
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 2.dp, bottom = bottom)) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = LocalListTop.current + 2.dp, bottom = bottom)) {
         itemsIndexed(tracks, key = { _, t -> t.id }) { i, t ->
             TrackRow(t, playing = player.trackId == t.id) { player.play(tracks, i); onPlayed() }
         }
@@ -273,7 +377,7 @@ private fun Thumb(trackId: Long, sizeDp: Int) {
 @Composable
 private fun AlbumGrid(groups: List<Group>, bottom: Dp, onOpen: (Group) -> Unit) {
     val pal = LocalPalette.current
-    LazyVerticalGrid(GridCells.Adaptive(150.dp), Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 2.dp, end = 2.dp, top = 4.dp, bottom = bottom),
+    LazyVerticalGrid(GridCells.Adaptive(150.dp), Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 2.dp, end = 2.dp, top = LocalListTop.current + 4.dp, bottom = bottom),
         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         items(groups, key = { it.tracks.first().albumId }) { g ->
             Column(Modifier.clip(RoundedCornerShape(14.dp)).clickable { onOpen(g) }) {
@@ -281,6 +385,39 @@ private fun AlbumGrid(groups: List<Group>, bottom: Dp, onOpen: (Group) -> Unit) 
                 Spacer(Modifier.height(6.dp))
                 Text(g.title, color = pal.text, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(g.subtitle, color = pal.textDim, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+/**
+ * Playlists the app made from the library (see [Mixes]), in sections: games & soundtracks,
+ * decades, genres. Each card shows its first song's cover.
+ */
+@Composable
+private fun MixGrid(mixes: List<Mix>, bottom: Dp, onOpen: (Mix) -> Unit) {
+    val pal = LocalPalette.current
+    if (mixes.isEmpty()) {
+        EmptyState(
+            "No mixes yet",
+            "Mixes appear by themselves once there are ${Mixes.MIN_SONGS} or more songs from the same game or soundtrack, the same decade or the same genre.",
+            null,
+        ) {}
+        return
+    }
+    LazyVerticalGrid(GridCells.Adaptive(150.dp), Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 2.dp, end = 2.dp, top = LocalListTop.current + 4.dp, bottom = bottom),
+        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        for ((kind, group) in mixes.groupBy { it.kind }) {
+            item(key = "head:${kind.name}", span = { GridItemSpan(maxLineSpan) }) {
+                Text(kind.label, color = pal.text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 6.dp))
+            }
+            items(group, key = { it.id }) { m ->
+                Column(Modifier.clip(RoundedCornerShape(14.dp)).clickable { onOpen(m) }) {
+                    Box(Modifier.fillMaxWidth().aspectRatio(1f)) { BigThumb(m.tracks.first().id) }
+                    Spacer(Modifier.height(6.dp))
+                    Text(m.title, color = pal.text, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(m.subtitle, color = pal.textDim, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                }
             }
         }
     }
@@ -301,7 +438,7 @@ private fun BigThumb(trackId: Long) {
 @Composable
 private fun ArtistList(groups: List<Group>, bottom: Dp, onOpen: (Group) -> Unit) {
     val pal = LocalPalette.current
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 2.dp, bottom = bottom)) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = LocalListTop.current + 2.dp, bottom = bottom)) {
         items(groups, key = { it.title }) { g ->
             Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable { onOpen(g) }.padding(horizontal = 4.dp, vertical = 9.dp),
@@ -323,7 +460,7 @@ private fun ArtistList(groups: List<Group>, bottom: Dp, onOpen: (Group) -> Unit)
 @Composable
 private fun GroupDetail(g: Group, player: PlayerUi, bottom: Dp, onBack: () -> Unit, onPlayed: () -> Unit) {
     val pal = LocalPalette.current
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().padding(top = LocalListTop.current)) {
         Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back", tint = pal.text) }
             Column(Modifier.weight(1f)) {

@@ -35,7 +35,8 @@ newer APK updates the app and keeps your settings.
   the top). Or behind the full-size cover: **From below** (the original), **From above** (hanging
   down), **From above, flipped** (bass on the right), or both at once: **Top & bottom, mirrored**
   (the top is a mirror image of the bottom) or **Top & bottom, not mirrored** (the top is the bottom
-  turned round, bass on the right). Look > Visualizer > "On the Playing tab".
+  turned round, bass on the right); both top & bottom layouts span the whole width of the screen.
+  Look > Visualizer > "On the Playing tab".
 - **Freeze when music stops** (Look > Visualizer) – when a song is paused or ends, the visualizer
   stays exactly as it was instead of falling away, also after switching tabs; nothing runs while
   it's frozen.
@@ -54,6 +55,12 @@ newer APK updates the app and keeps your settings.
   as strongly as the visualizer is drawn there; between the bars and everywhere else the cover
   stays exactly at Cover opacity (e.g. a solid cover the bars show through). Its reset makes it
   follow Cover opacity again.
+- **Glass Library top** (Look > Glass, on by default) – the whole top of the Library page (title,
+  search, the Songs / Albums / Artists / Mixes buttons and the sort buttons) sits on one liquid-glass
+  panel that floats over the page like the bars at the bottom: the songs scroll on under it and
+  its glass blurs and bends them as they pass; off puts them straight on the background above the
+  list. Kept per Look profile and when
+  switching themes.
 - **Gradient flow** (Look > Visualizer) – like a TV's backlight: the screen round the cover glows in
   the colours of the cover's edges (each spot along an edge takes the average of the cover's
   outermost 10 pixels there). On AMOLED it melts into your own colour further out; on the other
@@ -80,7 +87,17 @@ newer APK updates the app and keeps your settings.
 - **Lyrics** – found automatically for every song on the phone (LRCLIB, a free database of
   time-synced lyrics; matched by title, artist and length, with "Artist - Title" file names and
   "(Official Video)"-style clutter handled) and shown under the player like Spotify: the sung line
-  is highlighted and followed, tap any line to jump there. Saved once, then they work offline.
+  is highlighted and followed, tap any line to jump there. When a song only has plain (untimed) lyrics anywhere, the
+  lines get estimated times from the song's length (longer lines longer, a pause at each verse
+  break), so they still follow along and can be tapped; the card says the timing is estimated.
+  **Lyrics AI** (Profile > App settings > lyrics AI): an on-device speech recognizer (Vosk, fully
+  offline; English model, 40 MB, downloaded once) listens to such a song, told to expect only the
+  words of its lyrics, and the words it hears are lined up with the lyrics in order (misheard,
+  missed and extra words allowed), so every line gets its real time. Lines it couldn't hear are
+  placed between their neighbours; if too little matched (another language, no vocals) the
+  estimate stays. Runs for the playing song and, while charging, for the whole library; the result
+  is saved like synced lyrics ("timed by on-device AI"). "Time with AI" on the lyrics card runs it
+  by hand. Saved once, then they work offline.
 - **Library preparation** – waveforms for the whole library are made while the phone charges,
   lyrics are fetched whenever you're online; the playing song is always done on the spot. Status
   and "Prepare now" on the Sound page.
@@ -134,7 +151,8 @@ newer APK updates the app and keeps your settings.
   **AMOLED Cover**: the same pure black, with buttons, sliders and everything you can touch coloured
   from the current song's cover.
 - **Full screen** – the navigation bar is hidden inside the app (swipe up from the bottom edge to
-  bring it back); the status bar can be hidden too.
+  bring it back); the status bar can be hidden too. The status bar is transparent: pages scroll on underneath it
+  instead of stopping at a black band.
 - **Dynamic colours** – the accent and background glow follow the average colour of the
   current song's cover, switching with the song (switch in Look).
 - **Downloads ("Get" tab)** – search YouTube Music or paste/share a link to a song, album,
@@ -146,6 +164,11 @@ newer APK updates the app and keeps your settings.
   - queue with several downloads at once, background downloading with a notification,
     retry/cancel, history, and playlists you can keep in sync;
   - files saved to `Music/LToTS/Artist/Album/`, visible to any app;
+  - **suggestions**: before you search, "Suggested for you" lists songs like your last few
+    downloads (or, before your first download, the newest songs on your phone), found with
+    YouTube Music's own radio for each and taking turns between them; "New picks" asks again.
+    After a search, "You might also like" under the first results lists songs like the song
+    found. Songs already on the phone, downloaded or queued are left out; tap one to download it;
   - built on yt-dlp (bundled, updatable in-app with "Update engine"); "Test engine" checks the
     whole download engine on the phone, and tapping a failed download shows (and copies) exactly
     what went wrong.
@@ -169,6 +192,22 @@ newer APK updates the app and keeps your settings.
   The two AI models are downloaded once from the Get tab ("Song finder AI"). Shazam's service is
   unofficial here and may change; the music tag and the lyrics listener still work without it.
 - Local library with songs, albums, artists and search.
+- **Mixes** (Library > Mixes) – playlists the app builds by itself from the songs on the phone:
+  - **Games & soundtracks** – every song from one game, film or series together, also across
+    several albums ("Halo 3 (Original Soundtrack) Vol. 1" and "Halo 3 OST, Disc 2") and single
+    songs like "Snake Eater (From \"Metal Gear Solid 3\")"; a song counts when its genre (Soundtrack,
+    Video Game…), album (OST, Soundtrack…) or title says so; in album and track order;
+  - **Through the years** – the 80s, the 90s, the 2000s… from each song's release year;
+  - **Genres** – one per genre family (Rock, Hip-hop, R&B & soul…), or per genre when it fits none.
+  A mix needs at least 3 songs; open one to play it. They follow the search box.
+- **Song order** (Profile > App settings > library) – **A–Z**, **Genre** (songs of one genre play
+  one after the other, related genres side by side: metal next to rock, soul next to R&B; old
+  numbered ID3 genres are read too; songs without a genre tag last), **Colour** (by the main colour
+  of each cover, round the rainbow from red to pink, then black, grey and white; each cover is
+  looked at once and remembered) or **Random**. Playing a song from the list plays the rest in that
+  order. Above the songs, the **Colour** and **Genre** buttons sort by that just for now: it stays
+  until the app restarts (or the lit button is tapped again) and never changes the setting, nor
+  does changing the setting undo it.
 - **Battery-friendly**
   - **Power-saving playback** (on by default, in Profile > App settings): when the EQ is off or flat and pitch and
     speed are original, the phone's audio chip decodes and plays the file by itself (audio

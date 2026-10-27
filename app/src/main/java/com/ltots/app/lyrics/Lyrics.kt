@@ -21,6 +21,10 @@ sealed interface LyricsState {
     data object Searching : LyricsState
     data class Found(val doc: LyricsDoc) : LyricsState
     data object NotFound : LyricsState
+    /** The AI match is running; [status] says what it's doing. */
+    data class Matching(val status: String) : LyricsState
+    /** The AI match didn't work; [message] says why. The previous lyrics (if any) are kept. */
+    data class MatchFailed(val message: String, val previous: LyricsDoc?) : LyricsState
     data class Offline(val message: String) : LyricsState
 }
 
@@ -41,6 +45,8 @@ object Lyrics {
     private val netease = NetEase()
 
     const val RETRY_AFTER_MS = 14L * 24 * 3600 * 1000
+    /** Bumped when the search gets better, so songs it missed before are tried again at once. */
+    private const val SEARCH_VERSION = 2
 
     fun init(context: Context) {
         root = File(context.filesDir, "ltots/lyrics").apply { mkdirs() }
@@ -61,6 +67,7 @@ object Lyrics {
         if (!f.exists()) return Unknown
         val o = runCatching { JSONObject(f.readText()) }.getOrNull() ?: return Unknown
         if (o.optBoolean("none")) {
+            if (o.optInt("v") < SEARCH_VERSION) return Unknown
             return if (System.currentTimeMillis() - o.optLong("at") > RETRY_AFTER_MS) Unknown else null
         }
         val doc = LyricsDoc.fromJson(o)
@@ -75,7 +82,7 @@ object Lyrics {
     private fun save(key: String, doc: LyricsDoc?) {
         val f = file(key)
         val tmp = File(f.parentFile, f.name + ".tmp")
-        val o = doc?.toJson() ?: JSONObject().put("none", true).put("at", System.currentTimeMillis())
+        val o = doc?.toJson() ?: JSONObject().put("none", true).put("at", System.currentTimeMillis()).put("v", SEARCH_VERSION)
         tmp.writeText(o.toString()); tmp.renameTo(f)
         synchronized(memory) { memory[key] = doc }
     }
@@ -83,6 +90,30 @@ object Lyrics {
     /** Looks [q] up online and saves the result. Throws [LrcLib.NetworkError] when offline. */
     suspend fun fetch(q: SongQuery): LyricsDoc? = lock.withLock {
         (saved(q.key) as? LyricsDoc)?.let { return it }
+        var doc = lookup(q)
+        // Edits and re-uploads ("Song (sped up)", "Song (But it hits different)" by some channel):
+        // find the song by its own name. Its timings belong to the original, so unless the
+        // length matches they're shown as plain text — the AI match can line them up.
+        if (doc == null) {
+            val loose = runCatching { api.findLoose(q) }.getOrNull()
+            if (loose != null) {
+                val (c, asWhat) = loose
+                val sameLength = q.durationMs <= 0 || kotlin.math.abs(c.durationSec - q.durationMs / 1000.0) <= SongMatch.MAX_LENGTH_DIFF_SEC
+                val synced = c.synced?.let { Lrc.parse(it) }?.takeIf { it.isNotEmpty() }
+                doc = LyricsDoc(
+                    synced = synced.takeIf { sameLength },
+                    plain = c.plain ?: synced?.joinToString("\n") { it.text },
+                    instrumental = c.instrumental, source = "LRCLIB", matchedAs = asWhat,
+                    note = "Found by the song's name · wrong song or timing? Tap AI",
+                ).takeIf { !it.isEmpty }
+            }
+        }
+        save(q.key, doc)
+        doc
+    }
+
+    /** Looks [q] up (exact name and length) without saving anything. */
+    suspend fun lookup(q: SongQuery): LyricsDoc? {
         var doc: LyricsDoc? = null
         // LRCLIB first: exact lookups, then search. A synced result is preferred.
         val hit = runCatching { api.find(q) }.getOrNull()
@@ -105,8 +136,20 @@ object Lyrics {
                 ).takeIf { !it.isEmpty } ?: doc
             }
         }
-        save(q.key, doc)
-        doc
+        return doc
+    }
+
+    /** Saves lyrics the AI match found for [key] (replacing what was there) and shows them. */
+    fun saveMatched(key: String, doc: LyricsDoc) {
+        save(key, doc)
+        if (_current.value?.first == key) _current.value = key to LyricsState.Found(doc)
+    }
+
+    /** Shows the AI match's progress for [key]. */
+    fun showMatching(key: String, status: String) { _current.value = key to LyricsState.Matching(status) }
+
+    fun showMatchFailed(key: String, message: String) {
+        _current.value = key to LyricsState.MatchFailed(message, saved(key) as? LyricsDoc)
     }
 
     /** For the lyrics view: show saved lyrics at once, otherwise look them up in the background. */
@@ -140,6 +183,16 @@ object Lyrics {
         save(key, doc)
         if (_current.value?.first == key) _current.value = key to LyricsState.Found(doc)
         return true
+    }
+
+    /**
+     * Saves lyrics that the on-device AI timed ([AiSync]): [doc]'s words with [lines]' times,
+     * shown at once if it's the song on screen.
+     */
+    fun saveAiSynced(key: String, doc: LyricsDoc, lines: List<LyricLine>) {
+        val synced = doc.copy(synced = lines, source = doc.source.ifBlank { "LRCLIB" } + " · timed by on-device AI")
+        save(key, synced)
+        if (_current.value?.first == key) _current.value = key to LyricsState.Found(synced)
     }
 
     /** Forget the saved result for [key] and search again. */

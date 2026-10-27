@@ -15,19 +15,13 @@ data class LyricsDoc(
     val source: String = "",
     /** What the match was found as (artist — title), for display. */
     val matchedAs: String = "",
+    /** A remark shown under the lyrics, e.g. how an AI match lined them up. */
+    val note: String = "",
 ) {
     val isEmpty: Boolean get() = synced.isNullOrEmpty() && plain.isNullOrBlank() && !instrumental
 
     /** Index of the line playing at [positionMs] (-1 before the first line). */
-    fun lineAt(positionMs: Long): Int {
-        val l = synced ?: return -1
-        var lo = 0; var hi = l.size - 1; var ans = -1
-        while (lo <= hi) {
-            val mid = (lo + hi) ushr 1
-            if (l[mid].timeMs <= positionMs) { ans = mid; lo = mid + 1 } else hi = mid - 1
-        }
-        return ans
-    }
+    fun lineAt(positionMs: Long): Int = synced?.let { Lrc.lineAt(it, positionMs) } ?: -1
 
     fun toJson(): JSONObject = JSONObject().apply {
         synced?.let { put("lrc", Lrc.format(it)) }
@@ -35,6 +29,7 @@ data class LyricsDoc(
         put("instrumental", instrumental)
         put("source", source)
         put("as", matchedAs)
+        if (note.isNotBlank()) put("note", note)
     }
 
     companion object {
@@ -44,6 +39,7 @@ data class LyricsDoc(
             instrumental = o.optBoolean("instrumental"),
             source = o.optString("source"),
             matchedAs = o.optString("as"),
+            note = o.optString("note"),
         )
     }
 }
@@ -77,6 +73,47 @@ object Lrc {
         }
         out.sortBy { it.timeMs }
         return out
+    }
+
+    /** Index of the line playing at [positionMs] in [lines] (-1 before the first line). */
+    fun lineAt(lines: List<LyricLine>, positionMs: Long): Int {
+        var lo = 0; var hi = lines.size - 1; var ans = -1
+        while (lo <= hi) {
+            val mid = (lo + hi) ushr 1
+            if (lines[mid].timeMs <= positionMs) { ans = mid; lo = mid + 1 } else hi = mid - 1
+        }
+        return ans
+    }
+
+    /**
+     * Guessed times for lyrics that only exist as plain text, so they can still follow the song
+     * and be tapped: the lines are spread over the song (after a short intro, ending a little
+     * before the end), each taking time by its length, with a pause at every verse break.
+     * Null for an empty text or an unknown length.
+     */
+    fun estimate(plain: String?, durationMs: Long): List<LyricLine>? {
+        if (plain.isNullOrBlank() || durationMs <= 0) return null
+        val lines = ArrayList<String>()
+        val pauseBefore = ArrayList<Boolean>()
+        var gap = false
+        for (raw in plain.lineSequence()) {
+            val t = raw.trim()
+            if (t.isEmpty()) { gap = lines.isNotEmpty(); continue }
+            lines += t; pauseBefore += gap; gap = false
+        }
+        if (lines.isEmpty()) return null
+        val edge = (durationMs * 0.06).toLong().coerceIn(3_000L, 15_000L).coerceAtMost(durationMs / 4)
+        val start = edge; val end = durationMs - edge
+        // A line takes a moment plus time for its words; a verse break is a short pause.
+        fun weight(t: String) = 1.5 + t.length / 12.0
+        val pause = 2.0
+        val total = lines.indices.sumOf { i -> weight(lines[i]) + if (pauseBefore[i]) pause else 0.0 }
+        val msPer = (end - start) / total
+        var at = start.toDouble()
+        return lines.mapIndexed { i, t ->
+            if (pauseBefore[i]) at += pause * msPer
+            LyricLine(at.toLong(), t).also { at += weight(t) * msPer }
+        }
     }
 
     fun format(lines: List<LyricLine>): String = lines.joinToString("\n") { l ->

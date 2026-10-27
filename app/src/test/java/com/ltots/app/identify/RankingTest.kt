@@ -85,6 +85,43 @@ class RankingTest {
         assertEquals(1, Identifier.pickWindows(FloatArray(8 * rate), null, null, false).size)
     }
 
+    @Test fun instrumentPlayingTheTuneIsNotTalking() {
+        val r = ClipAudio.RATE; val n = 30 * r; val rnd = java.util.Random(1)
+        fun pulse(t: Double) = 0.6 + 0.4 * kotlin.math.abs(Math.sin(Math.PI * t * 2.0))
+        val music = FloatArray(n) { val t = it / r.toDouble(); (pulse(t) * 0.4 * Math.sin(2 * Math.PI * 110 * t) + 0.05 * rnd.nextGaussian()).toFloat() }
+        // Talking: syllables, gaps between words and sentences.
+        val talk = FloatArray(n) { val t = it / r.toDouble()
+            val syl = maxOf(0.0, Math.sin(Math.PI * t * 4.3)); val word = if ((t * 1.3) % 1.0 < 0.7) 1.0 else 0.0; val sent = if (t % 4.0 < 3.0) 1.0 else 0.0
+            (0.5 * syl * word * sent * Math.sin(2 * Math.PI * 180 * t)).toFloat() }
+        // Singing: held notes in phrases with breaths.
+        val sing = FloatArray(n) { val t = it / r.toDouble()
+            val phrase = if (t % 5.0 < 3.6) 1.0 else 0.0; val gap = if ((t * 1.5) % 1.0 < 0.85) 1.0 else 0.0
+            (0.4 * phrase * gap * Math.sin(2 * Math.PI * 260 * t)).toFloat() }
+        // An instrument melody: notes one after another, swelling with the song.
+        val inst = FloatArray(n) { val t = it / r.toDouble()
+            val note = 220.0 * listOf(1.0, 1.25, 1.5, 1.33)[((t * 2).toInt()) % 4]; val attack = 0.75 + 0.25 * Math.exp(-((t * 2) % 1.0) * 3)
+            (0.4 * pulse(t) * attack * Math.sin(2 * Math.PI * note * t)).toFloat() }
+        assertTrue(Identifier.instrumentLike(inst, music))
+        assertTrue(!Identifier.instrumentLike(talk, music))
+        assertTrue(!Identifier.instrumentLike(sing, music))
+    }
+
+    @Test fun twoSongsInOneVideo() {
+        val a = Identity("Song A", "X", clues = listOf(Clue(Clue.Kind.SOUND, 2.0, "s"), Clue(Clue.Kind.SOUND, 2.0, "s")), heardAt = listOf(0.0, 15.0))
+        val b = Identity("Song B", "Y", clues = listOf(Clue(Clue.Kind.SOUND, 2.0, "s")), heardAt = listOf(60.0))
+        // Shazam naming something else at a moment song A plays is a mix-up, not a third song.
+        val c = Identity("Song C", "Z", clues = listOf(Clue(Clue.Kind.SOUND, 2.0, "s")), heardAt = listOf(15.0))
+        val parts = Ranking.parts(Ranking.merge(listOf(a, b, c)))
+        assertEquals(mapOf(a.key to 1, b.key to 2), parts)
+        assertTrue(Ranking.parts(listOf(a)).isEmpty())
+        val rows = Ranking.suggestions(Ranking.merge(listOf(a, b, c)), emptyMap())
+        assertEquals(listOf(1, 2), rows.take(2).map { it.part })
+        // Moments spread over a 90 s clip, away from ones already used.
+        val w = Identifier.spanWindows(90 * ClipAudio.RATE, listOf(20 * ClipAudio.RATE, 35 * ClipAudio.RATE))
+        assertTrue(w.isNotEmpty() && w.none { kotlin.math.abs(it.start - 20 * ClipAudio.RATE) < 6 * ClipAudio.RATE })
+        assertTrue(Identifier.spanWindows(20 * ClipAudio.RATE, emptyList()).isEmpty())
+    }
+
     @Test fun lyricsCleanup() {
         val t = Lyricist.cleanup(listOf("♪ I got a feeling ♪", "Thanks for watching!", "I got a feeling", "that tonight's gonna be a good night"))
         assertEquals("I got a feeling / that tonight's gonna be a good night", t)

@@ -58,6 +58,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -65,6 +66,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.Player
 import com.ltots.app.audio.AudioEngine
+import com.ltots.app.ui.topInset
 import com.ltots.app.audio.OutputDevice
 import com.ltots.app.ui.bottomChrome
 import com.ltots.app.ui.PlayerUi
@@ -91,7 +93,7 @@ fun NowPlayingScreen(player: PlayerUi, artwork: Bitmap?, onOpenEq: () -> Unit, o
     val visual = rememberLiveVisual(wave = false) // no waveform on this screen
 
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = topInset()).padding(horizontal = PAGE_PAD),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         // Output chip
@@ -242,6 +244,9 @@ private fun CoverWithSpectrum(visual: com.ltots.app.ui.components.LiveVisual, ar
     val padTop = if (lookCfg.behindLayout == com.ltots.app.data.BehindLayout.BELOW) 40.dp else 0.dp
     val padBottom = if (lookCfg.behindLayout == com.ltots.app.data.BehindLayout.ABOVE ||
         lookCfg.behindLayout == com.ltots.app.data.BehindLayout.ABOVE_FLIPPED) 40.dp else 0.dp
+    // Top & bottom: the spectrum reaches over the page's margins, so it spans the whole width
+    // of the screen (the cover stays where it is).
+    val wide = if (!wrap && lookCfg.behindLayout.both) PAGE_PAD else 0.dp
     Box(Modifier.fillMaxWidth().aspectRatio(1f), contentAlignment = Alignment.Center) {
         // Gradient flow (Look tab): light round the cover in its edges' colours, like a TV's
         // backlight. On AMOLED it melts into your own colour, elsewhere it fades out.
@@ -254,7 +259,13 @@ private fun CoverWithSpectrum(visual: com.ltots.app.ui.components.LiveVisual, ar
             visual,
             // A little space on the side the spectrum grows towards (below: at the top; above: at
             // the bottom). Top & bottom use the whole height, half each.
-            Modifier.fillMaxSize().padding(top = padTop, bottom = padBottom),
+            Modifier.fillMaxSize()
+                .layout { m, c ->
+                    val e = wide.roundToPx()
+                    val p = m.measure(c.copy(minWidth = c.maxWidth + 2 * e, maxWidth = c.maxWidth + 2 * e))
+                    layout(c.maxWidth, p.height) { p.place(-e, 0) }
+                }
+                .padding(top = padTop, bottom = padBottom),
             showWave = false, intensity = 0.8f, from = lookCfg.behindLayout,
         )
         val style = lookCfg.spectrumStyle
@@ -277,12 +288,12 @@ private fun CoverWithSpectrum(visual: com.ltots.app.ui.components.LiveVisual, ar
                         @Suppress("UNUSED_VARIABLE") val t = visual.tick // follow every frame
                         // The spectrum's area, in the cover's own coordinates.
                         val whole = size.width / coverFraction
-                        val edge = (whole - size.width) / 2
+                        val edge = (whole - size.width) / 2 + wide.toPx()
                         val top = padTop.toPx(); val bottom = padBottom.toPx()
                         with(com.ltots.app.ui.components.SpectrumMask) {
                             drawOpacity(
                                 visual.frame.post, style, from,
-                                left = -edge, top = top - edge, w = whole, h = whole - top - bottom,
+                                left = -edge, top = top - edge + wide.toPx(), w = whole + 2 * wide.toPx(), h = whole - top - bottom,
                                 cover = coverAlpha, underBars = barsAlpha,
                             )
                         }
@@ -557,4 +568,6 @@ private fun EqShortcut(onOpenEq: () -> Unit) {
 
 /** The cover's width on the Playing tab: full size, or smaller with the visualizer around it. */
 private const val COVER_FULL = 0.82f
+/** The Playing tab's margin at the left and right. */
+private val PAGE_PAD = 18.dp
 private const val COVER_WRAPPED = 0.62f

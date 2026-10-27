@@ -28,3 +28,7 @@
 
 # Song finder: whisper.cpp's JNI looks up these native methods by name.
 -keep class com.ltots.app.identify.WhisperNative { *; }
+# Vosk (on-device lyrics timing) talks to its native library through JNA, which finds classes by name.
+-keep class org.vosk.** { *; }
+-keep class com.sun.jna.** { *; }
+-dontwarn java.awt.**

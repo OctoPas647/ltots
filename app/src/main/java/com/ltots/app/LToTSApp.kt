@@ -19,6 +19,7 @@ class LToTSApp : Application(), androidx.work.Configuration.Provider {
         com.ltots.app.data.EqProfiles.load()
         com.ltots.app.audio.WaveIndex.init(this)
         com.ltots.app.lyrics.Lyrics.init(this)
+        com.ltots.app.lyrics.AiSync.init(this)
         AudioEngine.init(this)
         com.ltots.app.download.DownloadManager.init(this)
         com.ltots.app.identify.SongFinder.init(this)

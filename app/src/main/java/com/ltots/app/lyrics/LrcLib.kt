@@ -85,6 +85,31 @@ class LrcLib(private val base: String = "https://lrclib.net/api") {
      * plain lyrics are used only when no trustworthy synced version is available.
      */
     fun find(q: SongQuery): Pair<Candidate, String>? {
+        return findStrict(q)
+    }
+
+    /**
+     * For edits and re-uploads ("Rather Be (But it hits different)" by some channel): searches
+     * by the song's own name alone and accepts an exact name match even when the length and
+     * artist differ. The caller must not trust its timings for this file.
+     */
+    fun findLoose(q: SongQuery): Pair<Candidate, String>? {
+        val base = SongMatch.baseTitle(q.title)
+        val dash = Regex("""\s+[-–—]\s+""").split(base, limit = 2)
+        val titles = LinkedHashSet<String>().apply { if (dash.size == 2) add(SongMatch.baseTitle(dash[1])); add(base) }
+        val artist = q.artist?.takeIf { it.isNotBlank() && !it.equals("<unknown>", true) }?.let(SongMatch::mainArtist)
+        for (t in titles) {
+            val runs = listOfNotNull(artist?.let { it to t }, (if (dash.size == 2) SongMatch.mainArtist(dash[0]) to t else null), null to t)
+            for ((a, title) in runs) {
+                val results = runCatching { search(a, title) }.getOrNull() ?: continue
+                val c = SongMatch.pickLoose(q, a ?: artist, title, results) ?: continue
+                return c to "${c.artist} — ${c.title}"
+            }
+        }
+        return null
+    }
+
+    private fun findStrict(q: SongQuery): Pair<Candidate, String>? {
         val secs = (q.durationMs / 1000).takeIf { it > 0 }
         val tries = SongMatch.interpretations(q)
         var reached = false

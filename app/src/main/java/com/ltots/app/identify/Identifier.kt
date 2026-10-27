@@ -41,7 +41,8 @@ internal data class Window(val start: Int, val length: Int, val score: Double)
 /**
  * Finds the song in a clip, Shazam-style, and ranks what it finds:
  *  1. the video's own music tag (TikTok's music label),
- *  2. AI separation of music from talking and noise,
+ *  2. AI separation of music from talking and noise — unless what it pulls out is really an
+ *     instrument playing the tune (covers, someone playing along), when the untouched sound is used,
  *  3. Shazam fingerprints of the best moments — of the clip and of the separated music,
  *  4. if that fails, the same at the speeds TikTok edits use (sped up / slowed),
  *  5. if that fails too, AI lyrics listening and a lyrics search,
@@ -66,7 +67,7 @@ class Identifier(
     fun soundRunning(detail: String) = set(Step.SOUND, StepState.RUNNING, detail)
 
     /** Hits Shazam made, with the window/source/speed they came from. */
-    private data class SoundHit(val hit: ShazamHit, val window: Int, val ai: Boolean, val speed: Double)
+    private data class SoundHit(val hit: ShazamHit, val window: Int, val ai: Boolean, val speed: Double, val atSec: Double)
 
     suspend fun run(clip: ClipAudio): List<Suggestion> = withContext(Dispatchers.Default) {
         set(Step.SOUND, StepState.DONE, "%.0f s of sound".format(clip.seconds))
@@ -88,6 +89,7 @@ class Identifier(
         var music: FloatArray? = null
         var voice: FloatArray? = null
         var voiceHeavy = false
+        var instrument = false
         if (separatorModel != null && separatorModel.isFile) {
             set(Step.SEPARATE, StepState.RUNNING, "Separating…", 0f)
             runCatching {
@@ -98,8 +100,12 @@ class Identifier(
             }.onSuccess { stems ->
                 music = stems.music; voice = stems.voice
                 val ratio = Dsp.rms(stems.voice) / max(1e-6, Dsp.rms(stems.music))
-                voiceHeavy = ratio > 0.5
+                // A guitar, piano, violin or sax melody often ends up in the "voice" part.
+                // Then it isn't talking over the song: it *is* the song, so keep it in.
+                instrument = ratio > 0.5 && instrumentLike(stems.voice, stems.music)
+                voiceHeavy = ratio > 0.5 && !instrument
                 set(Step.SEPARATE, StepState.DONE, when {
+                    instrument -> "An instrument plays the tune — kept it in"
                     ratio > 1.5 -> "Lots of talking over the music — removed it"
                     ratio > 0.5 -> "Voices over the music — separated them"
                     else -> "Mostly music"
@@ -110,38 +116,59 @@ class Identifier(
 
         val musicStem: FloatArray? = music
         val voiceStem: FloatArray? = voice
-        val origWindows = pickWindows(pcm, musicStem, voiceStem, forStem = false)
+        // Windows of the untouched sound: where talking is quietest, or simply the loudest
+        // moments when the "voice" is an instrument. A loudest-moment window of the untouched
+        // sound is always tried as well, in case the separator mistook the tune for a voice.
+        val origWindows = if (instrument) pickWindows(pcm, null, null, forStem = false)
+            else pickWindows(pcm, musicStem, voiceStem, forStem = false)
+        val rawWindows = if (instrument || voiceStem == null) emptyList()
+            else pickWindows(pcm, null, null, forStem = false).filter { w -> origWindows.take(2).all { abs(it.start - w.start) >= 6 * ClipAudio.RATE } }
         val stemWindows = musicStem?.let { pickWindows(it, it, voiceStem, forStem = true) }.orEmpty()
+        // Moments spread over the whole clip, so a video that plays two songs gets both heard,
+        // not just the loudest one twice.
+        // (The separator only covers the first $SEPARATE_SECONDS s; past that, the untouched sound.)
+        val spanFromStem = voiceHeavy && musicStem != null && musicStem.size >= pcm.size - ClipAudio.RATE
+        val spanWindows = spanWindows(
+            (if (spanFromStem) musicStem else pcm)!!.size,
+            (origWindows.take(2) + rawWindows.take(1) + stemWindows.take(2)).map { it.start },
+        )
 
         // 3. Shazam at normal speed
         set(Step.MATCH, StepState.RUNNING, "Asking Shazam…")
         val hits = ArrayList<SoundHit>()
-        val plan = ArrayList<Triple<Int, Boolean, Double>>() // window index, ai, speed
-        origWindows.take(2).indices.forEach { plan += Triple(it, false, 1.0) }
-        stemWindows.take(2).indices.forEach { plan += Triple(it, true, 1.0) }
+        val plan = ArrayList<Triple<Int, Src, Double>>() // window index, source, speed
+        origWindows.take(2).indices.forEach { plan += Triple(it, Src.ORIG, 1.0) }
+        rawWindows.take(1).indices.forEach { plan += Triple(it, Src.RAW, 1.0) }
+        stemWindows.take(2).indices.forEach { plan += Triple(it, Src.STEM, 1.0) }
+        spanWindows.indices.forEach { plan += Triple(it, Src.SPAN, 1.0) }
         val errorCount = java.util.concurrent.atomic.AtomicInteger()
         val lastErr = java.util.concurrent.atomic.AtomicReference<String?>(null)
-        suspend fun ask(q: List<Triple<Int, Boolean, Double>>) = coroutineScope {
+        fun windowsOf(src: Src) = when (src) { Src.ORIG -> origWindows; Src.RAW -> rawWindows; Src.STEM -> stemWindows; Src.SPAN -> spanWindows }
+        suspend fun ask(q: List<Triple<Int, Src, Double>>) = coroutineScope {
             val gate = Semaphore(3)
-            q.map { (w, ai, speed) ->
+            q.map { (w, from, speed) ->
                 async(Dispatchers.IO) {
                     gate.withPermit {
+                        val ai = from == Src.STEM || (from == Src.SPAN && spanFromStem)
                         val src = if (ai) musicStem!! else pcm
-                        val win = (if (ai) stemWindows else origWindows)[w]
+                        val win = windowsOf(from)[w]
                         val seg = src.copyOfRange(win.start, win.start + win.length)
                         val audio = if (speed == 1.0) seg else Dsp.resample(seg, speed)
                         val clipped = if (audio.size > SEG * ClipAudio.RATE) audio.copyOf(SEG * ClipAudio.RATE) else audio
                         runCatching { Shazam.recognize(ShazamSignature.from(ClipLoader.normalize(clipped))) }
                             .onFailure { errorCount.incrementAndGet(); lastErr.set(it.message) }
-                            .getOrNull()?.let { SoundHit(it, w, ai, speed) }
+                            .getOrNull()?.let { SoundHit(it, w, ai, speed, win.start / ClipAudio.RATE.toDouble()) }
                     }
                 }
             }.awaitAll().filterNotNull()
         }
         hits += ask(plan)
         val errors = errorCount.get()
+        val songsAt = hits.groupBy { Ranking.key(it.hit.title, it.hit.artist) }
         set(Step.MATCH, if (hits.isEmpty() && errors == plan.size) StepState.FAILED else StepState.DONE,
             when {
+                songsAt.size >= 2 && songsAt.values.map { g -> g.map { it.atSec } }.let { ts -> ts.all { a -> ts.all { b -> a === b || a.none { x -> b.any { y -> abs(x - y) < 6 } } } } } ->
+                    "${songsAt.size} different songs at different moments"
                 hits.isNotEmpty() -> "${hits.distinctBy { Ranking.key(it.hit.title, it.hit.artist) }.size} match(es) from ${hits.size} of ${plan.size} listens"
                 errors == plan.size -> lastErr.get() ?: "Couldn't reach Shazam"
                 else -> "No match at normal speed"
@@ -150,21 +177,22 @@ class Identifier(
         // 4. Sped-up / slowed
         val onlyEdits = hits.isNotEmpty() && hits.all { Ranking.versionOf(it.hit.title) in setOf("Sped up", "Slowed") }
         if ((hits.isEmpty() || onlyEdits) && errors < plan.size) {
-            // Sweep the separated music when voices cover the song; otherwise the full mix
-            // (the separator also removes the singing, which helps Shazam with the original).
-            val useAi = stemWindows.isNotEmpty() && voiceHeavy
+            // When voices cover the song, sweep the separated music and the untouched sound
+            // (the separator may have taken out an instrument playing the tune); otherwise
+            // just the untouched sound.
+            val sources = if (stemWindows.isNotEmpty() && voiceHeavy) listOf(Src.STEM, Src.ORIG) else listOf(Src.ORIG)
             var tried = 0
             for (batch in SPEEDS.chunked(3)) {
                 currentCoroutineContext().ensureActive()
                 set(Step.SPEED, StepState.RUNNING, batch.joinToString(", ") { "%.2f×".format(it) }, tried / SPEEDS.size.toFloat())
-                val found = ask(batch.map { Triple(0, useAi, it) })
+                val found = ask(batch.flatMap { sp -> sources.map { Triple(0, it, sp) } })
                 tried += batch.size
                 if (found.isNotEmpty()) {
                     hits += found
                     // A second listen at that speed, elsewhere in the clip, to confirm it.
-                    val sp = found.first().speed
-                    val other = if (useAi) stemWindows else origWindows
-                    if (other.size > 1) hits += ask(listOf(Triple(1, useAi, sp)))
+                    val first = found.first()
+                    val from = if (first.ai) Src.STEM else Src.ORIG
+                    if (windowsOf(from).size > 1) hits += ask(listOf(Triple(1, from, first.speed)))
                     break
                 }
             }
@@ -181,7 +209,7 @@ class Identifier(
             }
             identities += Identity(
                 h.hit.title, h.hit.artist, album = h.hit.album, year = h.hit.year, coverUrl = h.hit.coverUrl,
-                previewUrl = h.hit.previewUrl, speed = h.speed.takeIf { it != 1.0 },
+                previewUrl = h.hit.previewUrl, speed = h.speed.takeIf { it != 1.0 }, heardAt = listOf(h.atSec),
                 clues = listOf(Clue(kind, (if (kind == Clue.Kind.SOUND_SPEED) 1.7 else 2.0) * skewFactor(h.hit), note)),
             )
         }
@@ -190,7 +218,9 @@ class Identifier(
         if (hits.isEmpty()) {
             if (lyricsModel != null && lyricsModel.isFile) {
                 set(Step.LYRICS, StepState.RUNNING, "Listening…")
-                val heard = runCatching { listenToLyrics(pcm, musicStem, voiceStem) }.getOrNull()
+                // Whisper always listens to the untouched sound; with an instrument playing the
+                // tune, it listens where the clip is loudest rather than where the "voice" is.
+                val heard = runCatching { listenToLyrics(pcm, musicStem.takeIf { !instrument }, voiceStem.takeIf { !instrument }) }.getOrNull()
                 if (heard != null) {
                     val phrase = Lyricist.searchPhrase(heard.text)
                     set(Step.LYRICS, StepState.RUNNING, "Heard: “${heard.text.take(80)}”")
@@ -238,7 +268,16 @@ class Identifier(
             val src = pcm
             val len = minOf(src.size, LYRICS_SECONDS * ClipAudio.RATE)
             var start = 0
-            if (voice != null && music != null && src.size > len) {
+            if ((voice == null || music == null) && src.size > len) {
+                // No usable voice part: the loudest stretch.
+                var best = -1.0
+                var s = 0
+                while (s + len <= src.size) {
+                    val sc = Dsp.rms(src, s, s + len)
+                    if (sc > best) { best = sc; start = s }
+                    s += ClipAudio.RATE * 3
+                }
+            } else if (voice != null && music != null && src.size > len) {
                 var best = -1.0
                 var s = 0
                 val n = minOf(voice.size, music.size)
@@ -253,13 +292,77 @@ class Identifier(
         }
     }
 
+    /** Which sound a fingerprint is taken from. */
+    private enum class Src {
+        /** The untouched sound, at the moments with the least talking over the music. */
+        ORIG,
+        /** The untouched sound at its loudest moment, voices and all. */
+        RAW,
+        /** The music the AI separated out. */
+        STEM,
+        /** Moments spread over the whole clip (the separated music when voices cover it). */
+        SPAN,
+    }
+
     companion object {
         const val SEG = 12
+
+        /**
+         * Whether the separator's "voice" part is really an instrument playing the tune — a
+         * guitar or piano melody, a violin, a sax — rather than someone talking or singing.
+         * Speech comes in syllables with gaps between words; an instrument plays on steadily and
+         * swells and fades together with the rest of the music.
+         */
+        internal fun instrumentLike(voice: FloatArray, music: FloatArray): Boolean {
+            val frame = ClipAudio.RATE / 20 // 50 ms
+            val n = minOf(voice.size, music.size) / frame
+            if (n < 40) return false
+            val v = DoubleArray(n) { Dsp.rms(voice, it * frame, (it + 1) * frame) }
+            val m = DoubleArray(n) { Dsp.rms(music, it * frame, (it + 1) * frame) }
+            // Only where something is playing at all.
+            val loud = (v.indices).map { v[it] + m[it] }.sorted()[(n * 0.9).toInt()]
+            val live = v.indices.filter { v[it] + m[it] > 0.1 * loud }
+            if (live.size < 40) return false
+            val vTop = live.map { v[it] }.sorted()[(live.size * 0.9).toInt()]
+            if (vTop < 1e-6) return false
+            // Share of the time the "voice" keeps sounding (talking is ~55–75 %, an instrument 85 %+).
+            val steady = live.count { v[it] > 0.15 * vTop } / live.size.toDouble()
+            // How closely its loudness follows the music's, in log scale.
+            val lv = live.map { kotlin.math.ln(v[it] + 1e-6) }
+            val lm = live.map { kotlin.math.ln(m[it] + 1e-6) }
+            val av = lv.average(); val am = lm.average()
+            var cov = 0.0; var sv = 0.0; var sm = 0.0
+            for (i in lv.indices) { val a = lv[i] - av; val b = lm[i] - am; cov += a * b; sv += a * a; sm += b * b }
+            val corr = if (sv > 0 && sm > 0) cov / kotlin.math.sqrt(sv * sm) else 0.0
+            return steady >= 0.9 || (steady >= 0.8 && corr >= 0.3)
+        }
 
         /** Shazam reports how far off the speed is; a closer fit is a more believable match. */
         internal fun skewFactor(h: ShazamHit): Double =
             1.0 - minOf(0.4, (abs(h.frequencySkew) + abs(h.timeSkew)) * 4.0)
         const val SEPARATE_SECONDS = 75
+
+        /**
+         * Extra 12-second moments every ~15 s across a clip of [size] samples, skipping those
+         * within 6 s of a moment already listened to ([taken], sample starts). At most [max].
+         */
+        internal fun spanWindows(size: Int, taken: List<Int>, max: Int = 6): List<Window> {
+            val rate = ClipAudio.RATE
+            val len = SEG * rate
+            if (size < 30 * rate) return emptyList()
+            val out = ArrayList<Window>()
+            var s = 0
+            while (s + len <= size) {
+                if ((taken + out.map { it.start }).all { abs(it - s) >= 6 * rate }) out += Window(s, len, 0.0)
+                s += 15 * rate
+            }
+            // Always the very end too: the second song is often the last few seconds.
+            val last = size - len
+            if ((taken + out.map { it.start }).all { abs(it - last) >= 6 * rate }) out += Window(last, len, 0.0)
+            if (out.size <= max) return out
+            // Too many: keep them evenly spread, first and last included.
+            return List(max) { i -> out[(i * (out.size - 1).toDouble() / (max - 1)).toInt()] }
+        }
         const val LYRICS_SECONDS = 28
         /** Clip speed vs. the record, in the order TikTok edits are common. Shazam tolerates ±5 %. */
         val SPEEDS = listOf(1.26, 0.86, 1.17, 1.36, 0.93, 0.79, 1.08, 1.47, 0.73)

@@ -54,6 +54,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ltots.app.audio.AudioEngine
+import com.ltots.app.ui.topInset
 import com.ltots.app.audio.BiquadCoefs
 import com.ltots.app.audio.EqDefaults
 import com.ltots.app.audio.EqMath
@@ -61,6 +62,7 @@ import com.ltots.app.audio.EqSmooth
 import com.ltots.app.audio.EqState
 import com.ltots.app.audio.EqTone
 import com.ltots.app.data.EqProfiles
+import com.ltots.app.data.SongSort
 import com.ltots.app.data.ThemeConfig
 import com.ltots.app.data.Users
 import com.ltots.app.profiles.ProfileTransfer
@@ -68,6 +70,7 @@ import com.ltots.app.profiles.UserSwitch
 import com.ltots.app.ui.bottomChrome
 import com.ltots.app.ui.components.DeleteDialog
 import com.ltots.app.ui.components.Pill
+import com.ltots.app.ui.components.PillRow
 import com.ltots.app.ui.components.RenameDialog
 import com.ltots.app.ui.components.SectionTitle
 import com.ltots.app.ui.components.SwitchRow
@@ -126,7 +129,7 @@ fun ProfileScreen() {
         }
     }
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = topInset()).padding(horizontal = 14.dp)) {
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Profile", style = MaterialTheme.typography.displaySmall, color = pal.text)
@@ -471,6 +474,25 @@ private fun AppSettingsCard() {
                 color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 10.dp),
             )
 
+            SectionTitle("App settings · library")
+            Text("Sort songs by", color = pal.text, style = MaterialTheme.typography.bodyMedium)
+            PillRow(
+                SongSort.entries.map { it to it.label }, settings.songSort,
+                { s -> AudioEngine.updateSettings { it.copy(songSort = s) } },
+                Modifier.padding(vertical = 8.dp),
+            )
+            Text(
+                when (settings.songSort) {
+                    SongSort.TITLE -> "Songs in alphabetical order."
+                    SongSort.GENRE -> "Songs of the same genre play one after the other, related genres side by side (rock next to metal, soul next to R&B). Songs without a genre tag come last."
+                    SongSort.COLOR -> "Songs whose covers have the same colour play one after the other, from red round the rainbow to pink, then black, grey and white."
+                    SongSort.RANDOM -> "A new random order every time the app starts."
+                } + " The Colour and Genre buttons on the Library page sort differently just until the app restarts, without changing this.",
+                color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 10.dp),
+            )
+
+            AiLyricsSetting()
+
             SectionTitle("App settings · quality & battery")
             SwitchRow(
                 "Power-saving playback", settings.directPlayback,
@@ -502,6 +524,41 @@ private fun AppSettingsCard() {
                 sub = "Uses the lighter Rubber Band engine: about half the processing (and battery) while pitch or speed is changed, with slightly less polished sound. Nothing runs at original pitch and speed either way." +
                     if (settings.efficientPitch && settings.preserveFormants) " Not used while Natural voices is on: only the full engine keeps voices natural." else "",
             )
+        }
+    }
+}
+
+/** The on-device AI that times plain lyrics: on/off, and its speech model. */
+@Composable
+private fun AiLyricsSetting() {
+    val pal = LocalPalette.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    val settings by AudioEngine.settings.collectAsState()
+    val ready by com.ltots.app.lyrics.AiSync.modelReady.collectAsState()
+    val status by com.ltots.app.lyrics.AiSync.status.collectAsState()
+    SectionTitle("App settings · lyrics AI")
+    SwitchRow(
+        "Time plain lyrics with AI", settings.aiLyrics, { on -> AudioEngine.updateSettings { it.copy(aiLyrics = on) } },
+        sub = "When a song's lyrics have no timing anywhere, an on-device AI listens to the song and matches the words it hears " +
+            "to the lyrics, so they follow along and can be tapped. Runs for the song you play, and for the whole library while " +
+            "charging. Nothing leaves the phone. Works best for English songs.",
+    )
+    val s = status
+    Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            when {
+                s is com.ltots.app.lyrics.AiSync.Status.DownloadingModel -> "Downloading the speech model… ${(s.progress * 100).toInt()}%"
+                ready -> "Speech model installed (English, ${com.ltots.app.lyrics.AiSync.MODEL_SIZE})."
+                s is com.ltots.app.lyrics.AiSync.Status.Failed && s.key == null -> s.message
+                else -> "Needs a speech model (English, ${com.ltots.app.lyrics.AiSync.MODEL_SIZE}), downloaded once."
+            },
+            color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.width(8.dp))
+        if (s !is com.ltots.app.lyrics.AiSync.Status.DownloadingModel) {
+            if (ready) Pill("Remove", false, { com.ltots.app.lyrics.AiSync.removeModel(context) })
+            else Pill("Download", true, { scope.launch { com.ltots.app.lyrics.AiSync.downloadModel(context) } })
         }
     }
 }

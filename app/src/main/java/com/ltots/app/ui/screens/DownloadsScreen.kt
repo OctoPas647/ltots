@@ -79,9 +79,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ltots.app.data.Track
+import com.ltots.app.ui.topInset
 import com.ltots.app.download.DownloadManager
 import com.ltots.app.download.DownloadTask
 import com.ltots.app.download.Engine
+import com.ltots.app.download.Suggestions
 import com.ltots.app.download.SyncedPlaylist
 import com.ltots.app.download.TaskState
 import com.ltots.app.identify.ClipSource
@@ -110,6 +112,9 @@ import com.ltots.app.ytm.YtItem
 import com.ltots.app.ytm.YtPlaylist
 import com.ltots.app.ytm.YtSong
 import kotlinx.coroutines.delay
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import kotlinx.coroutines.launch
 
 /** One screen in the Downloads tab's back stack. */
@@ -222,7 +227,7 @@ fun DownloadsScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
         submit(s, fromShare = true)
     }
 
-    Column(Modifier.fillMaxSize().padding(horizontal = 14.dp)) {
+    Column(Modifier.fillMaxSize().padding(top = topInset()).padding(horizontal = 14.dp)) {
         // Header
         Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             if (stack.isNotEmpty()) {
@@ -279,12 +284,20 @@ fun DownloadsScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
 
         GlassPanel(Modifier.fillMaxWidth().weight(1f), tintBoost = 0.06f) {
             when (val l = loaded) {
-                null -> if (finder != FinderState.Idle) FinderContent(
-                    finder, player, onOpenPlayer,
-                    onOpenAlbum = { stack += Page.AlbumPage(it) },
-                    onOpenArtist = { stack += Page.Artist(it) },
-                    onToast = { toast = it },
-                ) else HomeContent(player, onOpenPlayer, onToast = { toast = it })
+                // Best matches and Downloads in one widget, stacked like iPhone widgets: swipe up
+                // and down (or tap the dots) to switch.
+                null -> GetStack(
+                    finder,
+                    matches = {
+                        if (finder != FinderState.Idle) FinderContent(
+                            finder, player, onOpenPlayer,
+                            onOpenAlbum = { stack += Page.AlbumPage(it) },
+                            onOpenArtist = { stack += Page.Artist(it) },
+                            onToast = { toast = it },
+                        ) else MatchesIdle()
+                    },
+                    downloads = { HomeContent(player, onOpenPlayer, onToast = { toast = it }) },
+                )
                 Loaded.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = pal.accent) }
                 is Loaded.Error -> Message(l.message, "Try again") { reload++ }
                 is Loaded.Results -> SearchContent(l.result, (page as? Page.Search)?.params,
@@ -378,11 +391,25 @@ private fun SearchContent(r: SearchResult, params: String?, onChip: (com.ltots.a
             Message("Nothing found. Try other words, or paste a link.", null) {}
             return@Column
         }
+        // Songs like the one found (the first song in the results), shown after the first section.
+        val context = LocalContext.current
+        val seed = remember(r) { r.sections.flatMap { it.items }.filterIsInstance<YtSong>().let { l -> l.firstOrNull { !it.isVideo } ?: l.firstOrNull() } }
+        var alsoLike by remember(r) { mutableStateOf<List<YtSong>>(emptyList()) }
+        LaunchedEffect(seed) { if (seed != null) alsoLike = runCatching { Suggestions.forSong(context, seed) }.getOrDefault(emptyList()) }
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 12.dp)) {
             // Keys include the position: YouTube sometimes lists the same song twice.
             r.sections.forEachIndexed { si, s ->
                 s.title?.let { t -> item(key = "h$si") { SectionTitle(t, Modifier.padding(start = 12.dp, top = 8.dp)) } }
                 itemsIndexed(s.items, key = { idx, it -> "$si-$idx-" + keyOf(it) }) { _, it -> ItemRow(it, onClick = { onOpen(it) }) }
+                if (si == 0 && alsoLike.isNotEmpty() && seed != null) {
+                    item(key = "likeh") {
+                        Column(Modifier.padding(start = 12.dp, top = 8.dp)) {
+                            SectionTitle("You might also like")
+                            Text("Songs like “${seed.title}”", color = pal.textFaint, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                    itemsIndexed(alsoLike, key = { idx, it -> "like-$idx-" + it.videoId }) { _, it -> ItemRow(it, onClick = { onOpen(it) }) }
+                }
             }
             item {
                 Text(
@@ -499,6 +526,14 @@ private fun HomeContent(player: PlayerUi, onOpenPlayer: () -> Unit, onToast: (St
     val active = tasks.filter { !it.state.finished }
     val history = tasks.filter { it.state.finished }
 
+    // Suggestions: songs like the last few downloads (or the newest songs on the phone),
+    // looked up again when a new download finishes.
+    val context = LocalContext.current
+    val suggested by Suggestions.home.collectAsState()
+    var suggesting by remember { mutableStateOf(false) }
+    val lastDone = history.filter { it.state == TaskState.DONE }.maxByOrNull { it.finishedAt }?.id
+    LaunchedEffect(lastDone) { suggesting = true; runCatching { Suggestions.loadHome(context) }; suggesting = false }
+
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 12.dp)) {
         if (active.isNotEmpty()) {
             item("qh") {
@@ -511,6 +546,35 @@ private fun HomeContent(player: PlayerUi, onOpenPlayer: () -> Unit, onToast: (St
                 }
             }
             items(active, key = { "q" + it.id }) { TaskRow(it, player, onOpenPlayer) }
+        }
+
+        val sug = suggested
+        if (sug != null && sug.basedOn.isNotEmpty() || suggesting) {
+            item("sugh") {
+                Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        SectionTitle("Suggested for you")
+                        if (sug != null && sug.basedOn.isNotEmpty()) Text(
+                            "Like " + sug.basedOn.joinToString(", ") { "“$it”" },
+                            color = pal.textFaint, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (suggesting) CircularProgressIndicator(color = pal.accent, strokeWidth = 2.5.dp, modifier = Modifier.size(22.dp))
+                    else Pill("New picks", false, {
+                        scope.launch { suggesting = true; runCatching { Suggestions.loadHome(context, force = true) }; suggesting = false }
+                    })
+                }
+            }
+            if (sug != null && sug.songs.isEmpty() && !suggesting && sug.basedOn.isNotEmpty()) item("sug0") {
+                Text("No suggestions right now. Check your connection and tap New picks.", color = pal.textDim,
+                    style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+            }
+            if (sug != null) items(sug.songs, key = { "sg" + it.videoId }) { song ->
+                ItemRow(song, onClick = {
+                    val n = DownloadManager.enqueueSong(song)
+                    onToast(if (n > 0) "Downloading “${song.title}”" else "Already downloaded or in the queue")
+                })
+            }
         }
 
         if (synced.isNotEmpty()) {
@@ -541,6 +605,81 @@ private fun HomeContent(player: PlayerUi, onOpenPlayer: () -> Unit, onToast: (St
 
         item("finder-ai") { FinderModelsCard() }
         item("engine") { EngineCard(onToast) }
+    }
+}
+
+/**
+ * One widget that holds two: Best matches and Downloads, one above the other like an iPhone
+ * widget stack. Each scrolls on its own; pulling past its top or bottom moves to the other,
+ * and the dots at the side switch directly. A new song search brings Best matches forward.
+ */
+@Composable
+private fun GetStack(finder: FinderState, matches: @Composable () -> Unit, downloads: @Composable () -> Unit) {
+    val pal = LocalPalette.current
+    val scope = rememberCoroutineScope()
+    val names = listOf("Best matches", "Downloads")
+    val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = if (finder != FinderState.Idle) 0 else 1) { 2 }
+    // A search starting (or a link shared to the app) shows its results.
+    val searching = finder !is FinderState.Idle
+    LaunchedEffect(searching, (finder as? FinderState.Results)?.label) { if (searching) pager.animateScrollToPage(0) }
+    Box(Modifier.fillMaxSize()) {
+        androidx.compose.foundation.pager.VerticalPager(
+            pager, Modifier.fillMaxSize(), beyondViewportPageCount = 1, pageSpacing = 10.dp,
+        ) { page ->
+            Box(
+                Modifier.fillMaxSize().graphicsLayer {
+                    // The page leaving shrinks and fades a little, as in a widget stack.
+                    val f = kotlin.math.abs((pager.currentPage - page) + pager.currentPageOffsetFraction).coerceIn(0f, 1f)
+                    val sc = 1f - 0.07f * f
+                    scaleX = sc; scaleY = sc; alpha = 1f - 0.55f * f
+                    clip = true; shape = RoundedCornerShape(22.dp)
+                }
+            ) { if (page == 0) matches() else downloads() }
+        }
+        // Which widget is coming, while swiping.
+        AnimatedVisibility(
+            pager.isScrollInProgress, Modifier.align(Alignment.TopCenter).padding(top = 8.dp),
+            enter = androidx.compose.animation.fadeIn(), exit = androidx.compose.animation.fadeOut(),
+        ) {
+            Text(
+                names[pager.targetPage], color = pal.onAccent, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.clip(RoundedCornerShape(50)).background(pal.accent).padding(horizontal = 12.dp, vertical = 5.dp),
+            )
+        }
+        // Page dots on the right edge.
+        Column(
+            Modifier.align(Alignment.CenterEnd).padding(end = 3.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp), horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            repeat(2) { i ->
+                val on = pager.currentPage == i
+                val h by androidx.compose.animation.core.animateDpAsState(if (on) 16.dp else 6.dp, label = "dot")
+                Box(
+                    Modifier.size(width = 6.dp, height = h).clip(RoundedCornerShape(50))
+                        .background(pal.text.copy(alpha = if (on) 0.75f else 0.25f))
+                        .clickable { scope.launch { pager.animateScrollToPage(i) } }
+                        .semantics { contentDescription = names[i] }
+                )
+            }
+        }
+    }
+}
+
+/** Best matches before any search: how to start one. */
+@Composable
+private fun MatchesIdle() {
+    val pal = LocalPalette.current
+    Column(Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 16.dp)) {
+        Text("Best matches", style = MaterialTheme.typography.titleMedium, color = pal.text)
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "Find the song in a TikTok, Short or any video: paste its link above, share it to LToTS, " +
+                "or let it listen with the mic. The matches show up here.",
+            color = pal.textDim, style = MaterialTheme.typography.bodyMedium,
+        )
+        Spacer(Modifier.weight(1f))
+        Text("Swipe up for Downloads", color = pal.textFaint, style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.align(Alignment.CenterHorizontally))
     }
 }
 

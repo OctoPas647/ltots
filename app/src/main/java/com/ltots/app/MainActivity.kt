@@ -1,6 +1,7 @@
 package com.ltots.app
 
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -112,6 +113,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun applySystemBars() {
+        // Always lay out behind the camera cutout (some skins, like HyperOS, letterbox the app
+        // with a black strip there once the status bar is hidden). The pages keep clear of the
+        // camera themselves; only the background reaches under it.
+        val attrs = window.attributes
+        if (attrs.layoutInDisplayCutoutMode != WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS) {
+            attrs.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            window.attributes = attrs
+        }
         val c = WindowCompat.getInsetsController(window, window.decorView)
         // Swiping in from the edge shows the bars briefly, then they hide again on their own.
         c.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE

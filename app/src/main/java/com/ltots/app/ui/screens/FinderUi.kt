@@ -261,8 +261,9 @@ private fun ResultsView(
         item("head") {
             Row(Modifier.padding(start = 16.dp, end = 8.dp, top = 14.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Best matches", style = MaterialTheme.typography.titleMedium, color = pal.text)
-                    Text("Most likely first · ${s.label}", color = pal.textFaint, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    val songs = s.suggestions.mapNotNull { it.part }.distinct().size
+                    Text(if (songs >= 2) "$songs songs in this video" else "Best matches", style = MaterialTheme.typography.titleMedium, color = pal.text)
+                    Text(if (songs >= 2) "In the order they play · ${s.label}" else "Most likely first · ${s.label}", color = pal.textFaint, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 IconButton(onClick = { Preview.stop(); SongFinder.clear() }) { Icon(Icons.Rounded.Close, "Close", tint = pal.textDim) }
             }
@@ -304,8 +305,16 @@ private fun SuggestionRow(
             .background(if (expanded) pal.text.copy(alpha = 0.06f) else Color.Transparent)
             .clickable(onClick = onClick).padding(horizontal = 8.dp, vertical = 8.dp)
     ) {
+        s.part?.let { part ->
+            // A clip with several songs: which one this is and when it plays.
+            Text(
+                "Song $part" + (s.heardAt.takeIf { it.isNotEmpty() }?.let { at -> " · at " + at.take(3).joinToString(", ") { "%d:%02d".format(it.toInt() / 60, it.toInt() % 60) } } ?: ""),
+                color = pal.accent, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(start = 24.dp, bottom = 4.dp),
+            )
+        }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("$rank", color = if (rank == 1) pal.accent else pal.textFaint, fontWeight = FontWeight.Bold,
+            Text("$rank", color = if (rank == 1 || s.part != null) pal.accent else pal.textFaint, fontWeight = FontWeight.Bold,
                 style = MaterialTheme.typography.titleMedium, modifier = Modifier.width(24.dp))
             NetImage(s.coverUrl, 52.dp, RoundedCornerShape(10.dp), placeholder = Icons.Rounded.MusicNote)
             Spacer(Modifier.width(12.dp))
