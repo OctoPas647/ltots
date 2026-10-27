@@ -609,8 +609,8 @@ private fun HomeContent(player: PlayerUi, onOpenPlayer: () -> Unit, onToast: (St
 }
 
 /**
- * One widget that holds two: Best matches and Downloads, one above the other like an iPhone
- * widget stack. Each scrolls on its own; pulling past its top or bottom moves to the other,
+ * One widget that holds two: Best matches and Downloads, side by side like iPhone widget
+ * pages. Each scrolls up and down on its own; swiping left or right moves to the other,
  * and the dots at the side switch directly. A new song search brings Best matches forward.
  */
 @Composable
@@ -623,7 +623,7 @@ private fun GetStack(finder: FinderState, matches: @Composable () -> Unit, downl
     val searching = finder !is FinderState.Idle
     LaunchedEffect(searching, (finder as? FinderState.Results)?.label) { if (searching) pager.animateScrollToPage(0) }
     Box(Modifier.fillMaxSize()) {
-        androidx.compose.foundation.pager.VerticalPager(
+        androidx.compose.foundation.pager.HorizontalPager(
             pager, Modifier.fillMaxSize(), beyondViewportPageCount = 1, pageSpacing = 10.dp,
         ) { page ->
             Box(
@@ -646,16 +646,16 @@ private fun GetStack(finder: FinderState, matches: @Composable () -> Unit, downl
                 modifier = Modifier.clip(RoundedCornerShape(50)).background(pal.accent).padding(horizontal = 12.dp, vertical = 5.dp),
             )
         }
-        // Page dots on the right edge.
-        Column(
-            Modifier.align(Alignment.CenterEnd).padding(end = 3.dp),
-            verticalArrangement = Arrangement.spacedBy(5.dp), horizontalAlignment = Alignment.CenterHorizontally,
+        // Page dots along the bottom edge.
+        Row(
+            Modifier.align(Alignment.BottomCenter).padding(bottom = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically,
         ) {
             repeat(2) { i ->
                 val on = pager.currentPage == i
                 val h by androidx.compose.animation.core.animateDpAsState(if (on) 16.dp else 6.dp, label = "dot")
                 Box(
-                    Modifier.size(width = 6.dp, height = h).clip(RoundedCornerShape(50))
+                    Modifier.size(width = h, height = 6.dp).clip(RoundedCornerShape(50))
                         .background(pal.text.copy(alpha = if (on) 0.75f else 0.25f))
                         .clickable { scope.launch { pager.animateScrollToPage(i) } }
                         .semantics { contentDescription = names[i] }
@@ -678,7 +678,7 @@ private fun MatchesIdle() {
             color = pal.textDim, style = MaterialTheme.typography.bodyMedium,
         )
         Spacer(Modifier.weight(1f))
-        Text("Swipe up for Downloads", color = pal.textFaint, style = MaterialTheme.typography.bodySmall,
+        Text("Swipe left for Downloads", color = pal.textFaint, style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.align(Alignment.CenterHorizontally))
     }
 }
