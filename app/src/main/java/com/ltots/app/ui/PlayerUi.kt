@@ -17,6 +17,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import com.ltots.app.data.LocalLibrary
@@ -42,6 +43,12 @@ class PlayerUi {
     var bufferedFraction by mutableFloatStateOf(0f)
     var shuffle by mutableStateOf(false)
     var repeatMode by mutableIntStateOf(Player.REPEAT_MODE_OFF)
+    /** Where the song sits in the queue, in the order it plays (shuffle included): 1-based. */
+    var queuePos by mutableIntStateOf(0)
+    var queueSize by mutableIntStateOf(0)
+    /** Length of the songs that play before this one, and of the whole queue (ms). */
+    var queueBeforeMs by mutableLongStateOf(0L)
+    var queueTotalMs by mutableLongStateOf(0L)
 
     fun refresh() {
         val c = controller ?: return
@@ -59,6 +66,25 @@ class PlayerUi {
         bufferedFraction = c.bufferedPercentage / 100f
         shuffle = c.shuffleModeEnabled
         repeatMode = c.repeatMode
+        readQueue(c)
+    }
+
+    private fun readQueue(c: Player) {
+        val tl = c.currentTimeline
+        val cur = c.currentMediaItemIndex
+        if (tl.isEmpty || cur == C.INDEX_UNSET) { queueSize = 0; return }
+        fun len(i: Int) = c.getMediaItemAt(i).mediaMetadata.durationMs?.takeIf { it > 0 } ?: 0L
+        var pos = 0; var before = 0L; var total = 0L; var passed = false
+        var i = tl.getFirstWindowIndex(c.shuffleModeEnabled)
+        var guard = 0
+        while (i != C.INDEX_UNSET && guard++ < tl.windowCount) {
+            val l = if (i == cur) durationMs.takeIf { it > 0 } ?: len(i) else len(i)
+            if (i == cur) { passed = true; pos = guard }
+            else if (!passed) before += l
+            total += l
+            i = tl.getNextWindowIndex(i, Player.REPEAT_MODE_OFF, c.shuffleModeEnabled)
+        }
+        queueSize = tl.windowCount; queuePos = pos; queueBeforeMs = before; queueTotalMs = total
     }
 
     fun togglePlay() {

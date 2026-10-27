@@ -229,7 +229,7 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
             openGroup != null -> GroupDetail(openGroup!!, player, bottom, onBack = { openGroup = null }, onPlayed = onOpenPlayer)
             view == LibView.SONGS -> SongList(
                 remember(filtered, sortBy, if (sortBy == SongSort.COLOR) colors else null) { SongSorter.sort(filtered, sortBy, colors) },
-                player, bottom, onOpenPlayer,
+                player, bottom, onOpenPlayer, sortBy,
             )
             view == LibView.MIXES -> MixGrid(remember(filtered) { Mixes.build(filtered) }, bottom) { m ->
                 openGroup = Group(m.title, "${m.kind.label} · ${m.subtitle}", m.tracks)
@@ -330,12 +330,31 @@ private fun SortBar(sortBy: SongSort, quick: SongSort?, readingColors: Boolean) 
 }
 
 @Composable
-private fun SongList(tracks: List<Track>, player: PlayerUi, bottom: Dp, onPlayed: () -> Unit) {
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = LocalListTop.current + 2.dp, bottom = bottom)) {
-        itemsIndexed(tracks, key = { _, t -> t.id }) { i, t ->
-            TrackRow(t, playing = player.trackId == t.id) { player.play(tracks, i); onPlayed() }
+private fun SongList(tracks: List<Track>, player: PlayerUi, bottom: Dp, onPlayed: () -> Unit, sortBy: SongSort) {
+    val state = androidx.compose.foundation.lazy.rememberLazyListState()
+    // The slider on the right shows where you are; dragging it jumps there.
+    com.ltots.app.ui.components.FastScrollBox(
+        state, tracks.size, top = LocalListTop.current + 8.dp, bottom = bottom,
+        label = { i -> tracks.getOrNull(i)?.let { songMark(it, sortBy) }.orEmpty() },
+    ) {
+        LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(top = LocalListTop.current + 2.dp, bottom = bottom)) {
+            itemsIndexed(tracks, key = { _, t -> t.id }) { i, t ->
+                TrackRow(t, playing = player.trackId == t.id) { player.play(tracks, i); onPlayed() }
+            }
         }
     }
+}
+
+/** What the scroll slider's bubble says for a song: its letter, or its genre when sorted by genre. */
+private fun songMark(t: Track, sortBy: SongSort): String = when (sortBy) {
+    SongSort.TITLE -> firstLetter(t.title)
+    SongSort.GENRE -> SongSorter.familyName(t.genre) ?: "Other"
+    else -> ""
+}
+
+private fun firstLetter(s: String): String {
+    val c = s.trim().trimStart('\'', '"', '(', '[', '.', '-').firstOrNull() ?: return "#"
+    return if (c.isLetter()) c.uppercaseChar().toString() else "#"
 }
 
 @Composable
@@ -438,7 +457,12 @@ private fun BigThumb(trackId: Long) {
 @Composable
 private fun ArtistList(groups: List<Group>, bottom: Dp, onOpen: (Group) -> Unit) {
     val pal = LocalPalette.current
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = LocalListTop.current + 2.dp, bottom = bottom)) {
+    val state = androidx.compose.foundation.lazy.rememberLazyListState()
+    com.ltots.app.ui.components.FastScrollBox(
+        state, groups.size, top = LocalListTop.current + 8.dp, bottom = bottom,
+        label = { i -> groups.getOrNull(i)?.let { firstLetter(it.title) }.orEmpty() },
+    ) {
+    LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(top = LocalListTop.current + 2.dp, bottom = bottom)) {
         items(groups, key = { it.title }) { g ->
             Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable { onOpen(g) }.padding(horizontal = 4.dp, vertical = 9.dp),
@@ -454,6 +478,7 @@ private fun ArtistList(groups: List<Group>, bottom: Dp, onOpen: (Group) -> Unit)
                 }
             }
         }
+    }
     }
 }
 

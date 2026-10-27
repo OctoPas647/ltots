@@ -196,6 +196,8 @@ data class ThemeConfig(
     val hideNavBar: Boolean = true,
     /** Hide the status bar (clock, battery) too, for fully full-screen. */
     val hideStatusBar: Boolean = false,
+    /** A second bar under the seek bar: how far through the album (the queue) you are. */
+    val albumProgress: Boolean = true,
     /** Accent follows the current song's cover: the AMOLED Cover theme. */
     val dynamicColors: Boolean = false,
     /**
@@ -337,7 +339,7 @@ object Json {
         put("corner", t.cornerDp.toDouble()); put("dark", t.darkMode)
         put("specStyle", t.spectrumStyle.name); put("specOpacity", t.spectrumOpacity.toDouble())
         put("ghost", t.showPreEqGhost); put("vfps", t.visualizerFps); put("vfpsV", 3)
-        put("black", t.pureBlack); put("hideNav", t.hideNavBar); put("hideStatus", t.hideStatusBar)
+        put("black", t.pureBlack); put("hideNav", t.hideNavBar); put("hideStatus", t.hideStatusBar); put("albumBar", t.albumProgress)
         put("dyn", t.dynamicColors)
         t.accentHsv?.let { put("aHsv", hsvJson(it)) }
         t.glowHsv?.let { put("gHsv", hsvJson(it)) }
@@ -393,6 +395,7 @@ object Json {
             pureBlack = o.optBoolean("black", d.pureBlack),
             hideNavBar = o.optBoolean("hideNav", d.hideNavBar),
             hideStatusBar = o.optBoolean("hideStatus", d.hideStatusBar),
+            albumProgress = o.optBoolean("albumBar", d.albumProgress),
             // Cover colours belong to the AMOLED Cover theme only (the separate switch is gone).
             dynamicColors = o.optBoolean("dyn", d.dynamicColors) && o.optBoolean("black", d.pureBlack),
             amoledAccent = if (o.has("amAccent")) o.optLong("amAccent") else null,

@@ -466,6 +466,10 @@ private fun AppSettingsCard() {
                 sub = "Swipe up from the bottom edge to bring it back for a moment.",
             )
             SwitchRow(
+                "Album progress bar", cfg.albumProgress, { on -> set { it.copy(albumProgress = on) } },
+                sub = "A thin second bar under the seek bar on Playing: which song of the album (or queue) you're on and how much is left.",
+            )
+            SwitchRow(
                 "Hide status bar", cfg.hideStatusBar, { on -> set { it.copy(hideStatusBar = on) } },
                 sub = "Clock and battery at the top. Swipe down from the top edge to see them.",
             )

@@ -160,6 +160,23 @@ fun NowPlayingScreen(player: PlayerUi, artwork: Bitmap?, onOpenEq: () -> Unit, o
             Text(formatTime(player.durationMs), color = pal.textDim, style = MaterialTheme.typography.bodySmall)
         }
 
+        // Album progress: how far through the album (the queue) you are. Profile > App settings.
+        val look by com.ltots.app.ui.theme.ThemeState.config.collectAsState()
+        if (look.albumProgress && player.queueSize > 1 && player.queueTotalMs > 0) {
+            val done = player.queueBeforeMs + (dragging?.let { (it * dur).toLong() } ?: player.positionMs)
+            val frac = (done.toFloat() / player.queueTotalMs).coerceIn(0f, 1f)
+            Column(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 6.dp)) {
+                Box(Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)).background(pal.text.copy(alpha = 0.12f))) {
+                    Box(Modifier.fillMaxWidth(frac).height(3.dp).background(pal.accent.copy(alpha = 0.7f)))
+                }
+                Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                    Text("Song ${player.queuePos} of ${player.queueSize}", color = pal.textFaint, style = MaterialTheme.typography.labelSmall)
+                    Spacer(Modifier.weight(1f))
+                    Text("${formatTime((player.queueTotalMs - done).coerceAtLeast(0))} left", color = pal.textFaint, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+
         // Transport
         Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { player.controller?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled } }) {

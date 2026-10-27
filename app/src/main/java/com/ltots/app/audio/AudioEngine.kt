@@ -190,6 +190,8 @@ object AudioEngine : SoundSource {
             override fun onTimelineChanged(timeline: Timeline, reason: Int) = updateDirect()
             override fun onAudioSessionIdChanged(audioSessionId: Int) = syncPhoneEq()
         })
+        // Shuffle plays every song once before any repeats (see ShuffleKeeper).
+        ShuffleKeeper(p)
         _player.value = p
         onSongChanged(p.currentMediaItem)
         applySpeedToPlayer()
