@@ -147,7 +147,7 @@ fun AppRoot() {
           Box(Modifier.fillMaxSize().then(if (bendPage) Modifier.layerBackdrop(pageBackdrop) else Modifier)) {
             // The glass panels on the pages refract this layer.
             AppBackground(artwork, Modifier.fillMaxSize().layerBackdrop(backdrop))
-            Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars.union(WindowInsets.displayCutout.only(WindowInsetsSides.Top)))) {
+            Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars.union(WindowInsets.displayCutout.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)))) {
                 Crossfade(if (soundOpen) null else tab, label = "tab") { t ->
                     when (t) {
                         null -> SoundScreen(onBack = { soundOpen = false })
