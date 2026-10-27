@@ -28,7 +28,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Download
@@ -97,6 +96,16 @@ enum class Tab(val label: String, val icon: ImageVector) {
  */
 val LocalBottomChrome = compositionLocalOf { 200.dp }
 
+/** Height of the status bar (and a camera cut-out) at the top, which the pages draw under. */
+val LocalTopInset = compositionLocalOf { 0.dp }
+
+/**
+ * Top space a page should leave so it starts below the status bar. Scrolling pages put it
+ * inside the scroll, so their content scrolls on under the (transparent) status bar.
+ */
+@Composable
+fun topInset(): Dp = LocalTopInset.current
+
 /** Bottom space a screen should leave so its last item can scroll clear of the bars. */
 @Composable
 fun bottomChrome(): Dp = LocalBottomChrome.current
@@ -142,12 +151,16 @@ fun AppRoot() {
         val miniShown = player.hasMedia && (tab != Tab.PLAYER || soundOpen)
         val sysBar = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
         val chrome = sysBar + 88.dp + (if (miniShown) 74.dp else 0.dp) + 32.dp
+        val top = WindowInsets.statusBars.union(WindowInsets.displayCutout.only(WindowInsetsSides.Top)).asPaddingValues().calculateTopPadding()
 
-        CompositionLocalProvider(LocalBackdrop provides backdrop, LocalBottomChrome provides chrome, LocalEffects provides effects) {
+        CompositionLocalProvider(LocalBackdrop provides backdrop, LocalBottomChrome provides chrome, LocalEffects provides effects, LocalTopInset provides top) {
           Box(Modifier.fillMaxSize().then(if (bendPage) Modifier.layerBackdrop(pageBackdrop) else Modifier)) {
             // The glass panels on the pages refract this layer.
             AppBackground(artwork, Modifier.fillMaxSize().layerBackdrop(backdrop))
-            Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars.union(WindowInsets.displayCutout.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)))) {
+            // The pages reach up under the status bar, which stays transparent; each page leaves
+            // room for it at its top (topInset()). A camera cutout at the side (landscape,
+            // some phones) is kept clear here.
+            Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))) {
                 Crossfade(if (soundOpen) null else tab, label = "tab") { t ->
                     when (t) {
                         null -> SoundScreen(onBack = { soundOpen = false })

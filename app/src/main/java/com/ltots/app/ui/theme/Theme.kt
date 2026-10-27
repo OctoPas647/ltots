@@ -232,6 +232,7 @@ object ThemeState {
         beatStrength = cur.beatStrength,
         beatSource = cur.beatSource,
         coverBarsOpacity = cur.coverBarsOpacity,
+        libraryHeaderGlass = cur.libraryHeaderGlass,
     )
 
     fun update(transform: (ThemeConfig) -> ThemeConfig) {

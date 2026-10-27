@@ -6,6 +6,7 @@ import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import com.ltots.app.audio.EqTone
+import com.ltots.app.ui.topInset
 import com.ltots.app.audio.ToneRegion
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -135,7 +136,7 @@ fun EqScreen(player: PlayerUi) {
     }
     fun editBand(id: Long, t: (EqBand) -> EqBand) = edit(drag = true) { s -> s.copy(bands = s.bands.map { if (it.id == id) t(it) else it }) }
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = topInset()).padding(horizontal = 14.dp)) {
         // Header
         Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {

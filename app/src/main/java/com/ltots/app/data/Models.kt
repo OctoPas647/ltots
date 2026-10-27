@@ -240,6 +240,8 @@ data class ThemeConfig(
      * [coverOpacity] (nothing different where the bars are).
      */
     val coverBarsOpacity: Float? = null,
+    /** The Library page's top (title, search, buttons) sits on one liquid-glass panel. */
+    val libraryHeaderGlass: Boolean = true,
 )
 
 data class AppSettings(
@@ -266,6 +268,10 @@ data class AppSettings(
      * EQ, so the audio chip can keep playing by itself with an EQ on, on phones that allow it.
      */
     val batteryEq: Boolean = false,
+    /** Order of the Songs list, and so of what plays next (the Library page can pick another for now). */
+    val songSort: SongSort = SongSort.TITLE,
+    /** Time plain lyrics with the on-device AI by itself (the playing song, and the library while charging). */
+    val aiLyrics: Boolean = true,
 )
 
 /** Hand-written JSON (de)serialisation — no reflection, so it survives R8 untouched. */
@@ -346,6 +352,7 @@ object Json {
         put("iconCoverMode", t.iconCover.name); put("iconDim", t.iconCoverDim.toDouble()); put("iconBars", t.iconBars.name); put("iconIdle", t.iconIdle.name)
         put("freeze", t.freezeVisualizer); put("gFlow", t.gradientFlow)
         put("beat", t.coverBeat); put("beatK", t.beatStrength.toDouble()); put("beatSrc", t.beatSource.name); t.coverBarsOpacity?.let { put("coverBars", it.toDouble()) }
+        put("libGlass", t.libraryHeaderGlass)
     }
 
     private fun hsvJson(h: Hsv) = JSONArray().put(h.h.toDouble()).put(h.s.toDouble()).put(h.v.toDouble())
@@ -409,6 +416,7 @@ object Json {
             beatSource = runCatching { BeatSource.valueOf(o.optString("beatSrc")) }.getOrDefault(d.beatSource),
             // 100% in version 0.1.48 meant "off": the same as the rest of the cover.
             coverBarsOpacity = if (o.has("coverBars")) o.optDouble("coverBars").toFloat().coerceIn(0f, 1f).takeIf { it < 0.999f } else null,
+            libraryHeaderGlass = o.optBoolean("libGlass", d.libraryHeaderGlass),
         )
     }
 
@@ -420,6 +428,8 @@ object Json {
         put("gPitch", s.globalPitchCents); put("gSpeed", s.globalSpeed.toDouble()); put("gTape", s.globalTape)
         put("direct", s.directPlayback)
         put("batteryEq", s.batteryEq)
+        put("sort", s.songSort.name)
+        put("aiLyrics", s.aiLyrics)
     }
 
     fun settings(o: JSONObject) = AppSettings(
@@ -433,5 +443,7 @@ object Json {
         globalTape = o.optBoolean("gTape", false),
         directPlayback = o.optBoolean("direct", true),
         batteryEq = o.optBoolean("batteryEq", false),
+        songSort = runCatching { SongSort.valueOf(o.optString("sort")) }.getOrDefault(SongSort.TITLE),
+        aiLyrics = o.optBoolean("aiLyrics", true),
     )
 }

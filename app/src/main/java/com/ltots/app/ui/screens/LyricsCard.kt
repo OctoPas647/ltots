@@ -40,7 +40,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.ltots.app.lyrics.LyricsDoc
+import com.ltots.app.audio.AudioEngine
+import com.ltots.app.lyrics.AiSync
+import com.ltots.app.lyrics.LyricLine
+import com.ltots.app.lyrics.Lrc
 import com.ltots.app.lyrics.Lyrics
 import com.ltots.app.lyrics.LyricsState
 import com.ltots.app.lyrics.SongQuery
@@ -87,7 +90,7 @@ fun LyricsCard(player: PlayerUi) {
         Column(Modifier.padding(top = 14.dp, start = 16.dp, end = 16.dp, bottom = 12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 SectionTitle("Lyrics", Modifier.weight(1f))
-                if (state is LyricsState.Found && !state.doc.synced.isNullOrEmpty()) {
+                if (state is LyricsState.Found && (!state.doc.synced.isNullOrEmpty() || !state.doc.plain.isNullOrBlank())) {
                     Pill(if (big) "Smaller" else "Bigger", false, { big = !big })
                 }
                 Pill("Import .lrc", false, { lrcPicker.launch(arrayOf("text/*", "application/octet-stream")) })
@@ -95,9 +98,13 @@ fun LyricsCard(player: PlayerUi) {
             when (state) {
                 is LyricsState.Found -> {
                     val doc = state.doc
-                    Box(Modifier.fillMaxWidth().height(if (doc.synced != null) height else 340.dp)) {
+                    // Plain lyrics (no times anywhere) get guessed times from the song's length,
+                    // so they still follow along and can be tapped.
+                    val estimated = remember(doc, player.durationMs) { if (doc.synced == null) Lrc.estimate(doc.plain, player.durationMs) else null }
+                    val lines = doc.synced ?: estimated
+                    Box(Modifier.fillMaxWidth().height(if (lines != null) height else 340.dp)) {
                         when {
-                            doc.synced != null -> SyncedLyrics(doc, player)
+                            lines != null -> SyncedLyrics(lines, player)
                             doc.instrumental && doc.plain.isNullOrBlank() -> Message("♪  Instrumental")
                             else -> Text(
                                 doc.plain.orEmpty(), color = pal.text, fontSize = 17.sp, lineHeight = 26.sp,
@@ -108,10 +115,12 @@ fun LyricsCard(player: PlayerUi) {
                     Text(
                         buildString {
                             append("Lyrics from ").append(doc.source.ifBlank { "LRCLIB" })
-                            if (doc.synced == null && !doc.instrumental) append(" · not time-synced for this song")
+                            if (estimated != null) append(" · timing estimated (no time-synced lyrics for this song)")
+                            else if (doc.synced == null && !doc.instrumental) append(" · not time-synced for this song")
                         },
                         color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp),
                     )
+                    if (estimated != null && key != null && player.trackId >= 0) AiTiming(key, player.trackId, doc, player.durationMs)
                 }
                 LyricsState.Searching, LyricsState.Idle -> Message("Looking for lyrics…")
                 LyricsState.NotFound -> {
@@ -127,6 +136,46 @@ fun LyricsCard(player: PlayerUi) {
     }
 }
 
+/**
+ * For lyrics with estimated timing: the on-device AI listens to the song and times them for
+ * real. Runs by itself once the speech model is installed (Profile > App settings), or on a tap.
+ */
+@Composable
+private fun AiTiming(key: String, trackId: Long, doc: com.ltots.app.lyrics.LyricsDoc, durationMs: Long) {
+    val context = LocalContext.current
+    val pal = LocalPalette.current
+    val status by AiSync.status.collectAsState()
+    val ready by AiSync.modelReady.collectAsState()
+    val settings by AudioEngine.settings.collectAsState()
+    var asking by remember(key) { mutableStateOf(false) }
+    LaunchedEffect(key, ready, settings.aiLyrics) {
+        if (ready && settings.aiLyrics) AiSync.request(context, key, trackId, doc, durationMs)
+    }
+    val s = status
+    val line = when {
+        s is AiSync.Status.Listening && s.key == key -> "AI is listening to the song to time the lyrics… ${(s.progress * 100).toInt()}%"
+        s is AiSync.Status.Listening -> "AI is timing another song's lyrics; this one is next."
+        s is AiSync.Status.DownloadingModel -> "Downloading the speech model… ${(s.progress * 100).toInt()}%"
+        s is AiSync.Status.Failed && (s.key == key || s.key == null) -> s.message
+        asking -> "The on-device AI listens to the song and matches the words it hears to these lyrics. " +
+            "It needs a speech model (English, ${AiSync.MODEL_SIZE}) downloaded once; after that it works offline."
+        else -> null
+    }
+    Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(line ?: "Let the on-device AI time these lyrics by listening to the song.", color = pal.textDim,
+            style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+        val busy = s is AiSync.Status.Listening || s is AiSync.Status.DownloadingModel
+        if (!busy) {
+            when {
+                ready -> Pill(if (s is AiSync.Status.Failed && s.key == key) "Try again" else "Time with AI", true,
+                    { AiSync.request(context, key, trackId, doc, durationMs, again = true) })
+                asking -> Pill("Download & time", true, { AiSync.request(context, key, trackId, doc, durationMs, download = true, again = true) })
+                else -> Pill("Time with AI", true, { asking = true })
+            }
+        }
+    }
+}
+
 @Composable
 private fun Message(text: String) {
     val pal = LocalPalette.current
@@ -134,10 +183,9 @@ private fun Message(text: String) {
 }
 
 @Composable
-private fun SyncedLyrics(doc: LyricsDoc, player: PlayerUi) {
+private fun SyncedLyrics(lines: List<LyricLine>, player: PlayerUi) {
     val pal = LocalPalette.current
-    val lines = doc.synced ?: return
-    val now = doc.lineAt(player.positionMs + LEAD_MS)
+    val now = Lrc.lineAt(lines, player.positionMs + LEAD_MS)
     val list = rememberLazyListState()
     // Follow the song unless you've just scrolled yourself (then wait a few seconds).
     var userScrolledAt by remember { mutableLongStateOf(0L) }
@@ -147,7 +195,7 @@ private fun SyncedLyrics(doc: LyricsDoc, player: PlayerUi) {
             if (scrolling && !autoScrolling) userScrolledAt = System.currentTimeMillis()
         }
     }
-    LaunchedEffect(now, doc) {
+    LaunchedEffect(now, lines) {
         if (System.currentTimeMillis() - userScrolledAt < 4000) return@LaunchedEffect
         autoScrolling = true
         try { list.animateScrollToItem(max(0, now - 1)) } finally { autoScrolling = false }

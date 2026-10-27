@@ -9,6 +9,22 @@ import org.junit.Test
 class LyricsTest {
     // ---- LRC ------------------------------------------------------------------------------
 
+    @Test fun plainLyricsGetTimesSpreadOverTheSong() {
+        val plain = "So the last time that you guys saw\nAn AK-50 video was about\n\nBig russian gun\nPart of my personality\n"
+        val l = Lrc.estimate(plain, 130_000)!!
+        assertEquals(listOf("So the last time that you guys saw", "An AK-50 video was about", "Big russian gun", "Part of my personality"), l.map { it.text })
+        // After a short intro, in order, and done before the end.
+        assertEquals(7_800L, l.first().timeMs)
+        assertTrue(l.zipWithNext().all { (a, b) -> a.timeMs < b.timeMs })
+        assertTrue(l.last().timeMs < 130_000 - 7_800)
+        // The verse break adds a pause: the gap before "Big russian gun" is the biggest.
+        val gaps = l.zipWithNext { a, b -> b.timeMs - a.timeMs }
+        assertEquals(1, gaps.indexOf(gaps.max()))
+        assertEquals(2, Lrc.lineAt(l, l[2].timeMs + 1))
+        assertNull(Lrc.estimate("  \n ", 130_000))
+        assertNull(Lrc.estimate(plain, 0))
+    }
+
     @Test fun parsesTimesFractionsAndRepeats() {
         val l = Lrc.parse(
             """

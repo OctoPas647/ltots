@@ -30,6 +30,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.draw.alpha
 import com.ltots.app.ui.components.ProfileMenu
+import com.ltots.app.ui.topInset
 import com.ltots.app.ui.components.ProfilePill
 import com.ltots.app.ui.components.ProfileRow
 import com.ltots.app.ui.components.ProfileAddRow
@@ -87,7 +88,7 @@ fun LookScreen(artwork: android.graphics.Bitmap? = null) {
     fun set(t: (ThemeConfig) -> ThemeConfig) = ThemeState.update(t)
     var resetAsk by remember { mutableStateOf(false) }
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = topInset()).padding(horizontal = 14.dp)) {
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Look", style = MaterialTheme.typography.displaySmall, color = pal.text)
@@ -159,6 +160,10 @@ fun LookScreen(artwork: android.graphics.Bitmap? = null) {
                 )
                 LabeledSlider("Frost / tint", cfg.glassTint, { v -> set { it.copy(glassTint = v) } }, 0f..0.7f, pct(cfg.glassTint / 0.7f))
                 LabeledSlider("Rim light", cfg.rimLight, { v -> set { it.copy(rimLight = v) } }, 0f..1f, pct(cfg.rimLight))
+                SwitchRow(
+                    "Glass Library top", cfg.libraryHeaderGlass, { on -> set { it.copy(libraryHeaderGlass = on) } },
+                    sub = "The top of the Library page (title, search, buttons) floats on one glass panel, like the bars at the bottom: the songs scroll on under it, blurred. Off: it sits straight on the background above the list.",
+                )
                 LabeledSlider("Corner roundness", cfg.cornerDp, { v -> set { it.copy(cornerDp = v) } }, 4f..44f, "%.0f dp".format(Locale.ROOT, cfg.cornerDp))
                 LabeledSlider("Cover opacity", cfg.coverOpacity, { v -> set { it.copy(coverOpacity = v) } }, 0.1f..1f, pct(cfg.coverOpacity))
                 // Only where the bars pass behind the cover: the cover can stay solid and still
