@@ -4,6 +4,7 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -36,6 +37,15 @@ class PlaybackService : MediaSessionService() {
         val player = AudioEngine.buildPlayer(this)
         player.addListener(object : Player.Listener {
             override fun onEvents(player: Player, events: Player.Events) {
+                // The home-screen icon follows each song's cover, and reads the next one ahead.
+                if (events.containsAny(Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_MEDIA_METADATA_CHANGED)) {
+                    com.ltots.app.ui.IconColor.onSong(player.currentMediaItem?.mediaId, player.mediaMetadata.artworkData)
+                    val next = player.nextMediaItemIndex
+                    if (next != C.INDEX_UNSET) player.getMediaItemAt(next).let { item ->
+                        val uri = item.localConfiguration?.uri ?: item.requestMetadata.mediaUri
+                        if (uri != null && item.mediaId.isNotBlank()) com.ltots.app.ui.IconColor.prefetch(item.mediaId, uri)
+                    }
+                }
                 if (!events.containsAny(Player.EVENT_PLAY_WHEN_READY_CHANGED, Player.EVENT_PLAYBACK_STATE_CHANGED)) return
                 handler.removeCallbacks(releaseIdle)
                 if (!player.playWhenReady && player.playbackState != Player.STATE_IDLE) {
