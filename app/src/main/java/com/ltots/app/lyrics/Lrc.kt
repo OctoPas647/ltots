@@ -15,6 +15,8 @@ data class LyricsDoc(
     val source: String = "",
     /** What the match was found as (artist — title), for display. */
     val matchedAs: String = "",
+    /** A remark shown under the lyrics, e.g. how an AI match lined them up. */
+    val note: String = "",
 ) {
     val isEmpty: Boolean get() = synced.isNullOrEmpty() && plain.isNullOrBlank() && !instrumental
 
@@ -27,6 +29,7 @@ data class LyricsDoc(
         put("instrumental", instrumental)
         put("source", source)
         put("as", matchedAs)
+        if (note.isNotBlank()) put("note", note)
     }
 
     companion object {
@@ -36,6 +39,7 @@ data class LyricsDoc(
             instrumental = o.optBoolean("instrumental"),
             source = o.optString("source"),
             matchedAs = o.optString("as"),
+            note = o.optString("note"),
         )
     }
 }

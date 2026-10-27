@@ -88,16 +88,28 @@ fun LyricsCard(player: PlayerUi) {
 
     GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
         Column(Modifier.padding(top = 14.dp, start = 16.dp, end = 16.dp, bottom = 12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 SectionTitle("Lyrics", Modifier.weight(1f))
                 if (state is LyricsState.Found && (!state.doc.synced.isNullOrEmpty() || !state.doc.plain.isNullOrBlank())) {
                     Pill(if (big) "Smaller" else "Bigger", false, { big = !big })
                 }
+                // AI: recognise the song from its sound and get its real lyrics, lined up with this
+                // version (for edits, re-uploads and wrongly named files).
+                Pill("✦ AI", state is LyricsState.Matching, {
+                    if (state !is LyricsState.Matching) query()?.let { com.ltots.app.identify.LyricsMatch.start(context, it, player.trackId) }
+                }, enabled = player.trackId >= 0)
                 Pill("Import .lrc", false, { lrcPicker.launch(arrayOf("text/*", "application/octet-stream")) })
             }
-            when (state) {
-                is LyricsState.Found -> {
-                    val doc = state.doc
+            val shown = when (state) {
+                is LyricsState.Found -> state.doc
+                is LyricsState.MatchFailed -> state.previous
+                else -> null
+            }
+            if (state is LyricsState.Matching) Message("✦  ${state.status}")
+            if (state is LyricsState.MatchFailed) Message("✦  ${state.message}")
+            when {
+                shown != null -> {
+                    val doc = shown
                     // Plain lyrics (no times anywhere) get guessed times from the song's length,
                     // so they still follow along and can be tapped.
                     val estimated = remember(doc, player.durationMs) { if (doc.synced == null) Lrc.estimate(doc.plain, player.durationMs) else null }
@@ -115,19 +127,22 @@ fun LyricsCard(player: PlayerUi) {
                     Text(
                         buildString {
                             append("Lyrics from ").append(doc.source.ifBlank { "LRCLIB" })
+                            if (doc.matchedAs.isNotBlank() && doc.note.isNotBlank()) append(" · ").append(doc.matchedAs)
                             if (estimated != null) append(" · timing estimated (no time-synced lyrics for this song)")
                             else if (doc.synced == null && !doc.instrumental) append(" · not time-synced for this song")
+                            if (doc.note.isNotBlank()) append("\n").append(doc.note)
                         },
                         color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp),
                     )
                     if (estimated != null && key != null && player.trackId >= 0) AiTiming(key, player.trackId, doc, player.durationMs)
                 }
-                LyricsState.Searching, LyricsState.Idle -> Message("Looking for lyrics…")
-                LyricsState.NotFound -> {
-                    Message("No lyrics found for this song.")
+                state is LyricsState.Matching -> {}
+                state == LyricsState.Searching || state == LyricsState.Idle -> Message("Looking for lyrics…")
+                state == LyricsState.NotFound || state is LyricsState.MatchFailed -> {
+                    if (state == LyricsState.NotFound) Message("No lyrics found for this song. Tap ✦ AI to recognise it from its sound.")
                     Pill("Search again", false, { query()?.let { Lyrics.retry(context, it) } })
                 }
-                is LyricsState.Offline -> {
+                state is LyricsState.Offline -> {
                     Message(state.message)
                     Pill("Try again", false, { query()?.let { Lyrics.retry(context, it) } })
                 }

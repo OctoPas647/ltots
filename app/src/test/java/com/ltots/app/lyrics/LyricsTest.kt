@@ -108,6 +108,27 @@ class LyricsTest {
     }
 
     /** Real lookup against LRCLIB (opt-in: -Dltots.live=true). */
+    @Test fun editTitlesBecomeTheSongsName() {
+        assertEquals("Rather Be", SongMatch.baseTitle("Rather Be (But it hits different)"))
+        assertEquals("Line of Contact", SongMatch.baseTitle("'Line of Contact' but it fits perfectly"))
+        assertEquals("Song", SongMatch.baseTitle("Song - Sped Up"))
+        assertEquals("Daft Punk - One More Time", SongMatch.baseTitle("Daft Punk - One More Time"))
+        assertTrue(SongMatch.isEdit("Rather Be (But it hits different)"))
+        assertTrue(!SongMatch.isEdit("Rather Be (feat. Jess Glynne)"))
+    }
+
+    @Test fun nameOnlyMatchPicksTheSongPeopleMean() {
+        fun c(artist: String, len: Double) = Candidate("Rather Be", artist, "", len, "[00:01.00] x", null, false)
+        val q = SongQuery("k", "Rather Be (But it hits different)", "The Nostal Days", null, 214_000)
+        val cs = listOf(c("The Verve", 244.0), c("Clean Bandit feat. Jess Glynne", 248.0), c("Riley Green", 175.0),
+            c("Clean Bandit", 241.0), c("Clean Bandit/Jess Glynne", 228.0))
+        assertEquals(228.0, SongMatch.pickLoose(q, "The Nostal Days", "Rather Be", cs)!!.durationSec, 0.0)
+        // The file's own artist wins when it's there.
+        assertEquals("The Verve", SongMatch.pickLoose(q, "The Verve", "Rather Be", cs)!!.artist)
+        // No clear favourite: nothing, rather than someone else's song.
+        assertEquals(null, SongMatch.pickLoose(q, null, "Rather Be", listOf(c("The Verve", 230.0), c("Riley Green", 220.0))))
+    }
+
     @Test fun liveLookup() {
         if (System.getProperty("ltots.live") != "true") return
         val api = LrcLib()

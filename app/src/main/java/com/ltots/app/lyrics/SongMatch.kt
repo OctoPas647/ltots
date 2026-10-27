@@ -75,6 +75,74 @@ object SongMatch {
         return out.filter { it.second.isNotBlank() }
     }
 
+    // Edit labels re-uploads add: "(Sped Up)", "[Slowed + Reverb]", "(But it hits different)",
+    // "- Nightcore", "(8D Audio)", "(TikTok Version)"…
+    private val editWords = Regex(
+        """\b(?:sped|speed|slowed|slow|reverb|nightcore|daycore|8d|bass\s*boost(?:ed)?|tiktok|hits\s+different|but\s+it|lofi|lo-fi|phonk|edit|remix|version|extended|loop|perfect(?:ly)?|cover|instrumental|acoustic|live|mashup|vibe|chill|ver\.?)\b""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val bracketed = Regex("""\s*[(\[{][^)\]}]*[)\]}]""")
+    private val dashTail = Regex("""\s+[-–—|]\s+(.+)$""")
+    // "'Song' but it fits perfectly", "Song but it hits different"
+    private val butTail = Regex("""\s+but\s+(?:it|it's|its|this|now)\b.*$""", RegexOption.IGNORE_CASE)
+
+    /**
+     * The song's own name, without anything a re-upload adds: every bracketed part and a
+     * dashed tail that names an edit. "Rather Be (But it hits different)" → "Rather Be".
+     */
+    fun baseTitle(t: String): String {
+        var x = cleanTitle(t).replace(bracketed, "")
+        dashTail.find(x)?.let { m -> if (editWords.containsMatchIn(m.groupValues[1])) x = x.substring(0, m.range.first) }
+        x = x.replace(butTail, "")
+        return x.replace(Regex("\\s+"), " ").trim().trim('-', '–', '—', '|', ' ', '\'', '"', '‘', '’', '“', '”').ifBlank { cleanTitle(t) }
+    }
+
+    /** Whether the title says it's an edit of a song (sped up, slowed, "hits different", …). */
+    fun isEdit(t: String): Boolean = baseTitle(t) != cleanTitle(t) &&
+        (bracketed.findAll(t).any { editWords.containsMatchIn(it.value) } || butTail.containsMatchIn(t) || dashTail.find(t)?.let { editWords.containsMatchIn(it.value) } == true)
+
+    /**
+     * A looser fit, for edits and re-uploads whose length and uploader differ from the record:
+     * the song's name must match exactly, the length may be off by up to a quarter.
+     */
+    fun looseScore(q: SongQuery, artist: String?, title: String, c: Candidate): Double {
+        if (c.synced.isNullOrBlank() && c.plain.isNullOrBlank()) return 0.0
+        val ts = maxOf(similarity(title, baseTitle(c.title)), similarity(title, c.title).takeIf { it == 1.0 } ?: 0.0)
+        if (ts < 0.99) return 0.0
+        if (q.durationMs > 0 && c.durationSec > 0) {
+            val diff = abs(c.durationSec - q.durationMs / 1000.0) / (q.durationMs / 1000.0)
+            if (diff > 0.25) return 0.0
+        }
+        val asim = if (artist == null) 0.5 else max(similarity(artist, c.artist), similarity(artist, mainArtist(c.artist)))
+        // Synced lyrics and a matching artist first; a re-uploader's name rarely matches.
+        return 0.5 + 0.3 * asim + (if (!c.synced.isNullOrBlank()) 0.2 else 0.0)
+    }
+
+    /**
+     * Picks the song a name-only search means. Several different songs share a name ("Rather
+     * Be" by Clean Bandit, The Verve, Riley Green…), so: the file's own artist when it's among
+     * them; otherwise the artist uploaded most often under that name (a hit gets uploaded again
+     * and again). With no clear favourite, nothing — better no lyrics than another song's.
+     */
+    fun pickLoose(q: SongQuery, artist: String?, title: String, cs: List<Candidate>): Candidate? {
+        val named = cs.filter { looseScore(q, null, title, it) > 0 }
+        if (named.isEmpty()) return null
+        if (artist != null) {
+            named.filter { max(similarity(artist, it.artist), similarity(artist, mainArtist(it.artist))) >= 0.7 }
+                .takeIf { it.isNotEmpty() }?.let { return closest(q, it) }
+        }
+        val groups = named.groupBy { norm(mainArtist(it.artist)) }.filterKeys { it.isNotBlank() }
+            .values.sortedByDescending { it.size }
+        val top = groups.firstOrNull() ?: return null
+        val second = groups.getOrNull(1)?.size ?: 0
+        if (top.size < 2 || top.size < 2 * second) return null
+        return closest(q, top)
+    }
+
+    /** Synced first, then the length nearest the file's. */
+    private fun closest(q: SongQuery, cs: List<Candidate>): Candidate =
+        cs.sortedWith(compareByDescending<Candidate> { !it.synced.isNullOrBlank() }.thenBy { abs(it.durationSec - q.durationMs / 1000.0) }).first()
+
     /** Lower-case letters and digits only, accents removed, so "Beyoncé" == "beyonce". */
     fun norm(s: String): String {
         val n = Normalizer.normalize(s, Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
