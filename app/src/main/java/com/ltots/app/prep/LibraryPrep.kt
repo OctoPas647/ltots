@@ -111,7 +111,8 @@ class WaveWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             if (isStopped) return Result.retry()
             if (!WaveIndex.has(t.uri)) WaveIndex.build(ctx, t.uri)
             // Beats too (by the beat AI once it's downloaded), so the cover is in sync from the start.
-            if (!com.ltots.app.audio.BeatIndex.has(t.uri, byAi = com.ltots.app.audio.BeatIndex.aiInstalled)) {
+            if (com.ltots.app.ui.theme.ThemeState.config.value.coverBeat &&
+                !com.ltots.app.audio.BeatIndex.has(t.uri, byAi = com.ltots.app.audio.BeatIndex.aiInstalled)) {
                 runCatching { com.ltots.app.audio.BeatIndex.build(ctx, t.uri) }
             }
             // Plain lyrics get timed by the on-device AI too, when it's set up and switched on.
