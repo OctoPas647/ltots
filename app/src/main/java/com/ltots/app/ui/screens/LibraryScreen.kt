@@ -279,15 +279,18 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
         val headerTop = topInset() + 8.dp
         Box(Modifier.fillMaxSize()) {
             Box(Modifier.fillMaxSize().layerBackdrop(listLayer).padding(horizontal = 16.dp)) {
-                CompositionLocalProvider(LocalListTop provides headerTop + headerHeight + 8.dp, content = list)
+                CompositionLocalProvider(LocalListTop provides headerHeight + 8.dp, content = list)
             }
+            // The panel is fixed to the very top of the screen, status bar included, so nothing
+            // scrolls into view above it; only its bottom corners are rounded.
             CompositionLocalProvider(LocalBackdrop provides listLayer, LocalGlassOverContent provides true) {
                 GlassPanel(
-                    Modifier.padding(horizontal = 16.dp).padding(top = headerTop).fillMaxWidth()
+                    Modifier.fillMaxWidth()
                         .onSizeChanged { headerHeight = with(density) { it.height.toDp() } },
+                    shape = RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp),
                     tintBoost = 0.04f,
                 ) {
-                    Column(Modifier.padding(start = 14.dp, end = 14.dp, bottom = 4.dp), content = top)
+                    Column(Modifier.padding(start = 30.dp, end = 30.dp, top = headerTop, bottom = 4.dp), content = top)
                 }
             }
         }
