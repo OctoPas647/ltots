@@ -30,7 +30,7 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Prepares the whole library in the background, like a search index:
- *  - **waveforms** for every song — only while the phone is charging (decoding takes some
+ *  - **waveforms** and **beats** for every song — only while the phone is charging (decoding takes some
  *    processor time, so it's done when battery doesn't matter);
  *  - **lyrics** for every song — whenever there's internet and the battery isn't low (it's just
  *    a few small requests per song);
@@ -110,6 +110,10 @@ class WaveWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         for (t in tracks) {
             if (isStopped) return Result.retry()
             if (!WaveIndex.has(t.uri)) WaveIndex.build(ctx, t.uri)
+            // Beats too (by the beat AI once it's downloaded), so the cover is in sync from the start.
+            if (!com.ltots.app.audio.BeatIndex.has(t.uri, byAi = com.ltots.app.audio.BeatIndex.aiInstalled)) {
+                runCatching { com.ltots.app.audio.BeatIndex.build(ctx, t.uri) }
+            }
             // Plain lyrics get timed by the on-device AI too, when it's set up and switched on.
             if (AiSync.modelReady.value && AudioEngine.settings.value.aiLyrics) {
                 val doc = Lyrics.saved(t.profileKey) as? com.ltots.app.lyrics.LyricsDoc

@@ -44,6 +44,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -268,8 +269,9 @@ fun LookScreen(artwork: android.graphics.Bitmap? = null) {
                     sub = when {
                         cfg.iconMode -> "Works with the cover: pick Around the cover or Behind the cover above."
                         cfg.visualizerFps == 0 -> "Needs the visualizer (Refresh rate below isn't Off): it listens through it."
-                        else -> "The cover pumps on the hits, hardest on drops and big moments, like remix videos, in step with the visualizer. " +
-                            "Steady sound leaves it still. While the phone's audio chip plays the song by itself (Power-saving playback) there's nothing to listen to, so it rests."
+                        else -> "The cover pumps on every beat, hardest on drops and big moments, like remix videos. " +
+                            "Each song's beats are worked out before it plays (the next songs in the queue as soon as one starts, the whole library while charging), " +
+                            "so it lands exactly on the beat — also while the phone's audio chip plays the song by itself."
                     },
                 )
                 if (cfg.coverBeat && !cfg.iconMode) {
@@ -290,6 +292,7 @@ fun LookScreen(artwork: android.graphics.Bitmap? = null) {
                         modifier = Modifier.padding(top = 6.dp, bottom = 6.dp),
                     )
                     LabeledSlider("Beat strength", cfg.beatStrength, { v -> set { it.copy(beatStrength = v) } }, 0.1f..1f, pct(cfg.beatStrength))
+                    BeatAiSetting()
                 }
                 SwitchRow(
                     "Gradient flow", cfg.gradientFlow, { on -> set { it.copy(gradientFlow = on) } },
@@ -582,4 +585,42 @@ internal fun LookDot(t: ThemeConfig) {
             .background(Brush.linearGradient(listOf(back, back, t.accent.toColor())))
             .border(1.dp, pal.text.copy(alpha = 0.2f), CircleShape)
     )
+}
+
+/**
+ * The beat AI (Beat This!): finds beats more reliably than the classic tracker — through quiet
+ * parts, breakdowns and tricky rhythms. Runs on the phone, before songs play.
+ */
+@Composable
+private fun BeatAiSetting() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val pal = LocalPalette.current
+    val models by com.ltots.app.identify.AiModels.status.collectAsState()
+    val parts = listOf(com.ltots.app.identify.AiModels.Model.BEAT_NET, com.ltots.app.identify.AiModels.Model.BEAT_MEL)
+    val installed = parts.all { it in models.installed }
+    val downloading = models.downloading in parts
+    val mb = parts.sumOf { it.bytes } / 1_000_000
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Beat AI", color = pal.text)
+        Text(
+            if (installed) "On: an on-device AI (Beat This!) finds the beats of each song before it plays — steady through breakdowns, quiet intros and tricky rhythms."
+            else "Without it, a classic beat tracker finds the beats (fast, good on steady music). The beat AI (Beat This!, $mb MB, works offline) " +
+                "keeps the beat through breakdowns, quiet parts and tricky rhythms. It runs before songs play: the next songs as soon as one starts, the rest while charging.",
+            color = pal.textFaint, style = MaterialTheme.typography.bodySmall,
+        )
+        when {
+            downloading -> androidx.compose.material3.LinearProgressIndicator(progress = { models.progress }, modifier = Modifier.fillMaxWidth(), color = pal.accent)
+            !installed -> Pill("Download beat AI ($mb MB)", true, {
+                val app = context.applicationContext
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                    runCatching { for (m in parts) com.ltots.app.identify.AiModels.download(m) }
+                        .onSuccess {
+                            com.ltots.app.audio.BeatIndex.request(app, com.ltots.app.audio.AudioEngine.upcomingUris(3))
+                        }
+                }
+            })
+            else -> Pill("Remove beat AI", false, { parts.forEach { com.ltots.app.identify.AiModels.remove(it) } })
+        }
+        models.error?.takeIf { e -> parts.any { e.startsWith(it.title) } }?.let { Text(it, color = pal.textFaint, style = MaterialTheme.typography.bodySmall) }
+    }
 }

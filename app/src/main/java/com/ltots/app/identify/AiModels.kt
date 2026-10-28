@@ -47,6 +47,22 @@ object AiModels {
             "Listens to each of your songs once to find its mood — for themes like Sad, Happy or Chill and AI-made albums",
             forFinder = false,
         ),
+        BEAT_NET(
+            "beat_this_final0.onnx",
+            "https://huggingface.co/tuneperfect/beat-this-onnx/resolve/main/beat_this.onnx",
+            81_935_641L,
+            "Beat AI (Beat This!)",
+            "Finds every beat of each song before it plays, so the cover moves exactly on the beat",
+            forFinder = false,
+        ),
+        BEAT_MEL(
+            "beat_this_logmel.onnx",
+            "https://huggingface.co/tuneperfect/beat-this-onnx/resolve/main/logmel.onnx",
+            4_469_774L,
+            "Beat AI: sound reader",
+            "Turns the song into the picture of its sound the beat AI reads",
+            forFinder = false,
+        ),
     }
 
     data class Status(val installed: Set<Model> = emptySet(), val downloading: Model? = null, val progress: Float = 0f, val error: String? = null)
