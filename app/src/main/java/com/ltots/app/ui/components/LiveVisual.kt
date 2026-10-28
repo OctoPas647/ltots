@@ -63,10 +63,32 @@ class LiveVisual(val analyzer: Analyzer) {
     internal val beats = com.ltots.app.audio.BeatDetector()
     private var beatNanos = 0L
 
-    internal fun updateBeat(nowNanos: Long) {
+    /** Set by the Playing tab while Move with the beat is on, so the loop runs for it. */
+    @Volatile var wantsBeat = false
+    /** Whether the cover is following beats worked out ahead of time (else listening live). */
+    var beatFromMap = false
+        private set
+
+    /**
+     * The cover's pulse for this frame. With the song's beats worked out ahead of time
+     * ([com.ltots.app.audio.BeatIndex]) it's taken from the playback position, so it lands
+     * exactly on each beat; otherwise it listens to the spectrum as before.
+     */
+    internal fun updateBeat(nowNanos: Long, posMs: Long, playing: Boolean) {
         val dt = if (beatNanos == 0L) 1f / 60f else ((nowNanos - beatNanos) / 1e9f).coerceIn(0.001f, 0.1f)
         beatNanos = nowNanos
-        beat = beats.update(frame.post, dt)
+        val map = AudioEngine.songUri.value?.let { com.ltots.app.audio.BeatIndex.peek(it) }
+        if (map != null) {
+            beatFromMap = true
+            val speed = AudioEngine.player.value?.playbackParameters?.speed ?: 1f
+            val target = if (playing) map.pulse(posMs / 1000.0, beats.source, speed) else 0f
+            // Paused: let it settle instead of freezing mid-pulse.
+            beat = if (playing) target else beat * kotlin.math.exp(-dt / 0.12f)
+            if (beat < 0.002f) beat = 0f
+        } else {
+            beatFromMap = false
+            beat = beats.update(frame.post, dt)
+        }
     }
 
     internal fun stopBeat() { beats.reset(); beat = 0f; beatNanos = 0L }
@@ -168,11 +190,13 @@ private suspend fun runVisual(lv: LiveVisual, fps: Int, ghost: Boolean, wave: Bo
             val live = playing && !AudioEngine.direct.value
             // The pre-made wave also moves while the audio chip plays the song directly.
             val waveMoving = playing && indexed() != null
-            if (!live && !waveMoving && lv.frame.isAtRest()) {
+            // So do beats worked out ahead of time: they need no audio, only the position.
+            val beatMoving = playing && lv.wantsBeat && AudioEngine.songUri.value?.let { com.ltots.app.audio.BeatIndex.peek(it) } != null
+            if (!live && !waveMoving && !beatMoving && lv.frame.isAtRest() && lv.beat == 0f) {
                 // Nothing moving: no frames at all until music plays again.
                 if (lv.beat != 0f) { lv.stopBeat(); lv.tick++ }
-                combine(AudioEngine.isPlaying, AudioEngine.direct, com.ltots.app.audio.WaveIndex.ready) { p, d, _ ->
-                    p && (!d || indexed() != null)
+                combine(AudioEngine.isPlaying, AudioEngine.direct, com.ltots.app.audio.WaveIndex.ready, com.ltots.app.audio.BeatIndex.ready) { p, d, _, _ ->
+                    p && (!d || indexed() != null || (lv.wantsBeat && AudioEngine.songUri.value?.let { com.ltots.app.audio.BeatIndex.peek(it) } != null))
                 }.first { it }
                 last = 0L
             }
@@ -203,7 +227,7 @@ private suspend fun runVisual(lv: LiveVisual, fps: Int, ghost: Boolean, wave: Bo
                 f.peak = peak
             }
             if (playing) FrozenFrame.last = lv.frame
-            lv.updateBeat(last)
+            lv.updateBeat(last, posMs, playing)
             lv.tick++
         }
 }

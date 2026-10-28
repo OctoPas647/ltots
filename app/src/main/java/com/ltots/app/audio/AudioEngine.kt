@@ -185,9 +185,16 @@ object AudioEngine : SoundSource {
             .experimentalSetDynamicSchedulingEnabled(true)
             .build()
         p.addListener(object : Player.Listener {
-            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = onSongChanged(mediaItem)
-            override fun onIsPlayingChanged(isPlaying: Boolean) { _isPlaying.value = isPlaying }
-            override fun onTimelineChanged(timeline: Timeline, reason: Int) = updateDirect()
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                onSongChanged(mediaItem)
+                prepareBeats()
+                com.ltots.app.data.PlayStats.onSong(mediaItem?.mediaId?.takeIf { it.isNotBlank() }, mediaItem?.mediaMetadata?.durationMs ?: 0L, p.isPlaying)
+            }
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                _isPlaying.value = isPlaying
+                com.ltots.app.data.PlayStats.onPlaying(isPlaying)
+            }
+            override fun onTimelineChanged(timeline: Timeline, reason: Int) { updateDirect(); prepareBeats() }
             override fun onAudioSessionIdChanged(audioSessionId: Int) = syncPhoneEq()
         })
         _player.value = p
@@ -224,6 +231,25 @@ object AudioEngine : SoundSource {
     private fun uriOf(item: MediaItem?): android.net.Uri? = item?.localConfiguration?.uri ?: item?.requestMetadata?.mediaUri
 
     /** The playing song's file and the next one in the queue. */
+    /** The playing song and the next [count] - 1 in the queue. */
+    fun upcomingUris(count: Int): List<android.net.Uri> {
+        val p = _player.value ?: return listOfNotNull(_songUri.value)
+        val out = ArrayList<android.net.Uri>()
+        uriOf(p.currentMediaItem)?.let { out += it }
+        var i = p.currentMediaItemIndex
+        while (out.size < count && i != C.INDEX_UNSET) {
+            i = p.currentTimeline.takeIf { !it.isEmpty }?.getNextWindowIndex(i, p.repeatMode, p.shuffleModeEnabled) ?: C.INDEX_UNSET
+            if (i == C.INDEX_UNSET || i == p.currentMediaItemIndex) break
+            uriOf(p.getMediaItemAt(i))?.let { out += it }
+        }
+        return out
+    }
+
+    /** Beats for the playing song and the next two, so each is ready before it plays. */
+    private fun prepareBeats() {
+        runCatching { BeatIndex.request(appContext, upcomingUris(3)) }
+    }
+
     fun upcomingUris(): List<android.net.Uri> {
         val p = _player.value ?: return listOfNotNull(_songUri.value)
         val next = p.nextMediaItemIndex.takeIf { it != C.INDEX_UNSET }?.let { uriOf(p.getMediaItemAt(it)) }

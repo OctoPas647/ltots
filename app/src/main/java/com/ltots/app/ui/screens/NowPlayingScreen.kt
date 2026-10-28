@@ -230,7 +230,8 @@ private fun CoverWithSpectrum(visual: com.ltots.app.ui.components.LiveVisual, ar
     val beatOn = lookCfg.coverBeat && visual.fps > 0
     // Up to +30 % at full strength (+15 % at the default): clearly visible, like remix videos.
     val beatAmount = 0.30f * lookCfg.beatStrength
-    androidx.compose.runtime.SideEffect { visual.beats.source = lookCfg.beatSource }
+    androidx.compose.runtime.SideEffect { visual.beats.source = lookCfg.beatSource; visual.wantsBeat = beatOn }
+    androidx.compose.runtime.DisposableEffect(visual) { onDispose { visual.wantsBeat = false } }
     val beatScale = if (!beatOn) Modifier else Modifier.graphicsLayer {
         @Suppress("UNUSED_VARIABLE") val t = visual.tick
         // A gentle curve lifts small hits so they show too; full hits still reach the maximum.
