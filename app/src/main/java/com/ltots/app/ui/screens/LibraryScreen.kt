@@ -142,9 +142,25 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
     val colors by SongSorter.colors.collectAsState()
     if (sortBy == SongSort.COLOR) LaunchedEffect(tracks) { SongSorter.findColors(context, tracks) }
 
-    val filtered = remember(tracks, query) {
+    // Each song's real genre and popularity, looked up once per song in music databases.
+    val genres by com.ltots.app.data.GenreFinder.genres.collectAsState()
+    val popularity by com.ltots.app.data.GenreFinder.popularity.collectAsState()
+    val lookingUp by com.ltots.app.data.GenreFinder.busy.collectAsState()
+    LaunchedEffect(tracks) { if (tracks.isNotEmpty()) com.ltots.app.data.GenreFinder.find(tracks) }
+    val plays by com.ltots.app.data.PlayStats.plays.collectAsState()
+    // What the mood model heard in each song, for themes and AI albums.
+    val moods by com.ltots.app.moods.MoodIndex.embeddings.collectAsState()
+    LaunchedEffect(Unit) { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.ltots.app.moods.MoodIndex.load() } }
+    var showFilter by remember { mutableStateOf(false) }
+
+    // The library after the user's filters (hidden artists, popular songs only), with genres.
+    val shown = remember(tracks, genres, popularity, plays, lookingUp, settings.hiddenArtists, settings.onlyHits, settings.onlyMostPlayed) {
+        com.ltots.app.data.LibraryFilter.apply(com.ltots.app.data.GenreFinder.apply(tracks, genres), settings, popularity, plays, lookingUp)
+    }
+
+    val filtered = remember(shown, query) {
         val q = query.trim().lowercase(Locale.ROOT)
-        if (q.isEmpty()) tracks else tracks.filter {
+        if (q.isEmpty()) shown else shown.filter {
             it.title.lowercase(Locale.ROOT).contains(q) || it.artist.lowercase(Locale.ROOT).contains(q) ||
                 it.album.lowercase(Locale.ROOT).contains(q)
         }
@@ -211,7 +227,8 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
 
         if (hasPerm && tracks.isNotEmpty() && openGroup == null && view == LibView.SONGS) {
             val readingColors = remember(tracks, colors, sortBy) { sortBy == SongSort.COLOR && tracks.any { it.id !in colors } }
-            SortBar(sortBy, quickSort, readingColors)
+            val filtering = settings.hiddenArtists.isNotEmpty() || settings.onlyHits || settings.onlyMostPlayed
+            SortBar(sortBy, quickSort, readingColors, lookingUp && sortBy == SongSort.GENRE, filtering, hiddenCount = tracks.size - shown.size) { showFilter = true }
         }
     }
 
@@ -231,7 +248,7 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
                 remember(filtered, sortBy, if (sortBy == SongSort.COLOR) colors else null) { SongSorter.sort(filtered, sortBy, colors) },
                 player, bottom, onOpenPlayer,
             )
-            view == LibView.MIXES -> MixGrid(remember(filtered) { Mixes.build(filtered) }, bottom) { m ->
+            view == LibView.MIXES -> MixGrid(remember(filtered, moods) { Mixes.build(filtered, moods, com.ltots.app.moods.MoodIndex.text(context)) }, bottom) { m ->
                 openGroup = Group(m.title, "${m.kind.label} · ${m.subtitle}", m.tracks)
             }
             view == LibView.ALBUMS -> AlbumGrid(
@@ -280,6 +297,7 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
             Box(Modifier.fillMaxWidth().weight(1f)) { list() }
         }
     }
+    if (showFilter) LibraryFilterDialog(tracks, settings, onDismiss = { showFilter = false })
 }
 
 /** Room above a list for the floating top of the page (0 when the top isn't floating). */
@@ -309,7 +327,15 @@ private fun EmptyState(title: String, body: String, action: String?, onAction: (
  * for now (tap the lit one again to go back to the order from App settings).
  */
 @Composable
-private fun SortBar(sortBy: SongSort, quick: SongSort?, readingColors: Boolean) {
+private fun SortBar(
+    sortBy: SongSort,
+    quick: SongSort?,
+    readingColors: Boolean,
+    readingGenres: Boolean,
+    filtering: Boolean,
+    hiddenCount: Int,
+    onFilter: () -> Unit,
+) {
     val pal = LocalPalette.current
     Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
@@ -317,6 +343,8 @@ private fun SortBar(sortBy: SongSort, quick: SongSort?, readingColors: Boolean) 
             Text(
                 when {
                     readingColors -> "Reading cover colours…"
+                    readingGenres -> "Looking up each song's genre…"
+                    filtering && hiddenCount > 0 -> "$hiddenCount songs filtered out"
                     quick != null -> "Just for now"
                     else -> "From settings"
                 },
@@ -326,6 +354,7 @@ private fun SortBar(sortBy: SongSort, quick: SongSort?, readingColors: Boolean) 
         for (s in listOf(SongSort.COLOR, SongSort.GENRE)) {
             Pill(s.label, sortBy == s, { SongSorter.setQuick(if (quick == s) null else s) })
         }
+        Pill("Filter", filtering, onFilter)
     }
 }
 
@@ -396,20 +425,38 @@ private fun AlbumGrid(groups: List<Group>, bottom: Dp, onOpen: (Group) -> Unit) 
  */
 @Composable
 private fun MixGrid(mixes: List<Mix>, bottom: Dp, onOpen: (Mix) -> Unit) {
-    val pal = LocalPalette.current
+    if (mixes.none { it.kind == Mix.Kind.AI_ALBUM || it.kind == Mix.Kind.THEME } && mixes.isNotEmpty()) {
+        // No AI mixes yet: the card that sets them up sits above the other mixes.
+        Column(Modifier.fillMaxSize()) {
+            Box(Modifier.padding(top = LocalListTop.current + 4.dp)) { MoodsCard() }
+            Box(Modifier.weight(1f)) { CompositionLocalProvider(LocalListTop provides 8.dp) { MixGridBody(mixes, bottom, onOpen) } }
+        }
+        return
+    }
     if (mixes.isEmpty()) {
+        Column(Modifier.padding(top = LocalListTop.current + 4.dp)) { MoodsCard() }
         EmptyState(
             "No mixes yet",
-            "Mixes appear by themselves once there are ${Mixes.MIN_SONGS} or more songs from the same game or soundtrack, the same decade or the same genre.",
+            "Mixes appear by themselves once there are ${Mixes.MIN_SONGS} or more songs from the same game or soundtrack, the same decade or the same genre — and AI albums and moods once the mood listener has heard your songs.",
             null,
         ) {}
         return
     }
+    MixGridBody(mixes, bottom, onOpen)
+}
+
+@Composable
+private fun MixGridBody(mixes: List<Mix>, bottom: Dp, onOpen: (Mix) -> Unit) {
+    val pal = LocalPalette.current
     LazyVerticalGrid(GridCells.Adaptive(150.dp), Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 2.dp, end = 2.dp, top = LocalListTop.current + 4.dp, bottom = bottom),
         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         for ((kind, group) in mixes.groupBy { it.kind }) {
             item(key = "head:${kind.name}", span = { GridItemSpan(maxLineSpan) }) {
-                Text(kind.label, color = pal.text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 6.dp))
+                Column {
+                    Text(kind.label, color = pal.text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 6.dp))
+                    // Under the AI albums: progress of the listening, and the button to update.
+                    if (kind == Mix.Kind.AI_ALBUM) MoodsCard(compact = true)
+                }
             }
             items(group, key = { it.id }) { m ->
                 Column(Modifier.clip(RoundedCornerShape(14.dp)).clickable { onOpen(m) }) {

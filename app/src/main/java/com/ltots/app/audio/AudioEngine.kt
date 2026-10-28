@@ -185,8 +185,14 @@ object AudioEngine : SoundSource {
             .experimentalSetDynamicSchedulingEnabled(true)
             .build()
         p.addListener(object : Player.Listener {
-            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = onSongChanged(mediaItem)
-            override fun onIsPlayingChanged(isPlaying: Boolean) { _isPlaying.value = isPlaying }
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                onSongChanged(mediaItem)
+                com.ltots.app.data.PlayStats.onSong(mediaItem?.mediaId?.takeIf { it.isNotBlank() }, mediaItem?.mediaMetadata?.durationMs ?: 0L, p.isPlaying)
+            }
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                _isPlaying.value = isPlaying
+                com.ltots.app.data.PlayStats.onPlaying(isPlaying)
+            }
             override fun onTimelineChanged(timeline: Timeline, reason: Int) = updateDirect()
             override fun onAudioSessionIdChanged(audioSessionId: Int) = syncPhoneEq()
         })

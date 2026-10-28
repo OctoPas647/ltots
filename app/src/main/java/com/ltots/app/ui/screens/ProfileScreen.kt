@@ -484,7 +484,7 @@ private fun AppSettingsCard() {
             Text(
                 when (settings.songSort) {
                     SongSort.TITLE -> "Songs in alphabetical order."
-                    SongSort.GENRE -> "Songs of the same genre play one after the other, related genres side by side (rock next to metal, soul next to R&B). Songs without a genre tag come last."
+                    SongSort.GENRE -> "Songs of the same genre play one after the other, related genres side by side (rock next to metal, soul next to R&B). Each song's genre is looked up online by its artist and title (Deezer, then Apple Music), so it doesn't depend on the file's tag; songs the databases don't know take their artist's usual genre, then the file's tag."
                     SongSort.COLOR -> "Songs whose covers have the same colour play one after the other, from red round the rainbow to pink, then black, grey and white."
                     SongSort.RANDOM -> "A new random order every time the app starts."
                 } + " The Colour and Genre buttons on the Library page sort differently just until the app restarts, without changing this.",
@@ -492,6 +492,10 @@ private fun AppSettingsCard() {
             )
 
             AiLyricsSetting()
+
+            SectionTitle("App settings · song finder accounts")
+            com.ltots.app.ui.components.FinderAccounts()
+            Spacer(Modifier.height(10.dp))
 
             SectionTitle("App settings · quality & battery")
             SwitchRow(

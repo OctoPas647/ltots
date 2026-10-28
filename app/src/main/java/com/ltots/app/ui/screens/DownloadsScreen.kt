@@ -692,7 +692,7 @@ private fun Intro() {
         listOf(
             "Search above, or paste a YouTube Music link to a song, album, playlist or artist.",
             "Or share straight from the YouTube Music app: Share → LToTS.",
-            "Hear a song in a video? Paste its link above — TikTok, YouTube Shorts, YouTube, Instagram or any video site — or share it to LToTS. You get the best matches, most likely first.",
+            "Hear a song in a video? Paste its link above — TikTok (videos and photo slideshows), YouTube, Shorts, YouTube Music, Instagram, Facebook, Snapchat, X, Reddit, Pinterest or almost any other site — or share it to LToTS. You get the best matches, most likely first.",
             "No link? Tap Listen to use the microphone, or From a video for a saved clip.",
             "Songs keep YouTube's original audio (Opus) with no re-encoding, plus full album tags and the full-size cover.",
             "Music videos are swapped for the official audio release when there is one.",

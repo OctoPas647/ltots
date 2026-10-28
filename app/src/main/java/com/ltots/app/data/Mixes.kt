@@ -11,6 +11,7 @@ data class Mix(
     val tracks: List<Track>,
 ) {
     enum class Kind(val label: String) {
+        AI_ALBUM("AI albums"), THEME("Moods & themes"),
         SOUNDTRACK("Games & soundtracks"), DECADE("Through the years"), GENRE("Genres"),
     }
 
@@ -24,13 +25,23 @@ data class Mix(
  *    spread over several albums ("Halo 3 (Original Soundtrack) Vol. 1" and "Halo 3 OST, Disc 2"
  *    are one playlist) or comes as single songs ("Snake Eater (From \"Metal Gear Solid 3\")");
  *  - **decades** – the 80s, the 90s, the 2000s… from each song's release year;
- *  - **genres** – one per genre family (Rock, Hip-hop, R&B & soul…).
+ *  - **genres** – one per genre family (Rock, Hip-hop, R&B & soul…);
+ *  - with the mood model: **AI albums** of songs that sound alike, and **themes** (Sad, Happy,
+ *    Chill, Party…) — see [com.ltots.app.moods.MoodMixes].
  * A playlist needs at least [MIN_SONGS] songs.
  */
 object Mixes {
     const val MIN_SONGS = 3
 
-    fun build(tracks: List<Track>): List<Mix> = soundtracks(tracks) + decades(tracks) + genres(tracks)
+    fun build(
+        tracks: List<Track>,
+        moods: Map<String, FloatArray> = emptyMap(),
+        text: com.ltots.app.moods.ClapText? = null,
+    ): List<Mix> {
+        val ai = if (moods.isEmpty() || text == null) emptyList()
+        else com.ltots.app.moods.MoodMixes.albums(tracks, moods, text) + com.ltots.app.moods.MoodMixes.themes(tracks, moods, text)
+        return ai + soundtracks(tracks) + decades(tracks) + genres(tracks)
+    }
 
     // ---- games & soundtracks ---------------------------------------------------------------
 

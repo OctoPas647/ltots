@@ -22,6 +22,8 @@ object AiModels {
         val bytes: Long,
         val title: String,
         val purpose: String,
+        /** Used by the song finder (shown on its model card). */
+        val forFinder: Boolean = true,
     ) {
         SEPARATOR(
             "UVR-MDX-NET-Inst_HQ_3.onnx",
@@ -36,6 +38,14 @@ object AiModels {
             190_085_487L,
             "Lyrics listener (Whisper small)",
             "Writes down the sung words, to find covers and songs the sound match can't",
+        ),
+        MOODS(
+            "clap-htsat-unfused-audio-q8.onnx",
+            "https://huggingface.co/Xenova/clap-htsat-unfused/resolve/main/onnx/audio_model_quantized.onnx",
+            34_301_667L,
+            "Music mood listener (CLAP)",
+            "Listens to each of your songs once to find its mood — for themes like Sad, Happy or Chill and AI-made albums",
+            forFinder = false,
         ),
     }
 

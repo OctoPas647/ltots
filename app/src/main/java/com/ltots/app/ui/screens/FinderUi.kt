@@ -157,12 +157,23 @@ fun FinderContent(
                     Text(state.message, color = LocalPalette.current.textDim, style = MaterialTheme.typography.bodyMedium)
                 }
             }
+            state.signIn?.let { p -> item { SignInRow(p) } }
             item { Steps(state.progress) }
             item { FinderModelsCard() }
             item { Row(Modifier.padding(16.dp)) { Pill("Close", false, { SongFinder.clear() }) } }
         }
         is FinderState.Results -> ResultsView(state, player, onOpenPlayer, onOpenAlbum, onOpenArtist, onToast)
     }
+}
+
+/** "Sign in to Instagram" — then the same link is tried again by itself. */
+@Composable
+private fun SignInRow(p: com.ltots.app.identify.Platform) {
+    var open by remember { mutableStateOf(false) }
+    Row(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+        Pill("Sign in to ${p.label}", true, { open = true })
+    }
+    if (open) com.ltots.app.ui.components.SignInDialog(p, onDismiss = { open = false }, onSignedIn = { open = false; SongFinder.retry() })
 }
 
 @Composable
@@ -385,7 +396,7 @@ private fun SuggestionRow(
 fun FinderModelsCard(onlyMissing: Boolean = false) {
     val pal = LocalPalette.current
     val st by AiModels.status.collectAsState()
-    val models = AiModels.Model.entries.filter { !onlyMissing || it !in st.installed }
+    val models = AiModels.Model.entries.filter { it.forFinder && (!onlyMissing || it !in st.installed) }
     if (models.isEmpty()) return
     Column(Modifier.padding(16.dp)) {
         SectionTitle("Song finder AI")

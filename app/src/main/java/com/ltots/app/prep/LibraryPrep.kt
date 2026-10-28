@@ -33,12 +33,15 @@ import java.util.concurrent.TimeUnit
  *  - **waveforms** for every song — only while the phone is charging (decoding takes some
  *    processor time, so it's done when battery doesn't matter);
  *  - **lyrics** for every song — whenever there's internet and the battery isn't low (it's just
- *    a few small requests per song).
+ *    a few small requests per song);
+ *  - **moods** for every song (the on-device mood model listens to each once) — only while
+ *    charging, once the model is downloaded; "Listen now" in the Library starts it right away.
  * The playing song never waits for this: its wave and lyrics are fetched on the spot.
  */
 object LibraryPrep {
     private const val WAVES = "prep-waves"
     private const val LYRICS = "prep-lyrics"
+    private const val MOODS = "prep-moods"
 
     private fun wm(context: Context) = runCatching { WorkManager.getInstance(context.applicationContext) }.getOrNull()
 
@@ -57,6 +60,16 @@ object LibraryPrep {
             PeriodicWorkRequestBuilder<WaveWorker>(1, TimeUnit.DAYS).setConstraints(waveConstraints).build())
         wm.enqueueUniquePeriodicWork("$LYRICS-daily", ExistingPeriodicWorkPolicy.KEEP,
             PeriodicWorkRequestBuilder<LyricsWorker>(1, TimeUnit.DAYS).setConstraints(lyricsConstraints).build())
+        wm.enqueueUniquePeriodicWork("$MOODS-daily", ExistingPeriodicWorkPolicy.KEEP,
+            PeriodicWorkRequestBuilder<MoodWorker>(1, TimeUnit.DAYS).setConstraints(waveConstraints).build())
+    }
+
+    /** Listens to the library's moods: now, or (when [onlyCharging]) next time the phone charges. */
+    fun runMoods(context: Context, onlyCharging: Boolean = false) {
+        val wm = wm(context) ?: return
+        val req = OneTimeWorkRequestBuilder<MoodWorker>()
+        if (onlyCharging) req.setConstraints(waveConstraints)
+        wm.enqueueUniqueWork(MOODS, if (onlyCharging) ExistingWorkPolicy.KEEP else ExistingWorkPolicy.REPLACE, req.build())
     }
 
     /** "Prepare now" in Sound: run both passes right away, without waiting for the charger. */
@@ -128,5 +141,16 @@ class LyricsWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             delay(250) // be gentle with the free service
         }
         return Result.success()
+    }
+}
+
+class MoodWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
+    override suspend fun doWork(): Result {
+        val ctx = applicationContext
+        if (!LibraryPrep.hasAudioPermission(ctx)) return Result.success()
+        if (!com.ltots.app.identify.AiModels.isInstalled(com.ltots.app.identify.AiModels.Model.MOODS)) return Result.success()
+        val tracks = LocalLibrary.load(ctx)
+        com.ltots.app.moods.MoodIndex.analyse(ctx, tracks) { !isStopped }
+        return if (isStopped) Result.retry() else Result.success()
     }
 }

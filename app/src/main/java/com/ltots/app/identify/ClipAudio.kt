@@ -37,7 +37,11 @@ class ClipAudio(
     }
 }
 
-data class ClipTag(val title: String, val artist: String, val album: String? = null) {
+/**
+ * The song a video says it uses. [weak] for hints read from a caption or title ("♬ Song - Artist",
+ * "Artist - Song (Official Video)"), which are often right but prove nothing.
+ */
+data class ClipTag(val title: String, val artist: String, val album: String? = null, val weak: Boolean = false) {
     companion object {
         /** TikTok's "original sound - someone" means there is no real song tag. */
         fun isOriginalSound(title: String) = title.contains("original sound", true) ||
@@ -48,35 +52,95 @@ data class ClipTag(val title: String, val artist: String, val album: String? = n
 
 object ClipLoader {
 
-    /** Downloads the video at [url] (TikTok, YouTube Shorts, Instagram, …) and decodes its sound. */
-    suspend fun fromLink(context: Context, url: String, onStatus: (String) -> Unit): ClipAudio {
-        onStatus("Starting the download engine…")
-        if (!Engine.ensureReady()) throw IllegalStateException(Engine.state.value.error ?: "The download engine couldn't start")
+    /** The site wants the user signed in before it shows this post. */
+    class SignInNeeded(val platform: Platform, message: String) : IllegalStateException(message)
+
+    /**
+     * Gets the sound of the post at [url] — from any site the download engine knows (YouTube,
+     * YouTube Music, TikTok videos and photo slideshows, Instagram reels and posts, Facebook,
+     * Snapchat Spotlight, X, Reddit, Pinterest, Twitch, Vimeo, SoundCloud…) — and the song the
+     * site says it uses:
+     *  1. the link is cleaned up (short links followed, tracking removed),
+     *  2. the download engine fetches it, signed in when the user signed in to that site,
+     *  3. if that fails, once more asking for any format at all,
+     *  4. if that fails too, the post's own web page is read for its video/sound file,
+     *  5. the song tag comes from the engine, else the page (TikTok sound, Instagram music
+     *     sticker), else a credit in the caption, else (YouTube) the video's title.
+     */
+    suspend fun fromLink(context: Context, rawUrl: String, onStatus: (String) -> Unit): ClipAudio {
+        onStatus("Reading the link…")
+        val url = Platforms.canonical(rawUrl)
+        val platform = Platform.of(url)
         val work = File(context.cacheDir, "identify/${System.nanoTime()}").apply { mkdirs() }
         try {
-            onStatus("Getting the video's sound…")
-            val req = YoutubeDLRequest(url).apply {
-                addOption("--no-playlist")
-                // Audio alone when the site offers it (YouTube); TikTok only has small videos.
-                addOption("-f", "ba[filesize<50M]/ba[filesize_approx<50M]/b[filesize<120M]/b[filesize_approx<120M]/ba/b")
-                addOption("--write-info-json")
-                addOption("--no-mtime")
-                addOption("--retries", "3")
-                addOption("-o", File(work, "clip.%(ext)s").absolutePath)
+            var media: File? = null
+            var info: JSONObject? = null
+            var engineError: String? = null
+            var page: PageProbe.Page? = null
+
+            onStatus("Starting the download engine…")
+            if (Engine.ensureReady()) {
+                val cookies = Platforms.cookiesFor(context, File(work, "cookies.txt"))
+                for ((i, format) in listOf(FORMAT, "b/ba/bv*+ba/best").withIndex()) {
+                    onStatus(if (i == 0) "Getting the sound from ${platform.label}…" else "Trying another way…")
+                    val req = YoutubeDLRequest(url).apply {
+                        addOption("--no-playlist")
+                        addOption("-f", format)
+                        addOption("--write-info-json")
+                        addOption("--no-mtime")
+                        addOption("--retries", "3")
+                        addOption("--socket-timeout", "20")
+                        // Photo slideshows and image posts: still get their sound.
+                        addOption("--ignore-no-formats-error")
+                        cookies?.let { addOption("--cookies", it.absolutePath) }
+                        if (i == 1) addOption("--user-agent", Platforms.BROWSER_UA)
+                        addOption("-o", File(work, "clip$i.%(ext)s").absolutePath)
+                    }
+                    val res = runCatching { YoutubeDL.execute(req, "identify-${work.name}-$i") }
+                    currentCoroutineContext().ensureActive()
+                    media = work.listFiles()?.firstOrNull { it.name.startsWith("clip$i.") && !it.name.endsWith(".json") && !it.name.endsWith(".part") && it.length() > 0 }
+                    info = info ?: work.listFiles()?.firstOrNull { it.name.endsWith(".info.json") }?.let { runCatching { JSONObject(it.readText()) }.getOrNull() }
+                    if (media != null) break
+                    engineError = res.exceptionOrNull()?.message ?: res.getOrNull()?.err
+                    engineError = engineError?.lines()?.lastOrNull { it.contains("ERROR") } ?: engineError?.lines()?.lastOrNull { it.isNotBlank() }
+                }
+            } else engineError = Engine.state.value.error ?: "The download engine couldn't start"
+
+            // The page itself: a fallback for the sound, and a source of the song's name.
+            var tag = info?.let(::tagFrom)
+            if (media == null || (tag == null && platform in PAGE_TAGS)) {
+                onStatus("Reading the ${platform.label} page…")
+                page = PageProbe.read(context, url)
+                if (tag == null) tag = page?.tag
+                if (media == null && page != null && page.mediaUrls.isNotEmpty()) {
+                    onStatus("Getting the sound from the page…")
+                    media = PageProbe.download(page.mediaUrls, url, work, Platforms.cookieHeader(context, url))
+                }
             }
-            val res = YoutubeDL.execute(req, "identify-${work.name}")
-            currentCoroutineContext().ensureActive()
-            val media = work.listFiles()?.firstOrNull { it.name.startsWith("clip.") && !it.name.endsWith(".json") && !it.name.endsWith(".part") }
-                ?: throw IllegalStateException("Couldn't get the video's sound. ${res.err.lines().lastOrNull { it.isNotBlank() } ?: ""}".trim())
-            val info = work.listFiles()?.firstOrNull { it.name.endsWith(".info.json") }
-                ?.let { runCatching { JSONObject(it.readText()) }.getOrNull() }
+            if (media == null) {
+                val why = engineError?.removePrefix("ERROR:")?.trim().orEmpty()
+                if (platform.needsLoginSometimes && !Platforms.isSignedIn(context, platform) && (why.isEmpty() || Platforms.wantsLogin(why))) {
+                    throw SignInNeeded(platform, "${platform.label} didn't show this post to a guest. Sign in to ${platform.label} once and try again.")
+                }
+                throw IllegalStateException("Couldn't get the sound from ${platform.label}. $why".trim())
+            }
+            if (tag == null) tag = info?.let { PageProbe.creditIn(it.optString("description")) }
+            if (tag == null && (platform == Platform.YOUTUBE || platform == Platform.YOUTUBE_MUSIC)) tag = PageProbe.titleHint(info?.optString("title"))
+
             onStatus("Reading the sound…")
             val pcm = decode(context, Uri.fromFile(media))
-            return ClipAudio(pcm, info?.let(::tagFrom), info?.optString("title")?.ifBlank { null } ?: url)
+            val label = info?.optString("title")?.ifBlank { null } ?: page?.title ?: url
+            return ClipAudio(pcm, tag, label)
         } finally {
             work.deleteRecursively()
         }
     }
+
+    /** Audio alone when the site offers it (YouTube); TikTok and Instagram only have small videos. */
+    private const val FORMAT = "ba[filesize<50M]/ba[filesize_approx<50M]/b[filesize<120M]/b[filesize_approx<120M]/ba/b"
+
+    /** Sites whose pages name the song when the download engine doesn't. */
+    private val PAGE_TAGS = setOf(Platform.TIKTOK, Platform.INSTAGRAM, Platform.THREADS, Platform.FACEBOOK)
 
     /** A video or audio file picked from the phone. */
     suspend fun fromFile(context: Context, uri: Uri, name: String?): ClipAudio {
@@ -86,7 +150,7 @@ object ClipLoader {
 
     /** What yt-dlp knows about the song in the video. */
     internal fun tagFrom(info: JSONObject): ClipTag? {
-        val track = info.optString("track").trim()
+        val track = info.optString("track").ifBlank { info.optString("alt_title") }.trim()
         val artist = info.optString("artist").ifBlank { info.optString("artists") }.trim()
             .removePrefix("[\"").removeSuffix("\"]").replace("\",\"", ", ")
         if (track.isBlank() || ClipTag.isOriginalSound(track)) return null
@@ -94,8 +158,18 @@ object ClipLoader {
         return ClipTag(track, artist, info.optString("album").ifBlank { null })
     }
 
-    /** Decodes any audio/video file Android can play to 16 kHz mono. */
-    suspend fun decode(context: Context, uri: Uri, maxSeconds: Int = ClipAudio.MAX_SECONDS): FloatArray {
+    /**
+     * Decodes any audio/video file Android can play to mono at [outRate] (16 kHz unless asked),
+     * [maxSeconds] of it from [startSec] on, peak-normalised unless [normalized] is false.
+     */
+    suspend fun decode(
+        context: Context,
+        uri: Uri,
+        maxSeconds: Int = ClipAudio.MAX_SECONDS,
+        startSec: Double = 0.0,
+        outRate: Int = ClipAudio.RATE,
+        normalized: Boolean = true,
+    ): FloatArray {
         val ex = MediaExtractor()
         try {
             ex.setDataSource(context, uri, null)
@@ -103,6 +177,8 @@ object ClipLoader {
                 ex.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
             } ?: throw IllegalStateException("This video has no sound")
             ex.selectTrack(track)
+            val startUs = (startSec * 1_000_000).toLong()
+            if (startUs > 0) ex.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
             val fmt = ex.getTrackFormat(track)
             val mime = fmt.getString(MediaFormat.KEY_MIME)!!
             val codec = MediaCodec.createDecoderByType(mime)
@@ -123,7 +199,7 @@ object ClipLoader {
                         if (i >= 0) {
                             val buf = codec.getInputBuffer(i)!!
                             val n = ex.readSampleData(buf, 0)
-                            if (n < 0 || ex.sampleTime > maxSeconds * 1_000_000L) {
+                            if (n < 0 || ex.sampleTime > startUs + maxSeconds * 1_000_000L) {
                                 codec.queueInputBuffer(i, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                                 inputDone = true
                             } else {
@@ -173,7 +249,8 @@ object ClipLoader {
             }
             val raw = mono.toArray()
             if (raw.isEmpty()) throw IllegalStateException("Couldn't read any sound from this file")
-            return normalize(Dsp.resample(raw, ClipAudio.RATE.toDouble() / rate))
+            val out = if (rate == outRate) raw else Dsp.resample(raw, outRate.toDouble() / rate)
+            return if (normalized) normalize(out) else out
         } finally {
             ex.release()
         }

@@ -23,7 +23,13 @@ sealed interface FinderState {
     data class Listening(val level: Float, val secondsLeft: Int) : FinderState
     data class Working(val label: String, val progress: IdentifyProgress) : FinderState
     data class Results(val label: String, val suggestions: List<Suggestion>, val progress: IdentifyProgress) : FinderState
-    data class Failed(val label: String, val message: String, val progress: IdentifyProgress) : FinderState
+    data class Failed(
+        val label: String,
+        val message: String,
+        val progress: IdentifyProgress,
+        /** The site to sign in to before trying again, when that's why it failed. */
+        val signIn: Platform? = null,
+    ) : FinderState
 }
 
 /**
@@ -57,7 +63,14 @@ object SongFinder {
 
     fun linkIn(text: String): String? = Regex("""https?://[^\s"'<>]+""").find(text)?.value
 
+    /** What was searched last, to try again after signing in. */
+    var lastSource: ClipSource? = null
+        private set
+
+    fun retry() { lastSource?.let(::start) }
+
     fun start(source: ClipSource) {
+        lastSource = source
         job?.cancel()
         job = scope.launch {
             val label = when (source) {
@@ -100,6 +113,8 @@ object SongFinder {
                 else FinderState.Results(clip.label, rows, progress)
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: ClipLoader.SignInNeeded) {
+                _state.value = FinderState.Failed(currentLabel, e.message ?: "Sign in needed", progress, e.platform)
             } catch (e: Exception) {
                 _state.value = FinderState.Failed(currentLabel, e.message ?: "Something went wrong", progress)
             }
@@ -107,14 +122,14 @@ object SongFinder {
     }
 
     private fun noMatchMessage(): String {
-        val missing = AiModels.Model.entries.filter { !AiModels.isInstalled(it) }
+        val missing = AiModels.Model.entries.filter { it.forFinder && !AiModels.isInstalled(it) }
         return if (missing.isEmpty()) "Couldn't find this song. It may not be released, or the music is too quiet under everything else."
         else "Couldn't find this song. Downloading the AI models below helps with talking over the music and with covers."
     }
 
     /** Downloads an AI model in the app's scope, so leaving the tab doesn't stop it. */
-    fun downloadModel(m: AiModels.Model) {
-        scope.launch { runCatching { AiModels.download(m) } }
+    fun downloadModel(m: AiModels.Model, then: () -> Unit = {}) {
+        scope.launch { runCatching { AiModels.download(m) }.onSuccess { then() } }
     }
 
     fun cancel() {

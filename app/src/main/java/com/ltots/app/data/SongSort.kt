@@ -77,37 +77,52 @@ object SongSorter {
      * Each family is matched by words in the genre name.
      */
     private val FAMILIES = listOf(
-        listOf("metal", "hardcore", "deathcore", "grind", "thrash", "djent"),
-        listOf("punk", "emo", "grunge"),
-        listOf("rock", "alternative", "indie", "shoegaze", "garage"),
-        listOf("pop", "k-pop", "kpop", "j-pop", "synth", "disco", "schlager"),
-        listOf("dance", "edm", "house", "techno", "trance", "electro", "dubstep", "drum", "bass", "dnb", "hardstyle", "club", "phonk"),
-        listOf("ambient", "chill", "lo-fi", "lofi", "downtempo", "trip"),
+        listOf("metal", "hardcore", "deathcore", "metalcore", "grind", "thrash", "djent", "doom"),
+        listOf("punk", "emo", "grunge", "screamo"),
+        listOf("rock", "alternative", "alt", "indie", "shoegaze", "garage", "britpop", "new wave", "post-punk"),
+        listOf("pop", "k-pop", "kpop", "j-pop", "jpop", "c-pop", "synth", "electropop", "disco", "schlager", "top 40", "europop"),
+        listOf("dance", "edm", "house", "techno", "trance", "electro", "electronic", "electronica", "dubstep", "drum", "bass", "dnb", "hardstyle", "club", "phonk", "jungle", "garage house", "eurodance", "rave"),
+        listOf("ambient", "chill", "lo-fi", "lofi", "downtempo", "trip", "new age", "meditat"),
         listOf("hip hop", "hip-hop", "hiphop", "rap", "trap", "drill", "grime"),
-        listOf("r&b", "rnb", "soul", "funk", "neo soul", "gospel", "motown"),
-        listOf("reggae", "dancehall", "ska", "afro", "reggaeton", "latin", "salsa", "bachata", "cumbia", "samba", "bossa"),
+        listOf("r&b", "rnb", "soul", "funk", "neo soul", "gospel", "motown", "christian"),
+        listOf("reggae", "dancehall", "ska", "afro", "reggaeton", "latin", "salsa", "bachata", "cumbia", "samba", "bossa", "world", "chalga", "pop-folk", "turbo"),
         listOf("jazz", "swing", "blues", "big band"),
         listOf("country", "folk", "americana", "bluegrass", "singer", "acoustic"),
-        listOf("classical", "orchestra", "opera", "baroque", "piano", "soundtrack", "score", "instrumental", "film"),
+        listOf("classical", "orchestra", "opera", "baroque", "piano", "soundtrack", "score", "instrumental", "film", "anime", "game", "musical", "showtunes"),
     )
+
+    /** Each keyword matches at the start of a word ("synth" in "synthwave", not in "kasynth"). */
+    private val FAMILY_PATTERNS = FAMILIES.map { words -> words.map { Regex("(?<![\\p{L}\\p{N}])" + Regex.escape(it)) } }
 
     /** A name for each of [FAMILIES], for playlists. */
     private val FAMILY_NAMES = listOf(
         "Metal", "Punk", "Rock", "Pop", "Dance & electronic", "Chill", "Hip-hop", "R&B & soul",
-        "Latin & reggae", "Jazz & blues", "Country & folk", "Classical & soundtracks",
+        "Latin, reggae & world", "Jazz & blues", "Country & folk", "Classical & soundtracks",
     )
 
     /** The family [raw] belongs to (e.g. "Rock" for "Hard Rock"); null when it fits none. */
     fun familyName(raw: String?): String? = FAMILY_NAMES.getOrNull(familyIndex(raw))
 
-    /** Where a genre's family comes in [FAMILIES]; other genres after them, no genre last. */
+    /**
+     * Where a genre's family comes in [FAMILIES]; other genres after them, no genre last.
+     *
+     * In a genre name the *last* genre word says what it is: "Pop Rock" is rock, "Indie Pop" is
+     * pop, "Folk Metal" is metal, "Alternative R&B" is R&B. So the keyword found furthest along
+     * the name wins, ignoring keywords inside longer ones ("pop-folk" is its own genre, not
+     * folk). Database names like "Hip-Hop/Rap" or "R&B/Soul" work the same way.
+     */
     fun familyIndex(raw: String?): Int {
         val g = genreName(raw)?.lowercase(Locale.ROOT) ?: return FAMILIES.size + 1
-        // The first family matching from the start of the name wins ("Pop Rock" is pop), then
-        // the first matching anywhere.
-        FAMILIES.forEachIndexed { i, words -> if (words.any { g.startsWith(it) }) return i }
-        FAMILIES.forEachIndexed { i, words -> if (words.any { g.contains(it) }) return i }
-        return FAMILIES.size
+        // Every keyword found: (start, end, family).
+        val hits = ArrayList<Triple<Int, Int, Int>>()
+        FAMILY_PATTERNS.forEachIndexed { i, pats ->
+            pats.forEach { re -> re.findAll(g).forEach { m -> hits += Triple(m.range.first, m.range.last, i) } }
+        }
+        // A keyword inside a longer one ("folk" in "pop-folk", "house" in "garage house") doesn't count.
+        val kept = hits.filter { h ->
+            hits.none { o -> o !== h && o.first <= h.first && o.second >= h.second && (o.second - o.first) > (h.second - h.first) }
+        }
+        return kept.maxWithOrNull(compareBy<Triple<Int, Int, Int>> { it.first }.thenBy { it.second - it.first })?.third ?: FAMILIES.size
     }
 
     private val ID3 = listOf(

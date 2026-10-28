@@ -22,6 +22,7 @@ enum class Step(val label: String) {
     SEPARATE("AI: pulling the music out of voices & noise"),
     MATCH("Matching the sound"),
     SPEED("Trying sped-up & slowed versions"),
+    RAW("Trying again on the raw sound, without AI"),
     LYRICS("AI: listening to the lyrics"),
     YOUTUBE("Finding it on YouTube Music"),
 }
@@ -45,7 +46,9 @@ internal data class Window(val start: Int, val length: Int, val score: Double)
  *     instrument playing the tune (covers, someone playing along), when the untouched sound is used,
  *  3. Shazam fingerprints of the best moments — of the clip and of the separated music,
  *  4. if that fails, the same at the speeds TikTok edits use (sped up / slowed),
- *  5. if that fails too, AI lyrics listening and a lyrics search,
+ *  5. if the AI separated the sound and still nothing matched, everything again on the raw
+ *     sound alone — moments picked by loudness, not by the AI — at normal and edited speeds,
+ *  6. if that fails too, AI lyrics listening and a lyrics search,
  * then looks each candidate up on YouTube Music (original and other versions).
  */
 class Identifier(
@@ -67,7 +70,7 @@ class Identifier(
     fun soundRunning(detail: String) = set(Step.SOUND, StepState.RUNNING, detail)
 
     /** Hits Shazam made, with the window/source/speed they came from. */
-    private data class SoundHit(val hit: ShazamHit, val window: Int, val ai: Boolean, val speed: Double, val atSec: Double)
+    private data class SoundHit(val hit: ShazamHit, val window: Int, val ai: Boolean, val speed: Double, val atSec: Double, val raw: Boolean = false)
 
     suspend fun run(clip: ClipAudio): List<Suggestion> = withContext(Dispatchers.Default) {
         set(Step.SOUND, StepState.DONE, "%.0f s of sound".format(clip.seconds))
@@ -77,9 +80,12 @@ class Identifier(
         if (clip.tag != null) {
             identities += Identity(
                 clip.tag.title, clip.tag.artist, album = clip.tag.album,
-                clues = listOf(Clue(Clue.Kind.TAG, 3.0, "The video's music tag says so")),
+                clues = listOf(
+                    if (clip.tag.weak) Clue(Clue.Kind.TAG, 1.2, "The video's caption or title names it")
+                    else Clue(Clue.Kind.TAG, 3.0, "The video's music tag says so"),
+                ),
             )
-            set(Step.TAG, StepState.DONE, "${clip.tag.title} — ${clip.tag.artist}")
+            set(Step.TAG, StepState.DONE, (if (clip.tag.weak) "Hint: " else "") + "${clip.tag.title} — ${clip.tag.artist}")
         } else set(Step.TAG, StepState.SKIPPED, "No song tag on this video")
 
         val pcm = clip.pcm
@@ -143,7 +149,11 @@ class Identifier(
         spanWindows.indices.forEach { plan += Triple(it, Src.SPAN, 1.0) }
         val errorCount = java.util.concurrent.atomic.AtomicInteger()
         val lastErr = java.util.concurrent.atomic.AtomicReference<String?>(null)
-        fun windowsOf(src: Src) = when (src) { Src.ORIG -> origWindows; Src.RAW -> rawWindows; Src.STEM -> stemWindows; Src.SPAN -> spanWindows }
+        // Filled only if the raw-sound retry (step 5) runs.
+        var plainWindows: List<Window> = emptyList()
+        fun windowsOf(src: Src) = when (src) {
+            Src.ORIG -> origWindows; Src.RAW -> rawWindows; Src.STEM -> stemWindows; Src.SPAN -> spanWindows; Src.PLAIN -> plainWindows
+        }
         suspend fun ask(q: List<Triple<Int, Src, Double>>) = coroutineScope {
             val gate = Semaphore(3)
             q.map { (w, from, speed) ->
@@ -157,7 +167,7 @@ class Identifier(
                         val clipped = if (audio.size > SEG * ClipAudio.RATE) audio.copyOf(SEG * ClipAudio.RATE) else audio
                         runCatching { Shazam.recognize(ShazamSignature.from(ClipLoader.normalize(clipped))) }
                             .onFailure { errorCount.incrementAndGet(); lastErr.set(it.message) }
-                            .getOrNull()?.let { SoundHit(it, w, ai, speed, win.start / ClipAudio.RATE.toDouble()) }
+                            .getOrNull()?.let { SoundHit(it, w, ai, speed, win.start / ClipAudio.RATE.toDouble(), raw = from == Src.PLAIN) }
                     }
                 }
             }.awaitAll().filterNotNull()
@@ -200,12 +210,53 @@ class Identifier(
             set(Step.SPEED, StepState.DONE, sped?.let { "Found it at %.2f× — the video ${if (it.speed > 1) "speeds it up" else "slows it down"}".format(it.speed) } ?: "No match at other speeds either")
         } else set(Step.SPEED, StepState.SKIPPED, if (hits.isNotEmpty()) "Not needed" else "Shazam unreachable")
 
+        // 5. Raw sound, without the AI. The separator can take out the very part Shazam needs
+        // (or leave artefacts that spoil the fingerprint), so when it ran and nothing matched,
+        // listen again to the untouched video sound only — at the loudest moments and across
+        // the whole clip, chosen without any help from the AI — at normal and edited speeds.
+        if (hits.isEmpty() && musicStem != null && errors < plan.size) {
+            currentCoroutineContext().ensureActive()
+            set(Step.RAW, StepState.RUNNING, "Listening without the AI…", 0f)
+            // Moments of the untouched sound already fingerprinted at normal speed.
+            val heard = (origWindows.take(2) + rawWindows.take(1) + if (spanFromStem) emptyList() else spanWindows).map { it.start }
+            fun fresh(w: Window, others: List<Int>) = others.all { abs(it - w.start) >= 3 * ClipAudio.RATE }
+            val loudest = pickWindows(pcm, null, null, forStem = false)
+            val spread = spanWindows(pcm.size, loudest.map { it.start } + heard, max = 8)
+            plainWindows = loudest + spread
+            val normal = plainWindows.indices.filter { fresh(plainWindows[it], heard) }
+            hits += ask(normal.map { Triple(it, Src.PLAIN, 1.0) })
+            set(Step.RAW, StepState.RUNNING, null, 0.4f)
+            if (hits.isEmpty()) {
+                // Edited speeds on the two loudest raw moments (the AI sweep used other moments
+                // or the separated music).
+                val targets = loudest.indices.take(2)
+                var tried = 0
+                for (batch in SPEEDS.chunked(3)) {
+                    currentCoroutineContext().ensureActive()
+                    set(Step.RAW, StepState.RUNNING, "Raw sound at " + batch.joinToString(", ") { "%.2f×".format(it) }, 0.4f + 0.6f * tried / SPEEDS.size)
+                    val found = ask(batch.flatMap { sp -> targets.map { Triple(it, Src.PLAIN, sp) } })
+                    tried += batch.size
+                    if (found.isNotEmpty()) { hits += found; break }
+                }
+            }
+            val got = hits.filter { it.raw }
+            set(Step.RAW, StepState.DONE, when {
+                got.isEmpty() -> "No match on the raw sound either"
+                got.any { it.speed != 1.0 } -> "Found it on the raw sound at %.2f× — the AI had been hiding it".format(got.first { it.speed != 1.0 }.speed)
+                else -> "Found it on the raw sound — the AI had been hiding it"
+            })
+        } else set(Step.RAW, StepState.SKIPPED, when {
+            hits.isNotEmpty() -> "Not needed"
+            musicStem == null -> "The AI didn't change the sound"
+            else -> "Shazam unreachable"
+        })
+
         for (h in hits) {
             val kind = when { h.speed != 1.0 -> Clue.Kind.SOUND_SPEED; h.ai -> Clue.Kind.SOUND_AI; else -> Clue.Kind.SOUND }
             val note = when (kind) {
-                Clue.Kind.SOUND -> "Sound match (Shazam)"
+                Clue.Kind.SOUND -> if (h.raw) "Sound match on the raw sound, without AI" else "Sound match (Shazam)"
                 Clue.Kind.SOUND_AI -> "Sound match after AI removed the voices"
-                else -> "Sound match at %.2f× speed".format(h.speed)
+                else -> "Sound match at %.2f× speed".format(h.speed) + if (h.raw) " on the raw sound" else ""
             }
             identities += Identity(
                 h.hit.title, h.hit.artist, album = h.hit.album, year = h.hit.year, coverUrl = h.hit.coverUrl,
@@ -214,7 +265,7 @@ class Identifier(
             )
         }
 
-        // 5. Lyrics
+        // 6. Lyrics
         if (hits.isEmpty()) {
             if (lyricsModel != null && lyricsModel.isFile) {
                 set(Step.LYRICS, StepState.RUNNING, "Listening…")
@@ -236,7 +287,7 @@ class Identifier(
             } else set(Step.LYRICS, StepState.SKIPPED, "AI lyrics listener not downloaded")
         } else set(Step.LYRICS, StepState.SKIPPED, "Not needed")
 
-        // 6. YouTube Music
+        // 7. YouTube Music
         val merged = Ranking.merge(identities).take(6)
         if (merged.isEmpty()) {
             set(Step.YOUTUBE, StepState.SKIPPED)
@@ -302,6 +353,8 @@ class Identifier(
         STEM,
         /** Moments spread over the whole clip (the separated music when voices cover it). */
         SPAN,
+        /** The untouched sound at moments picked without the AI — the raw-sound retry. */
+        PLAIN,
     }
 
     companion object {

@@ -272,6 +272,12 @@ data class AppSettings(
     val songSort: SongSort = SongSort.TITLE,
     /** Time plain lyrics with the on-device AI by itself (the playing song, and the library while charging). */
     val aiLyrics: Boolean = true,
+    /** Artists left out of the Songs list, mixes and what plays next (main-artist names as shown). */
+    val hiddenArtists: List<String> = emptyList(),
+    /** Only songs that are well-known worldwide (by their popularity on Deezer). */
+    val onlyHits: Boolean = false,
+    /** Only the songs the user plays most. With [onlyHits] too, a song needs to be either. */
+    val onlyMostPlayed: Boolean = false,
 )
 
 /** Hand-written JSON (de)serialisation — no reflection, so it survives R8 untouched. */
@@ -430,6 +436,9 @@ object Json {
         put("batteryEq", s.batteryEq)
         put("sort", s.songSort.name)
         put("aiLyrics", s.aiLyrics)
+        put("hiddenArtists", JSONArray(s.hiddenArtists))
+        put("onlyHits", s.onlyHits)
+        put("onlyMostPlayed", s.onlyMostPlayed)
     }
 
     fun settings(o: JSONObject) = AppSettings(
@@ -445,5 +454,8 @@ object Json {
         batteryEq = o.optBoolean("batteryEq", false),
         songSort = runCatching { SongSort.valueOf(o.optString("sort")) }.getOrDefault(SongSort.TITLE),
         aiLyrics = o.optBoolean("aiLyrics", true),
+        hiddenArtists = o.optJSONArray("hiddenArtists")?.let { a -> List(a.length()) { a.getString(it) } } ?: emptyList(),
+        onlyHits = o.optBoolean("onlyHits", false),
+        onlyMostPlayed = o.optBoolean("onlyMostPlayed", false),
     )
 }
