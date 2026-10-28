@@ -245,8 +245,12 @@ object AudioEngine : SoundSource {
         return out
     }
 
-    /** Beats for the playing song and the next two, so each is ready before it plays. */
+    /**
+     * Beats for the playing song and the next two, so each is ready before it plays — only
+     * while Look > Move with the beat is on (otherwise nothing uses them).
+     */
     private fun prepareBeats() {
+        if (!com.ltots.app.ui.theme.ThemeState.config.value.coverBeat) return
         runCatching { BeatIndex.request(appContext, upcomingUris(3)) }
     }
 
