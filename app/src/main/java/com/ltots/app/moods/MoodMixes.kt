@@ -9,7 +9,12 @@ import kotlin.random.Random
 data class Prompt(val id: String, val label: String, val vec: FloatArray)
 
 /** The words' side of CLAP, computed once off the phone and shipped with the app. */
-data class ClapText(val themes: List<Prompt>, val albums: List<Prompt>)
+data class ClapText(
+    val themes: List<Prompt>,
+    val albums: List<Prompt>,
+    /** "song", "speech", "noise": what kind of sound a file is (for the Library's Songs view). */
+    val kinds: List<Prompt> = emptyList(),
+)
 
 /**
  * Themes and AI albums from what CLAP heard in each song.

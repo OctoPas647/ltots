@@ -153,7 +153,7 @@ private fun LibraryPrepCard() {
         while (true) {
             status = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 if (!com.ltots.app.prep.LibraryPrep.hasAudioPermission(context)) return@withContext null
-                val tracks = com.ltots.app.data.LocalLibrary.load(context)
+                val tracks = com.ltots.app.data.LocalLibrary.loadSongs(context)
                 Triple(
                     tracks.size,
                     com.ltots.app.audio.WaveIndex.countReady(tracks.map { it.uri }),

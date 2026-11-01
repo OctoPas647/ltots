@@ -169,11 +169,11 @@ fun FinderContent(
 /** "Sign in to Instagram" — then the same link is tried again by itself. */
 @Composable
 private fun SignInRow(p: com.ltots.app.identify.Platform) {
-    var open by remember { mutableStateOf(false) }
     Row(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
-        Pill("Sign in to ${p.label}", true, { open = true })
+        Pill("Sign in to ${p.label}", true, {
+            com.ltots.app.ui.components.SignInHost.open(com.ltots.app.ui.components.SignInTarget.Site(p)) { SongFinder.retry() }
+        })
     }
-    if (open) com.ltots.app.ui.components.SignInDialog(p, onDismiss = { open = false }, onSignedIn = { open = false; SongFinder.retry() })
 }
 
 @Composable

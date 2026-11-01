@@ -189,10 +189,20 @@ object AudioEngine : SoundSource {
                 onSongChanged(mediaItem)
                 prepareBeats()
                 com.ltots.app.data.PlayStats.onSong(mediaItem?.mediaId?.takeIf { it.isNotBlank() }, mediaItem?.mediaMetadata?.durationMs ?: 0L, p.isPlaying)
+                val md = mediaItem?.mediaMetadata
+                com.ltots.app.data.ListenHistory.onSong(
+                    mediaItem?.mediaId?.takeIf { it.isNotBlank() },
+                    md?.extras?.getLong("trackId", -1L) ?: -1L,
+                    md?.title?.toString() ?: "", md?.artist?.toString() ?: "", md?.albumTitle?.toString() ?: "",
+                    md?.durationMs ?: 0L, p.isPlaying,
+                )
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 _isPlaying.value = isPlaying
                 com.ltots.app.data.PlayStats.onPlaying(isPlaying)
+                com.ltots.app.data.ListenHistory.onPlaying(isPlaying)
+                // A song playing ends a recommendation preview.
+                if (isPlaying) com.ltots.app.recs.SongPreview.stop()
             }
             override fun onTimelineChanged(timeline: Timeline, reason: Int) { updateDirect(); prepareBeats() }
             override fun onAudioSessionIdChanged(audioSessionId: Int) = syncPhoneEq()

@@ -17,6 +17,8 @@ data class LyricsDoc(
     val matchedAs: String = "",
     /** A remark shown under the lyrics, e.g. how an AI match lined them up. */
     val note: String = "",
+    /** Length of the recording these lyrics were timed to (s), when the database says; not saved. */
+    val recordSec: Double? = null,
 ) {
     val isEmpty: Boolean get() = synced.isNullOrEmpty() && plain.isNullOrBlank() && !instrumental
 

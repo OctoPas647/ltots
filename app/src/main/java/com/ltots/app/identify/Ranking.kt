@@ -7,7 +7,7 @@ import kotlin.math.exp
 
 /** One piece of evidence that the clip is a certain song. */
 data class Clue(val kind: Kind, val weight: Double, val note: String) {
-    enum class Kind { TAG, SOUND, SOUND_AI, SOUND_SPEED, LYRICS }
+    enum class Kind { TAG, SOUND, SOUND_AI, SOUND_SPEED, LYRICS, MELODY }
 }
 
 /** A song the clip might be, with everything that points to it. */

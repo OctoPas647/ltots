@@ -43,6 +43,7 @@ import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -91,6 +92,7 @@ import com.ltots.app.ui.bottomChrome
 import com.ltots.app.ui.PlayerUi
 import com.ltots.app.ui.components.Logo
 import com.ltots.app.ui.components.Pill
+import com.ltots.app.ui.components.SegmentedToggle
 import com.ltots.app.ui.components.formatTime
 import com.ltots.app.ui.glass.GlassPanel
 import com.ltots.app.ui.glass.glass
@@ -103,7 +105,7 @@ private enum class LibView { SONGS, ALBUMS, ARTISTS, MIXES }
 private data class Group(val title: String, val subtitle: String, val tracks: List<Track>)
 
 @Composable
-fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
+fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenHistory: () -> Unit = {}) {
     val context = LocalContext.current
     val pal = LocalPalette.current
     val audioPerm = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO else Manifest.permission.READ_EXTERNAL_STORAGE
@@ -125,9 +127,21 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
 
     val downloadsDone by com.ltots.app.download.DownloadManager.libraryVersion.collectAsState()
     // Shown straight from memory when the tab opens again; only re-read when something changed.
-    val tracks by produceState(if (hasPerm) LocalLibrary.cached() ?: emptyList() else emptyList(), hasPerm, reload, downloadsDone) {
+    val allTracks by produceState(if (hasPerm) LocalLibrary.cached() ?: emptyList() else emptyList(), hasPerm, reload, downloadsDone) {
         value = if (hasPerm) LocalLibrary.load(context, version = reload * 100_003 + downloadsDone) else emptyList()
     }
+
+    // Songs or All: what isn't a song (recordings, voice notes, call recordings, ringtones, short
+    // sounds…) is told apart by its folder, name and tags, and the rest by the AI listening to it.
+    var showAll by rememberSaveable { mutableStateOf(false) }
+    val kindVerdicts by com.ltots.app.data.SongKinds.verdicts.collectAsState()
+    val sorting by com.ltots.app.data.SongKinds.progress.collectAsState()
+    val aiModels by com.ltots.app.identify.AiModels.status.collectAsState()
+    val kindsAi = com.ltots.app.identify.AiModels.Model.MOODS in aiModels.installed
+    LaunchedEffect(Unit) { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.ltots.app.data.SongKinds.load() } }
+    LaunchedEffect(allTracks, kindsAi) { if (allTracks.isNotEmpty()) com.ltots.app.data.SongKinds.classify(context, allTracks) }
+    val songsOnly = remember(allTracks, kindVerdicts) { com.ltots.app.data.SongKinds.songs(allTracks, kindVerdicts) }
+    val tracks = if (showAll) allTracks else songsOnly
 
     var query by rememberSaveable { mutableStateOf("") }
     var view by rememberSaveable { mutableStateOf(LibView.SONGS) }
@@ -179,10 +193,42 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
             Column(Modifier.weight(1f)) {
                 Text("LToTS", style = MaterialTheme.typography.displaySmall, color = pal.text)
                 Text(
-                    if (tracks.isEmpty()) "Your music" else "${tracks.size} songs on this phone",
-                    style = MaterialTheme.typography.bodySmall, color = pal.textDim,
+                    when {
+                        allTracks.isEmpty() -> "Your music"
+                        showAll -> "${allTracks.size} audio files · ${songsOnly.size} songs"
+                        else -> "${songsOnly.size} songs on this phone"
+                    },
+                    style = MaterialTheme.typography.bodySmall, color = pal.textDim, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
             }
+            // Top right, opposite the logo: shuffle, then the listening history.
+            val round = if (headerGlass) Modifier.clip(CircleShape).background(inner) else Modifier.glass(CircleShape, strength = 0.6f)
+            if (filtered.isNotEmpty()) {
+                Box(
+                    round.clip(CircleShape)
+                        .clickable { player.play(filtered, (filtered.indices).random(), shuffle = true); onOpenPlayer() }
+                        .padding(9.dp)
+                ) { Icon(Icons.Rounded.Shuffle, "Shuffle all", tint = pal.text) }
+                Spacer(Modifier.width(8.dp))
+            }
+            Box(round.clip(CircleShape).clickable(onClick = onOpenHistory).padding(9.dp)) {
+                Icon(Icons.Rounded.History, "History", tint = pal.text)
+            }
+        }
+
+        // Songs / All: only real songs, or every audio file on the phone.
+        Row(Modifier.padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            SegmentedToggle(
+                listOf("Songs", "All"), if (showAll) 1 else 0, background = inner,
+            ) { showAll = it == 1; openGroup = null }
+            Spacer(Modifier.width(10.dp))
+            val sortNote = when {
+                sorting != null -> "${if (kindsAi) "AI is sorting" else "Sorting"} ${sorting!!.done}/${sorting!!.total} files…"
+                showAll && allTracks.size > songsOnly.size -> "${allTracks.size - songsOnly.size} aren't songs"
+                !showAll && allTracks.size > songsOnly.size -> "${allTracks.size - songsOnly.size} recordings & sounds hidden"
+                else -> null
+            }
+            if (sortNote != null) Text(sortNote, color = pal.textFaint, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
 
         // Search
@@ -215,14 +261,6 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
             Pill("Albums", view == LibView.ALBUMS, { view = LibView.ALBUMS; openGroup = null })
             Pill("Artists", view == LibView.ARTISTS, { view = LibView.ARTISTS; openGroup = null })
             Pill("Mixes", view == LibView.MIXES, { view = LibView.MIXES; openGroup = null })
-            Spacer(Modifier.weight(1f))
-            if (filtered.isNotEmpty()) {
-                Box(
-                    (if (headerGlass) Modifier.clip(CircleShape).background(inner) else Modifier.glass(CircleShape, strength = 0.6f)).clip(CircleShape)
-                        .clickable { player.play(filtered, (filtered.indices).random(), shuffle = true); onOpenPlayer() }
-                        .padding(9.dp)
-                ) { Icon(Icons.Rounded.Shuffle, "Shuffle all", tint = pal.text) }
-            }
         }
 
         if (hasPerm && tracks.isNotEmpty() && openGroup == null && view == LibView.SONGS) {
@@ -242,11 +280,13 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
                 "Allow \"Music and audio\" so the app can find songs on your phone.",
                 "Allow access",
             ) { launcher.launch(arrayOf(audioPerm)) }
+            tracks.isEmpty() && allTracks.isNotEmpty() -> EmptyState("No songs yet", "Only recordings and sounds were found. Tap All to see them.", "Show all") { showAll = true }
             tracks.isEmpty() -> EmptyState("No songs found", "Put some music files on your phone (any folder) and they'll show up here.", null) {}
             openGroup != null -> GroupDetail(openGroup!!, player, bottom, onBack = { openGroup = null }, onPlayed = onOpenPlayer)
             view == LibView.SONGS -> SongList(
                 remember(filtered, sortBy, if (sortBy == SongSort.COLOR) colors else null) { SongSorter.sort(filtered, sortBy, colors) },
                 player, bottom, onOpenPlayer,
+                note = if (showAll) { t -> com.ltots.app.data.SongKinds.describe(t, kindVerdicts) } else null,
             )
             view == LibView.MIXES -> MixGrid(remember(filtered, moods) { Mixes.build(filtered, moods, com.ltots.app.moods.MoodIndex.text(context)) }, bottom) { m ->
                 openGroup = Group(m.title, "${m.kind.label} · ${m.subtitle}", m.tracks)
@@ -362,16 +402,16 @@ private fun SortBar(
 }
 
 @Composable
-private fun SongList(tracks: List<Track>, player: PlayerUi, bottom: Dp, onPlayed: () -> Unit) {
+private fun SongList(tracks: List<Track>, player: PlayerUi, bottom: Dp, onPlayed: () -> Unit, note: ((Track) -> String?)? = null) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = LocalListTop.current + 2.dp, bottom = bottom)) {
         itemsIndexed(tracks, key = { _, t -> t.id }) { i, t ->
-            TrackRow(t, playing = player.trackId == t.id) { player.play(tracks, i); onPlayed() }
+            TrackRow(t, playing = player.trackId == t.id, note = note?.invoke(t)) { player.play(tracks, i); onPlayed() }
         }
     }
 }
 
 @Composable
-private fun TrackRow(t: Track, playing: Boolean, onClick: () -> Unit) {
+private fun TrackRow(t: Track, playing: Boolean, note: String? = null, onClick: () -> Unit) {
     val pal = LocalPalette.current
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable(onClick = onClick).padding(horizontal = 4.dp, vertical = 7.dp),
@@ -384,7 +424,7 @@ private fun TrackRow(t: Track, playing: Boolean, onClick: () -> Unit) {
                 t.title, color = if (playing) pal.accent else pal.text, fontWeight = FontWeight.SemiBold,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
-            val sub = listOfNotNull(t.artist.takeIf { it != Track.UNKNOWN }, t.qualityLabel).joinToString("  ·  ")
+            val sub = listOfNotNull(note, t.artist.takeIf { it != Track.UNKNOWN }, t.qualityLabel).joinToString("  ·  ")
             Text(sub, color = pal.textDim, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Text(formatTime(t.durationMs), color = pal.textFaint, style = MaterialTheme.typography.bodySmall)

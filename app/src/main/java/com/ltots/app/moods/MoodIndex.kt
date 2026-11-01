@@ -92,7 +92,9 @@ object MoodIndex {
                 .map { Prompt(it.getString("id"), it.getString("label"), vec(it.getString("vec"))) }
             val al = o.getJSONArray("albums").let { a -> List(a.length()) { a.getJSONObject(it) } }
                 .map { val l = it.getString("label"); Prompt(l.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-'), l, vec(it.getString("vec"))) }
-            ClapText(th, al)
+            val kinds = o.optJSONArray("kinds")?.let { a -> List(a.length()) { a.getJSONObject(it) } }
+                ?.map { Prompt(it.getString("id"), it.getString("id"), vec(it.getString("vec"))) }.orEmpty()
+            ClapText(th, al, kinds)
         }.getOrElse { ClapText(emptyList(), emptyList()) }.also { text = it }
     }
 

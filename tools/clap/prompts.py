@@ -68,3 +68,14 @@ ALBUM_NAMES = [
     ("Strings attached", "music led by violins and strings"),
     ("After midnight", "late night slow dark r&b"),
 ]
+
+# What kind of sound a file is, for the Library's Songs / All views (each an ensemble).
+KINDS = {
+    "song": ["a song with music and singing", "a music track with instruments and vocals", "instrumental music", "a pop song",
+             "electronic music with a beat", "a rap song with a beat", "classical music", "a piano piece"],
+    "speech": ["a person talking", "people having a conversation", "a voice recording of someone speaking",
+               "a voice message on the phone", "a phone call between two people", "a lecture or a speech",
+               "a podcast with people talking"],
+    "noise": ["background noise and room sounds", "a short notification sound", "a phone ringtone beep",
+              "silence with quiet noise", "wind and street noise", "a recording of a crowd and ambient noise"],
+}

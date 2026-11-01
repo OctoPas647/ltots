@@ -121,6 +121,7 @@ class NewControlsUiTest {
     @Test fun newControls() {
         rule.mainClock.autoAdvance = false
         idle()
+        tab("Library")
 
         // 1. Library: no box around the songs; the list runs down the whole page.
         rule.onNodeWithText("Song number 1").assertIsDisplayed()

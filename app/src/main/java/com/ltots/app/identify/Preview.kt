@@ -49,7 +49,7 @@ object Preview {
         if (!Engine.ensureReady()) return@withContext null
         runCatching {
             val req = YoutubeDLRequest("https://music.youtube.com/watch?v=$videoId").apply {
-                addOption("-g"); addOption("-f", "ba[ext=m4a]/ba"); addOption("--no-playlist")
+                addOption("-g"); addOption("-f", "ba[ext=m4a]/ba"); addOption("--no-playlist"); addOption("--cache-dir", Engine.cacheDir())
             }
             YoutubeDL.execute(req, "preview-$videoId").out.lines().firstOrNull { it.startsWith("http") }
         }.getOrNull()

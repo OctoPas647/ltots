@@ -82,7 +82,9 @@ object SongFinder {
             val identifier = Identifier(
                 AiModels.file(AiModels.Model.SEPARATOR).takeIf { AiModels.isInstalled(AiModels.Model.SEPARATOR) },
                 AiModels.file(AiModels.Model.LYRICS).takeIf { AiModels.isInstalled(AiModels.Model.LYRICS) },
-            ) { p -> progress = p; (_state.value as? FinderState.Working)?.let { _state.value = it.copy(progress = p) } }
+                onProgress = { p -> progress = p; (_state.value as? FinderState.Working)?.let { _state.value = it.copy(progress = p) } },
+                context = app,
+            )
             var currentLabel = label
             try {
                 val clip = when (source) {

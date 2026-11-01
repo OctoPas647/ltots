@@ -33,6 +33,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.MusicNote
@@ -83,6 +84,7 @@ import com.ltots.app.ui.screens.SoundScreen
 import com.ltots.app.ui.theme.LocalPalette
 
 enum class Tab(val label: String, val icon: ImageVector) {
+    HOME("Home", Icons.Rounded.Home),
     LIBRARY("Library", Icons.Rounded.LibraryMusic),
     PLAYER("Playing", Icons.Rounded.MusicNote),
     EQ("EQ", Icons.Rounded.GraphicEq),
@@ -115,10 +117,13 @@ fun bottomChrome(): Dp = LocalBottomChrome.current
 fun AppRoot() {
     val controller by PlayerConnection.controller.collectAsState()
     val player = rememberPlayerUi(controller)
-    var tab by rememberSaveable { mutableStateOf(Tab.LIBRARY) }
+    // Opens on Home, like YouTube Music and Spotify.
+    var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
     // The Sound page (output and signal path) opens from the output chip on the Playing tab, over
     // the tabs; any tab in the bar closes it.
     var soundOpen by rememberSaveable { mutableStateOf(false) }
+    // The listening history on the Playing tab (it shows there anyway when nothing plays).
+    var historyOpen by rememberSaveable { mutableStateOf(false) }
     val artwork = rememberArtwork(player.trackId, player.artworkData)
     val backdrop = rememberLayerBackdrop()
     // The page itself (background + the open tab): the floating bars at the bottom bend and blur
@@ -149,7 +154,7 @@ fun AppRoot() {
     Box(Modifier.fillMaxSize()) {
 
         // nav bar 68 + its padding 10+10, mini player 64 + gap 10, system bar, and 32 extra.
-        val miniShown = player.hasMedia && (tab != Tab.PLAYER || soundOpen)
+        val miniShown = player.hasMedia && (tab != Tab.PLAYER || soundOpen || historyOpen)
         val sysBar = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
         val chrome = sysBar + 88.dp + (if (miniShown) 74.dp else 0.dp) + 32.dp
         val top = WindowInsets.statusBars.union(WindowInsets.displayCutout.only(WindowInsetsSides.Top)).asPaddingValues().calculateTopPadding()
@@ -165,8 +170,17 @@ fun AppRoot() {
                 Crossfade(if (soundOpen) null else tab, label = "tab") { t ->
                     when (t) {
                         null -> SoundScreen(onBack = { soundOpen = false })
-                        Tab.LIBRARY -> LibraryScreen(player, onOpenPlayer = { tab = Tab.PLAYER })
-                        Tab.PLAYER -> NowPlayingScreen(player, artwork, onOpenEq = { tab = Tab.EQ }, onOpenSound = { soundOpen = true })
+                        Tab.HOME -> com.ltots.app.ui.screens.HomeScreen(
+                            player, onOpenPlayer = { tab = Tab.PLAYER; historyOpen = false }, onOpenGet = { tab = Tab.DOWNLOADS },
+                        )
+                        Tab.LIBRARY -> LibraryScreen(
+                            player, onOpenPlayer = { tab = Tab.PLAYER; historyOpen = false },
+                            onOpenHistory = { tab = Tab.PLAYER; historyOpen = true },
+                        )
+                        Tab.PLAYER -> NowPlayingScreen(
+                            player, artwork, onOpenEq = { tab = Tab.EQ }, onOpenSound = { soundOpen = true },
+                            showHistory = historyOpen, onShowHistory = { historyOpen = it },
+                        )
                         Tab.EQ -> EqScreen(player)
                         Tab.DOWNLOADS -> DownloadsScreen(player, onOpenPlayer = { tab = Tab.PLAYER })
                         Tab.LOOK -> LookScreen(artwork)
@@ -190,12 +204,14 @@ fun AppRoot() {
                     enter = fadeIn() + slideInVertically { it / 2 },
                     exit = fadeOut() + slideOutVertically { it / 2 },
                 ) {
-                    MiniPlayer(player, artwork) { tab = Tab.PLAYER; soundOpen = false }
+                    MiniPlayer(player, artwork) { tab = Tab.PLAYER; soundOpen = false; historyOpen = false }
                 }
-                NavBar(tab) { tab = it; soundOpen = false }
+                NavBar(tab) { tab = it; soundOpen = false; historyOpen = false }
             }
           }
         }
+        // Sign-in pages (song-finder sites, YouTube Music) open over everything.
+        com.ltots.app.ui.components.SignInOverlay()
     }
 }
 

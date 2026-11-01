@@ -10,7 +10,7 @@ import java.util.Locale
 
 /**
  * Minimal YouTube Music client (the same internal API the music.youtube.com website uses).
- * No account: everything here is what a logged-out visitor sees.
+ * Logged out, except the few calls the Home tab makes as the signed-in user ([YtmAccount]).
  */
 object InnerTube {
     private const val BASE = "https://music.youtube.com/youtubei/v1/"
@@ -41,7 +41,11 @@ object InnerTube {
         }
     }
 
-    private fun post(endpoint: String, body: JSONObject, query: String = ""): JSONObject {
+    /**
+     * [auth]: as the signed-in YouTube Music user ([YtmAccount]); only the Home tab's
+     * recommendations ask for that. Everything else is what a logged-out visitor sees.
+     */
+    private fun post(endpoint: String, body: JSONObject, query: String = "", auth: Boolean = false): JSONObject {
         refreshVersion()
         val client = JSONObject()
             .put("clientName", "WEB_REMIX")
@@ -59,10 +63,15 @@ object InnerTube {
             setRequestProperty("Origin", "https://music.youtube.com")
             setRequestProperty("Referer", "https://music.youtube.com/")
             visitorData?.let { setRequestProperty("X-Goog-Visitor-Id", it) }
+            if (auth) {
+                val headers = YtmAccount.authHeaders() ?: throw YtmException("Not signed in to YouTube Music")
+                headers.forEach { (k, v) -> setRequestProperty(k, v) }
+            }
         }
         c.outputStream.use { it.write(body.toString().toByteArray()) }
         val code = c.responseCode
         val text = (if (code in 200..299) c.inputStream else c.errorStream)?.bufferedReader()?.use { it.readText() } ?: ""
+        if (auth && (code == 401 || code == 403)) { YtmAccount.expired(); throw YtmException("The YouTube Music sign-in has expired") }
         if (code !in 200..299) throw YtmException("YouTube Music returned $code")
         val json = JSONObject(text)
         json.optJSONObject("responseContext")?.optString("visitorData")?.takeIf { it.isNotBlank() }?.let {
@@ -106,6 +115,23 @@ object InnerTube {
 
     suspend fun artist(channelId: String): ArtistPage = withContext(Dispatchers.IO) {
         Parser.parseArtist(channelId, post("browse", JSONObject().put("browseId", channelId)))
+    }
+
+    // ---- signed in (Home tab) ---------------------------------------------------------------
+
+    /** Name and picture of the signed-in YouTube Music account. */
+    suspend fun accountInfo(): YtmAccount.Account? = withContext(Dispatchers.IO) {
+        Parser.parseAccount(post("account/account_menu", JSONObject(), auth = true))
+    }
+
+    /** The signed-in user's YouTube Music home: its shelves, as YouTube Music shows them. */
+    suspend fun home(): List<SearchSection> = withContext(Dispatchers.IO) {
+        Parser.parseHome(post("browse", JSONObject().put("browseId", "FEmusic_home"), auth = true))
+    }
+
+    /** What the signed-in user played on YouTube Music lately, newest first. */
+    suspend fun history(): List<YtSong> = withContext(Dispatchers.IO) {
+        Parser.parseHistory(post("browse", JSONObject().put("browseId", "FEmusic_history"), auth = true))
     }
 
     /** Title, artists, album, year and square cover for one song. */

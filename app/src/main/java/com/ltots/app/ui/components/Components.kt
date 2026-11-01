@@ -285,3 +285,39 @@ fun formatTime(ms: Long): String {
     val s = ms / 1000
     return "%d:%02d".format(s / 60, s % 60)
 }
+
+/**
+ * Two or more options in one rounded track, the chosen one filled with the accent (like the
+ * Songs / All switch at the top of the Library).
+ */
+@Composable
+fun SegmentedToggle(
+    options: List<String>,
+    selected: Int,
+    modifier: Modifier = Modifier,
+    background: Color? = null,
+    onSelect: (Int) -> Unit,
+) {
+    val pal = LocalPalette.current
+    val shape = RoundedCornerShape(50)
+    Row(
+        modifier.clip(shape).background(background ?: pal.text.copy(alpha = 0.08f))
+            .border(1.dp, pal.text.copy(alpha = 0.10f), shape).padding(3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        options.forEachIndexed { i, label ->
+            val on = i == selected
+            Box(
+                Modifier.clip(shape)
+                    .background(if (on) pal.accent else Color.Transparent)
+                    .clickable(enabled = !on) { onSelect(i) }
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+            ) {
+                Text(
+                    label, color = if (on) pal.onAccent else pal.textDim, maxLines = 1,
+                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+    }
+}

@@ -24,7 +24,7 @@ class FreeLossless(private val base: String = "https://archive.org") {
 
     private fun fetch(url: String): String {
         val c = (URL(url).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 10_000; readTimeout = 20_000
+            connectTimeout = 4_000; readTimeout = 6_000
             setRequestProperty("User-Agent", "LToTS/1.0 (https://github.com/OctoPas647/ltots)")
             setRequestProperty("Accept", "application/json")
         }
@@ -51,7 +51,7 @@ class FreeLossless(private val base: String = "https://archive.org") {
                 append(" AND creator:\"").append(artist.replace("\"", "")).append("\"")
             }
         }
-        val searchUrl = "$base/advancedsearch.php?q=${enc(q)}&fl%5B%5D=identifier&rows=8&output=json"
+        val searchUrl = "$base/advancedsearch.php?q=${enc(q)}&fl%5B%5D=identifier&rows=4&output=json"
         val ids = runCatching {
             JSONObject(fetch(searchUrl)).optJSONObject("response")?.optJSONArray("docs") ?: JSONArray()
         }.getOrNull() ?: return null

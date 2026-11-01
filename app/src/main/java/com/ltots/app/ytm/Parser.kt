@@ -341,6 +341,33 @@ object Parser {
         return ArtistPage(id, name, bestThumb(header?.opt("thumbnail")), sections)
     }
 
+    /**
+     * YouTube Music's home feed (signed in: "Quick picks", "Listen again", "Mixed for you"…):
+     * each shelf with its songs, albums and playlists.
+     */
+    fun parseHome(root: JSONObject): List<SearchSection> {
+        val out = ArrayList<SearchSection>()
+        findAll(root, "musicCarouselShelfRenderer").forEach { s ->
+            s as JSONObject
+            val title = text(findFirst(s.opt("header"), "title")).ifBlank { null }
+            val items = findAll(s.opt("contents"), "musicTwoRowItemRenderer").mapNotNull { parseTwoRowItem(it as JSONObject) } +
+                findAll(s.opt("contents"), "musicResponsiveListItemRenderer").mapNotNull { parseListItem(it as JSONObject) }
+            if (items.isNotEmpty()) out += SearchSection(title, items)
+        }
+        return out
+    }
+
+    /** The signed-in user's YouTube Music history: songs, newest first. */
+    fun parseHistory(root: JSONObject): List<YtSong> =
+        findAll(root, "musicResponsiveListItemRenderer").mapNotNull { parseListItem(it as JSONObject) as? YtSong }
+
+    /** Name, @handle and picture of the signed-in account (account menu). */
+    fun parseAccount(root: JSONObject): YtmAccount.Account? {
+        val h = findFirst(root, "activeAccountHeaderRenderer") as? JSONObject ?: return null
+        val name = text(h.opt("accountName")).ifBlank { return null }
+        return YtmAccount.Account(name, text(h.opt("channelHandle")).ifBlank { null }, bestThumb(h.opt("accountPhoto")))
+    }
+
     /** Song details from the "next" (watch) endpoint: artists, album, year, square cover. */
     fun parseNext(videoId: String, root: JSONObject): YtSong? {
         val panels = findAll(root, "playlistPanelVideoRenderer").map { it as JSONObject }
