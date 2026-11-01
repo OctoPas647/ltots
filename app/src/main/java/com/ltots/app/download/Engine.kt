@@ -139,6 +139,13 @@ object Engine {
 
     fun clearMessage() { _state.value = _state.value.copy(message = null) }
 
+    /**
+     * yt-dlp's cache folder (YouTube's player code and solved signature puzzles). Every yt-dlp
+     * call passes it: the download engine otherwise runs with no cache at all and works all of
+     * that out again for each song, which was most of the wait before a download started.
+     */
+    fun cacheDir(): String = File(app.cacheDir, "yt-dlp").apply { mkdirs() }.absolutePath
+
     suspend fun selfTest(): String {
         val head = "LToTS engine test · Android ${android.os.Build.VERSION.RELEASE} (${android.os.Build.MODEL}) · ABI ${android.os.Build.SUPPORTED_ABIS.firstOrNull()}\n"
         if (!ensureReady()) return head + "FAILED to start: ${_state.value.error}"

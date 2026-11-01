@@ -23,6 +23,7 @@ enum class Step(val label: String) {
     MATCH("Matching the sound"),
     SPEED("Trying sped-up & slowed versions"),
     RAW("Trying again on the raw sound, without AI"),
+    MELODY("AI: matching the tune (covers, instruments, humming)"),
     LYRICS("AI: listening to the lyrics"),
     YOUTUBE("Finding it on YouTube Music"),
 }
@@ -48,12 +49,17 @@ internal data class Window(val start: Int, val length: Int, val score: Double)
  *  4. if that fails, the same at the speeds TikTok edits use (sped up / slowed),
  *  5. if the AI separated the sound and still nothing matched, everything again on the raw
  *     sound alone — moments picked by loudness, not by the AI — at normal and edited speeds,
- *  6. if that fails too, AI lyrics listening and a lyrics search,
+ *  6. if that fails too, the tune itself: an instrument cover or a hummed melody sounds nothing
+ *     like the record, so its melody is compared with the melodies of today's most played songs,
+ *     the songs on the phone and the songs the caption names, in any key and tempo,
+ *  7. and AI lyrics listening and a lyrics search,
  * then looks each candidate up on YouTube Music (original and other versions).
  */
 class Identifier(
     private val separatorModel: File?,
     private val lyricsModel: File?,
+    /** For hearing the songs a caption names (melody matching); null skips that part. */
+    private val context: android.content.Context? = null,
     private val onProgress: (IdentifyProgress) -> Unit,
 ) {
     private var progress = IdentifyProgress()
@@ -265,7 +271,40 @@ class Identifier(
             )
         }
 
-        // 6. Lyrics
+        // 6. Melody: covers played on an instrument, hummed tunes.
+        if (hits.isEmpty()) {
+            currentCoroutineContext().ensureActive()
+            set(Step.MELODY, StepState.RUNNING, "Listening for the tune…")
+            // With an instrument playing the tune, the separator's "voice" part is that tune alone.
+            val tuneSrc = (if (instrument) voiceStem else null) ?: pcm
+            val q = runCatching { Melody.contour(loudestStretch(tuneSrc, MELODY_SECONDS)) }.getOrDefault(FloatArray(0))
+            if (Melody.voiced(q) < Melody.MIN_VOICED) set(Step.MELODY, StepState.DONE, "No clear tune to follow")
+            else {
+                val named = if (context != null) runCatching { MelodyIndex.hearNamed(context, listOfNotNull(clip.tag?.let { "${it.title} ${it.artist}" }, clip.label.takeIf { !it.contains("://") }).joinToString(" ")) }.getOrDefault(emptyList()) else emptyList()
+                val refs = (MelodyIndex.entries() + named).distinctBy { Ranking.key(it.title, it.artist) }
+                val ranked = runCatching { Melody.rank(q, refs.map { it to it.tune }) }.getOrDefault(emptyList())
+                val top = ranked.firstOrNull()
+                val second = ranked.getOrNull(1)
+                when {
+                    refs.size < 3 -> {
+                        context?.let { com.ltots.app.prep.LibraryPrep.runMelodyCharts(it) }
+                        set(Step.MELODY, StepState.SKIPPED, "No tunes to compare with yet — they're being fetched now; try again in a few minutes")
+                    }
+                    top != null && top.z >= Melody.CONFIDENT -> {
+                        identities += Identity(top.key.title, top.key.artist, clues = listOf(Clue(Clue.Kind.MELODY, 1.5, "The tune matches (played or hummed, any key)")))
+                        if (second != null && second.z >= Melody.CONFIDENT) identities += Identity(second.key.title, second.key.artist, clues = listOf(Clue(Clue.Kind.MELODY, 0.8, "The tune is close")))
+                        set(Step.MELODY, StepState.DONE, "Sounds like ${top.key.title} — ${top.key.artist}")
+                    }
+                    top != null && top.z >= Melody.POSSIBLE && (second == null || top.z - second.z >= 0.4) -> {
+                        identities += Identity(top.key.title, top.key.artist, clues = listOf(Clue(Clue.Kind.MELODY, 0.6, "The tune is similar")))
+                        set(Step.MELODY, StepState.DONE, "Maybe ${top.key.title} — ${top.key.artist}")
+                    }
+                    else -> set(Step.MELODY, StepState.DONE, "No song with this tune among ${refs.size}")
+                }
+            }
+        } else set(Step.MELODY, StepState.SKIPPED, "Not needed")
+
+        // 7. Lyrics
         if (hits.isEmpty()) {
             if (lyricsModel != null && lyricsModel.isFile) {
                 set(Step.LYRICS, StepState.RUNNING, "Listening…")
@@ -417,6 +456,20 @@ class Identifier(
             return List(max) { i -> out[(i * (out.size - 1).toDouble() / (max - 1)).toInt()] }
         }
         const val LYRICS_SECONDS = 28
+        const val MELODY_SECONDS = 30
+
+        /** The loudest [seconds] of [src] (all of it when shorter). */
+        internal fun loudestStretch(src: FloatArray, seconds: Int): FloatArray {
+            val len = minOf(src.size, seconds * ClipAudio.RATE)
+            if (src.size <= len) return src
+            var best = -1.0; var start = 0; var s = 0
+            while (s + len <= src.size) {
+                val sc = Dsp.rms(src, s, s + len)
+                if (sc > best) { best = sc; start = s }
+                s += 3 * ClipAudio.RATE
+            }
+            return src.copyOfRange(start, start + len)
+        }
         /** Clip speed vs. the record, in the order TikTok edits are common. Shazam tolerates ±5 %. */
         val SPEEDS = listOf(1.26, 0.86, 1.17, 1.36, 0.93, 0.79, 1.08, 1.47, 0.73)
 

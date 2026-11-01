@@ -121,6 +121,12 @@ object Store {
     /** Writes [text] to [file] straight away (users' files, imports). */
     fun writeFileNow(file: File, text: String) = writeNow(file, text)
 
+    /** A file in the folder of the user in use (listening history, recommendation feedback). */
+    fun userFile(name: String): File = File(userDir, name)
+
+    /** Writes [content] to [file] a moment later, coalescing quick successive changes. */
+    fun writeLater(file: File, content: () -> String) = writeDebounced(file, content)
+
     // ---- theme / settings / default EQ -----------------------------------------------------
 
     /** The saved theme, or null if none has been saved yet. */

@@ -45,14 +45,25 @@ class Downloader(private val context: Context) {
 
     suspend fun enrich(meta: TrackMeta, preferOfficialAudio: Boolean, onStatus: (String) -> Unit): TrackMeta {
         if (meta.complete) return meta
+        return details(officialAudio(meta, preferOfficialAudio, onStatus))
+    }
+
+    /**
+     * Step 1a: a music video becomes its official-audio release when there is one. Done first,
+     * because it decides which video is downloaded; the rest of the metadata ([details]) is then
+     * looked up while yt-dlp already reads the stream information.
+     */
+    suspend fun officialAudio(meta: TrackMeta, preferOfficialAudio: Boolean, onStatus: (String) -> Unit = {}): TrackMeta {
+        if (meta.complete || !meta.isVideo || !preferOfficialAudio) return meta
+        onStatus("Looking for the official audio version")
+        val video = YtSong(meta.videoId, meta.title, listOf(YtRef(meta.artist, null)), durationSec = meta.durationSec, isVideo = true)
+        return InnerTube.officialAudio(video)?.let { audio -> TrackMeta.from(audio).copy(album = audio.album?.name ?: meta.album) } ?: meta
+    }
+
+    /** Step 1b: album, track number, year and the full-size cover. */
+    suspend fun details(meta: TrackMeta): TrackMeta {
+        if (meta.complete) return meta
         var m = meta
-        if (m.isVideo && preferOfficialAudio) {
-            onStatus("Looking for the official audio version")
-            val video = YtSong(m.videoId, m.title, listOf(YtRef(m.artist, null)), durationSec = m.durationSec, isVideo = true)
-            InnerTube.officialAudio(video)?.let { audio ->
-                m = TrackMeta.from(audio).copy(album = audio.album?.name ?: m.album)
-            }
-        }
         val details = runCatching { InnerTube.song(m.videoId) }.getOrNull()
         if (details != null) {
             m = m.copy(
@@ -92,9 +103,15 @@ class Downloader(private val context: Context) {
      * often gets past temporary blocks.
      * [processId] names the yt-dlp process so the download can be cancelled.
      */
-    fun download(processId: String, meta: TrackMeta, onProgress: (Float, String?) -> Unit): Result {
+    fun download(
+        processId: String,
+        meta: TrackMeta,
+        onProgress: (Float, String?) -> Unit,
+        lossless: FreeLossless.Hit? = runCatching { FreeLossless().find(meta) }.getOrNull(),
+        prefetched: Prefetched? = null,
+    ): Result {
         // Free lossless first: only a close title/artist/length match is accepted.
-        runCatching { FreeLossless().find(meta) }.getOrNull()?.let { hit ->
+        lossless?.let { hit ->
             try {
                 return downloadLossless(hit, "$processId-lossless", meta, onProgress)
             } catch (e: YoutubeDL.CanceledException) {
@@ -111,6 +128,22 @@ class Downloader(private val context: Context) {
         )
         val log = StringBuilder()
         var last: Throwable? = null
+        // The stream information read ahead of time (while the metadata was looked up) saves
+        // the slowest step; if it didn't work out, the usual attempts follow.
+        if (prefetched != null && prefetched.videoId == meta.videoId) {
+            log.append(prefetched.log)
+            try {
+                return downloadFrom(prefetched.url, "$processId-p", meta, log, onProgress, info = JSONObject(prefetched.info.toString()))
+            } catch (e: YoutubeDL.CanceledException) {
+                throw e
+            } catch (e: InterruptedException) {
+                throw e
+            } catch (e: Throwable) {
+                last = e
+                log.append("\n[LToTS] download with the information read ahead failed: ").append(e.message?.takeLast(2000)).append('\n')
+                if (e is Failure && !e.retryable) throw e
+            }
+        }
         for ((i, url) in urls.withIndex()) {
             try {
                 return downloadFrom(url, "$processId-$i", meta, log, onProgress)
@@ -153,24 +186,43 @@ class Downloader(private val context: Context) {
 
     private val Failure.retryable get() = cause !is StepFailure
 
-    private fun downloadFrom(url: String, pid: String, meta: TrackMeta, log: StringBuilder, onProgress: (Float, String?) -> Unit): Result {
+    /** Stream information read ahead of the download (see [readInfo]). */
+    class Prefetched(val videoId: String, val url: String, val info: JSONObject, val log: String, val at: Long = System.currentTimeMillis())
+
+    /**
+     * Step 3a on its own: asks yt-dlp for the song's stream information. The download manager
+     * runs this while the metadata is still being looked up (and for the next songs in the queue),
+     * so the download itself starts right away.
+     */
+    fun readInfo(videoId: String, pid: String): Prefetched {
+        val url = "https://music.youtube.com/watch?v=$videoId"
+        val log = StringBuilder("[LToTS] ").append(url).append(" (read ahead)\n")
+        val info = fetchInfo(url, pid, log)
+        return Prefetched(videoId, url, info, log.toString())
+    }
+
+    private fun fetchInfo(url: String, pid: String, log: StringBuilder): JSONObject {
+        val infoReq = YoutubeDLRequest(url).apply { infoArgs(context.cacheDir).forEach { (k, v) -> if (v == null) addOption(k) else addOption(k, v) } }
+        val infoRes = YoutubeDL.execute(infoReq, "$pid-info")
+        log.append(infoRes.err.takeLast(3000))
+        val infoOut = infoRes.out
+        val start = infoOut.indexOf('{')
+        if (start < 0) throw IllegalStateException("yt-dlp returned no song information. ${infoRes.err.lines().lastOrNull { it.isNotBlank() } ?: ""}")
+        return JSONObject(infoOut.substring(start))
+    }
+
+    private fun downloadFrom(url: String, pid: String, meta: TrackMeta, log: StringBuilder, onProgress: (Float, String?) -> Unit, info: JSONObject? = null): Result {
         val work = File(context.cacheDir, "dl/$pid").apply { deleteRecursively(); mkdirs() }
         try {
-            log.append("[LToTS] ").append(url).append('\n')
-            // Fetch stream info, then replace YouTube's video metadata with the album metadata.
-            val infoReq = YoutubeDLRequest(url).apply { infoArgs().forEach { (k, v) -> if (v == null) addOption(k) else addOption(k, v) } }
-            val infoRes = YoutubeDL.execute(infoReq, "$pid-info")
-            log.append(infoRes.err.takeLast(3000))
-            val infoOut = infoRes.out
-            val start = infoOut.indexOf('{')
-            if (start < 0) throw IllegalStateException("yt-dlp returned no song information. ${infoRes.err.lines().lastOrNull { it.isNotBlank() } ?: ""}")
-            val info = JSONObject(infoOut.substring(start))
+            if (info == null) log.append("[LToTS] ").append(url).append('\n')
+            // Fetch stream info (unless read ahead), then replace YouTube's video metadata with the album metadata.
+            val info = info ?: fetchInfo(url, pid, log)
             val m = fillFromInfo(meta, info)
             val cover = prepareCover(m, work)
             rewriteInfo(info, m, cover?.file)
             val infoFile = File(work, "info.json").apply { writeText(info.toString()) }
 
-            val req = YoutubeDLRequest(emptyList()).apply { downloadArgs(infoFile, work).forEach { (k, v) -> if (v == null) addOption(k) else addOption(k, v) } }
+            val req = YoutubeDLRequest(emptyList()).apply { downloadArgs(infoFile, work, context.cacheDir).forEach { (k, v) -> if (v == null) addOption(k) else addOption(k, v) } }
             val dl = YoutubeDL.execute(req, pid) { progress, _, line ->
                 onProgress((progress / 100f).coerceIn(0f, 1f), line)
             }
@@ -196,14 +248,22 @@ class Downloader(private val context: Context) {
     }
 
     /** yt-dlp options for the first step: song information and the chosen audio stream. */
-    internal fun infoArgs(): List<Pair<String, String?>> = listOf(
+    internal fun infoArgs(cacheDir: File? = null): List<Pair<String, String?>> = listOf(
         "--dump-single-json" to null,
         "--no-playlist" to null,
         "-f" to formatSelector,
-    )
+    ) + cacheArgs(cacheDir)
+
+    /**
+     * yt-dlp keeps what it learns about YouTube's player (the player code and the solved
+     * signature puzzles) in a cache folder. Without one it fetches and solves them again for
+     * every single song — most of the wait before a download started.
+     */
+    private fun cacheArgs(cacheDir: File?): List<Pair<String, String?>> =
+        if (cacheDir == null) emptyList() else listOf("--cache-dir" to File(cacheDir, "yt-dlp").apply { mkdirs() }.absolutePath)
 
     /** yt-dlp options for the second step: fetch that stream and tag it. */
-    internal fun downloadArgs(infoFile: File, work: File): List<Pair<String, String?>> = listOf(
+    internal fun downloadArgs(infoFile: File, work: File, cacheDir: File? = null): List<Pair<String, String?>> = cacheArgs(cacheDir) + listOf(
         "--load-info-json" to infoFile.absolutePath,
         "-f" to formatSelector,
         "-x" to null, // audio only, kept in its original codec (no re-encoding)

@@ -33,6 +33,15 @@ data class Track(
     val trackNo: Int? = null,
     /** When the file arrived on the phone (seconds since 1970), if known. */
     val addedAt: Long? = null,
+    /** Folder on the phone, e.g. "Music/LToTS/" or "Recordings/Call/". */
+    val folder: String? = null,
+    /** File name, e.g. "PTT-20260101-WA0003.opus". */
+    val fileName: String? = null,
+    /** What Android's media database says the file is ([KIND_MUSIC], [KIND_RECORDING]…, combined). */
+    val mediaFlags: Int = 0,
+    /** Size in bytes and last change (s), to recognise the same file again. */
+    val sizeBytes: Long = 0L,
+    val modifiedAt: Long = 0L,
 ) {
     /**
      * Key used for this song's saved EQ / pitch / speed. Based on artist + title, so the same
@@ -65,8 +74,18 @@ data class Track(
         )
         .build()
 
+    /** Identifies this exact file (a re-saved or replaced file counts as new). */
+    val fileKey: String get() = "$id:$sizeBytes:$modifiedAt"
+
     companion object {
         const val UNKNOWN = "<unknown>"
+        const val KIND_MUSIC = 1
+        const val KIND_RECORDING = 2
+        const val KIND_RINGTONE = 4
+        const val KIND_NOTIFICATION = 8
+        const val KIND_ALARM = 16
+        const val KIND_PODCAST = 32
+        const val KIND_AUDIOBOOK = 64
         private fun norm(s: String) = s.lowercase(Locale.ROOT).replace(Regex("[^\\p{L}\\p{N}]+"), " ").trim()
     }
 }
@@ -79,6 +98,18 @@ object LocalLibrary {
 
     /** The last loaded library (to show instantly when the Library tab opens again). */
     fun cached(): List<Track>? = cache
+
+    /** The last loaded library's songs only (no recordings, voice notes, sounds…). */
+    fun cachedSongs(): List<Track>? = cache?.let { SongKinds.load(); SongKinds.songs(it) }
+
+    /**
+     * The phone's songs: [load] without recordings, voice notes, ringtones and other audio
+     * that isn't music (see [SongKinds]). What waveforms, lyrics, moods and suggestions use.
+     */
+    suspend fun loadSongs(context: Context, version: Int = 0): List<Track> {
+        SongKinds.load()
+        return SongKinds.songs(load(context, version))
+    }
 
     /**
      * The phone's music. Kept in memory and only read again from Android's media database when
@@ -125,6 +156,17 @@ object LocalLibrary {
             add(MediaStore.Audio.Media.YEAR)
             add(MediaStore.Audio.Media.TRACK)
             add(MediaStore.Audio.Media.DATE_ADDED)
+            add(MediaStore.Audio.Media.DATE_MODIFIED)
+            add(MediaStore.Audio.Media.SIZE)
+            add(MediaStore.Audio.Media.RELATIVE_PATH)
+            add(MediaStore.Audio.Media.DISPLAY_NAME)
+            add(MediaStore.Audio.Media.IS_MUSIC)
+            add(MediaStore.Audio.Media.IS_RECORDING)
+            add(MediaStore.Audio.Media.IS_RINGTONE)
+            add(MediaStore.Audio.Media.IS_NOTIFICATION)
+            add(MediaStore.Audio.Media.IS_ALARM)
+            add(MediaStore.Audio.Media.IS_PODCAST)
+            add(MediaStore.Audio.Media.IS_AUDIOBOOK)
             if (android.os.Build.VERSION.SDK_INT >= 34) {
                 add(MediaStore.Audio.Media.SAMPLERATE)
                 add(MediaStore.Audio.Media.BITS_PER_SAMPLE)
@@ -133,7 +175,9 @@ object LocalLibrary {
         val tracks = mutableListOf<Track>()
         context.contentResolver.query(
             collection, projection,
-            "${MediaStore.Audio.Media.IS_MUSIC} != 0 AND ${MediaStore.Audio.Media.DURATION} >= 20000",
+            // Every audio file: the Library's "Songs" view leaves out what isn't a song
+            // (recordings, voice notes, ringtones…), sorted by [SongKinds]; "All" shows them too.
+            "${MediaStore.Audio.Media.DURATION} > 0",
             null, "${MediaStore.Audio.Media.TITLE} COLLATE NOCASE ASC",
         )?.use { c ->
             val iId = c.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
@@ -147,6 +191,19 @@ object LocalLibrary {
             val iYear = c.getColumnIndex(MediaStore.Audio.Media.YEAR)
             val iTrackNo = c.getColumnIndex(MediaStore.Audio.Media.TRACK)
             val iAdded = c.getColumnIndex(MediaStore.Audio.Media.DATE_ADDED)
+            val iModified = c.getColumnIndex(MediaStore.Audio.Media.DATE_MODIFIED)
+            val iSize = c.getColumnIndex(MediaStore.Audio.Media.SIZE)
+            val iPath = c.getColumnIndex(MediaStore.Audio.Media.RELATIVE_PATH)
+            val iName = c.getColumnIndex(MediaStore.Audio.Media.DISPLAY_NAME)
+            val flagCols = listOf(
+                MediaStore.Audio.Media.IS_MUSIC to Track.KIND_MUSIC,
+                MediaStore.Audio.Media.IS_RECORDING to Track.KIND_RECORDING,
+                MediaStore.Audio.Media.IS_RINGTONE to Track.KIND_RINGTONE,
+                MediaStore.Audio.Media.IS_NOTIFICATION to Track.KIND_NOTIFICATION,
+                MediaStore.Audio.Media.IS_ALARM to Track.KIND_ALARM,
+                MediaStore.Audio.Media.IS_PODCAST to Track.KIND_PODCAST,
+                MediaStore.Audio.Media.IS_AUDIOBOOK to Track.KIND_AUDIOBOOK,
+            ).map { (col, bit) -> c.getColumnIndex(col) to bit }
             val iRate = c.getColumnIndex("samplerate")
             val iBits = c.getColumnIndex("bits_per_sample")
             while (c.moveToNext()) {
@@ -166,6 +223,11 @@ object LocalLibrary {
                     year = if (iYear >= 0 && !c.isNull(iYear)) c.getInt(iYear).takeIf { it > 0 } else null,
                     trackNo = if (iTrackNo >= 0 && !c.isNull(iTrackNo)) c.getInt(iTrackNo).takeIf { it > 0 } else null,
                     addedAt = if (iAdded >= 0 && !c.isNull(iAdded)) c.getLong(iAdded).takeIf { it > 0 } else null,
+                    folder = if (iPath >= 0) c.getString(iPath) else null,
+                    fileName = if (iName >= 0) c.getString(iName) else null,
+                    mediaFlags = flagCols.fold(0) { acc, (i, bit) -> if (i >= 0 && !c.isNull(i) && c.getInt(i) != 0) acc or bit else acc },
+                    sizeBytes = if (iSize >= 0 && !c.isNull(iSize)) c.getLong(iSize) else 0L,
+                    modifiedAt = if (iModified >= 0 && !c.isNull(iModified)) c.getLong(iModified) else 0L,
                 )
             }
         }

@@ -73,6 +73,7 @@ class PlayerUi {
     fun play(tracks: List<Track>, startIndex: Int, shuffle: Boolean = false) {
         val c = controller ?: return
         if (tracks.isEmpty()) return
+        com.ltots.app.recs.SongPreview.stop()
         c.shuffleModeEnabled = shuffle
         c.setMediaItems(tracks.map { it.toMediaItem() }, startIndex.coerceIn(0, tracks.size - 1), 0L)
         c.prepare()
@@ -100,6 +101,8 @@ fun rememberPlayerUi(controller: MediaController?): PlayerUi {
         while (true) {
             awaitOnScreen(lifecycle)
             ui.controller?.let { ui.positionMs = it.currentPosition; ui.bufferedFraction = it.bufferedPercentage / 100f }
+            // The song that's playing shows up in the history after a moment, not only at its end.
+            if (ui.isPlaying) com.ltots.app.data.ListenHistory.tick()
             delay(if (ui.isPlaying) 250 else 700)
         }
     }

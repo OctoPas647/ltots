@@ -14,6 +14,37 @@ newer APK updates the app and keeps your settings.
 
 ## What's in phase 1
 
+- **Home** (first tab, where the app opens) – recommendations, a mix of YouTube Music's and
+  Spotify's home screens: a greeting and a grid of things to jump back into (from your phone, they
+  play at once), YouTube Music's mood chips (Energize, Relax, Workout…) and **Quick picks** (pages
+  of four songs side by side), then shelves — **Because you listened to …**, **AI picks** for the
+  vibe of what you've been playing, your own **YouTube Music** shelves when signed in, **Your
+  mixes** and **Listen again**. Tap any new song to **hear 30 seconds of it** (the hook, from the
+  free iTunes preview or streamed from YouTube Music) before downloading it; the preview bar has a
+  Download button. Long-press for Not interested / Fewer songs by this artist.
+  How the picks are made: the in-app listening history (finished songs count more than skipped
+  ones, recent plays more than old ones), play counts, downloads and — signed in — your YouTube
+  Music history choose a few seed songs (at most two per artist); YouTube Music's own radio for
+  each seed gives candidates; a song several seeds point to, or by an artist you love, ranks
+  higher; songs you already have, hidden artists and turned-down songs are left out; and no
+  artist may crowd the top. The **AI** part: the on-device music model that finds moods has heard
+  your songs, and what you've been playing lately is matched to its descriptions ("Night drive",
+  "Lo-fi corner"…) to find new songs with that sound.
+- **History** – every song played, grouped Today / Yesterday / This week…, like YouTube Music.
+  The Playing tab shows it whenever nothing is playing; the history button at the top right of
+  the Library (next to Shuffle) and on the Playing tab opens it any time. Tap a song to play it
+  (followed by what you played before it), long-press to remove it; Clear empties it.
+- **Songs / All** (top of the Library) – **Songs** shows only music; **All** shows every audio
+  file on the phone, each labelled (voice recording, call recording, voice note, ringtone, short
+  sound…). Files are sorted by where they live (Recordings, WhatsApp Voice Notes, Ringtones…),
+  their name and tags; anything still unclear (a stray "audio.mp3" in Downloads) is listened to
+  by the on-device AI (CLAP: music vs. talking vs. noise), or by a simpler sound check until that
+  model is downloaded.
+- **Sign-ins** (Profile > Accounts) – a full-screen sign-in page (no more pop-up hidden behind
+  the status bar and keyboard) that closes by itself once you're signed in, and only counts a
+  real sign-in (a visit alone used to count). **YouTube Music**: signing in makes Home learn from
+  your YouTube Music history and show your own shelves; search and downloads stay signed out.
+
 - **Easy-first EQ** – 33 presets in four groups (Basics, Genres, Voice & places, Precise) with a
   one-line description of each, the active preset highlighted, **Quick tone** sliders (Bass / Mids /
   Treble) that work on top of any shape, Undo and Flatten; save your own presets ("Mine").
@@ -98,6 +129,12 @@ newer APK updates the app and keeps your settings.
   estimate stays. Runs for the playing song and, while charging, for the whole library; the result
   is saved like synced lyrics ("timed by on-device AI"). "Time with AI" on the lyrics card runs it
   by hand. Saved once, then they work offline.
+  **✦ AI lyrics** (recognise the song from its sound): when the file is the whole song, the
+  lyrics keep their own timeline (stretched to the file) instead of following Shazam's copy of
+  the record, which can start a little earlier or later — that's what made AI lyrics run slightly
+  late. With the speech model there, the AI also listens for the words and moves all lines by how
+  much they're consistently off. Pressed ✦ AI by mistake? **↺ Revert** brings back the lyrics found
+  the normal way (only shown when there were some).
 - **Library preparation** – waveforms for the whole library are made while the phone charges,
   lyrics are fetched whenever you're online; the playing song is always done on the spot. Status
   and "Prepare now" on the Sound page.
@@ -164,11 +201,11 @@ newer APK updates the app and keeps your settings.
   - queue with several downloads at once, background downloading with a notification,
     retry/cancel, history, and playlists you can keep in sync;
   - files saved to `Music/LToTS/Artist/Album/`, visible to any app;
-  - **suggestions**: before you search, "Suggested for you" lists songs like your last few
-    downloads (or, before your first download, the newest songs on your phone), found with
-    YouTube Music's own radio for each and taking turns between them; "New picks" asks again.
-    After a search, "You might also like" under the first results lists songs like the song
-    found. Songs already on the phone, downloaded or queued are left out; tap one to download it;
+  - **quick to start**: the stream information, the album / year / cover lookup and the check
+    for a free lossless copy run at the same time (the lossless check gets 3 seconds at most),
+    the next songs in the queue get their stream information read while the current ones
+    download, and yt-dlp keeps a cache of YouTube's player code and solved signatures (it used to
+    work them out again for every song);
   - built on yt-dlp (bundled, updatable in-app with "Update engine"); "Test engine" checks the
     whole download engine on the phone, and tapping a failed download shows (and copies) exactly
     what went wrong.
@@ -183,6 +220,15 @@ newer APK updates the app and keeps your settings.
   - fingerprints the best moments — of the clip and of the separated music — and matches them
     with Shazam (only the fingerprint is sent, never the audio);
   - if nothing matches, tries again at the speeds TikTok edits use (sped up / slowed, 0.73–1.47×);
+  - if the separator ran and still nothing matched, everything again on the **raw sound**, without
+    the AI (it can take out the very part the fingerprint needs);
+  - **melody matching** for songs played on an instrument (piano / guitar covers, someone playing
+    the tune) or hummed — which sound nothing like the record: the clip's tune (pitch, ten times a
+    second; with an instrument playing the tune, the separator's part that holds it) is compared,
+    in every key and a little faster or slower, with the tunes of this week's most played songs
+    (Apple's free charts, worldwide and in your country, heard once a week on Wi-Fi from their free
+    previews), the songs on your phone (heard while charging) and the songs the video's caption
+    names. Only a tune that clearly stands out from the rest counts;
   - if that fails too, the **lyrics listener** AI (Whisper small, 190 MB, on the phone) writes
     down the sung words and searches YouTube Music by lyrics;
   - finds every candidate on YouTube Music and shows the **best matches, most likely first**,
@@ -309,13 +355,15 @@ app/src/main/java/com/ltots/app/
   data/      local library, per-song profiles, presets, theme & settings storage (per user), users,
              EQ profiles, picked icons
   profiles/  switching user, exporting and importing looks, EQs and users
-  ytm/       YouTube Music client: search, albums, playlists, artists, song details, links
+  ytm/       YouTube Music client: search, albums, playlists, artists, song details, links;
+             YtmAccount (signed-in home & history for recommendations)
+  recs/      Home tab: Recommender (taste, seeds, radios, AI vibes, shelves), SongPreview
   download/  yt-dlp engine, download queue, tagging/cover, background service
   identify/  song finder: clip audio (link/file/mic), music separator (ONNX), Shazam signature +
              client, Whisper lyrics listener (JNI), ranking, the finder's state, AI model downloads
   playback/  background playback service + connection
-  ui/        glass system, Smoothness (frame-time watcher), screens (Library, Playing, EQ, Get, Look,
-             Profile, Sound), components
+  ui/        glass system, Smoothness (frame-time watcher), screens (Home, Library, Playing/History,
+             EQ, Get, Look, Profile, Sound), components
   ui/components/
     LiveVisual.kt       the analyzer loop (frame rate, Battery Saver, Smoothness, screen-off)
     SpectrumOutline.kt  points + outward normals + reach that a spectrum grows from (shared)

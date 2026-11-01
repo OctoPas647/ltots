@@ -154,6 +154,18 @@ object AiSync {
         }
     }
 
+    /**
+     * Listens to song [trackId] for the words of [plain] and returns where each line was heard
+     * (null without the speech model, or when too little was heard). Nothing is saved: the AI
+     * match uses this to check its own timing.
+     */
+    suspend fun hear(context: Context, trackId: Long, plain: String, durationMs: Long): LyricAlign.Result? = lock.withLock {
+        if (!_modelReady.value || plain.isBlank()) return null
+        val uri = ContentUris.withAppendedId(MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL), trackId)
+        val heard = withContext(Dispatchers.Default) { listen(context, uri, plain, durationMs) { } }
+        LyricAlign.align(plain, heard, durationMs)
+    }
+
     /** Runs the recognizer over the whole song; the words it heard, in time order. */
     private suspend fun listen(context: Context, uri: Uri, plain: String, durationMs: Long, onProgress: (Float) -> Unit): List<HeardWord> {
         org.vosk.LibVosk.setLogLevel(org.vosk.LogLevel.WARNINGS)

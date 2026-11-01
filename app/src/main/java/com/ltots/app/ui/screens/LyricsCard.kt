@@ -100,6 +100,13 @@ fun LyricsCard(player: PlayerUi) {
                 }, enabled = player.trackId >= 0)
                 Pill("Import .lrc", false, { lrcPicker.launch(arrayOf("text/*", "application/octet-stream")) })
             }
+            // Pressed AI by mistake? Back to the lyrics found the normal way. Only when there were
+            // some: a song whose lyrics only the AI found has nothing to go back to.
+            val canRevert = remember(state, key) { key != null && state is LyricsState.Found && Lyrics.canRevert(key) }
+            if (canRevert) Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Showing the AI's lyrics.", color = pal.textDim, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                Pill("↺ Revert", false, { key?.let { Lyrics.revert(it) } })
+            }
             val shown = when (state) {
                 is LyricsState.Found -> state.doc
                 is LyricsState.MatchFailed -> state.previous

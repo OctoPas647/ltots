@@ -11,3 +11,4 @@ captures/
 keystore.properties
 .cxx/
 app/.cxx/
+__pycache__/

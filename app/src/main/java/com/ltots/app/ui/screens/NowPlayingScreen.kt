@@ -31,6 +31,7 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Speaker
@@ -87,7 +88,19 @@ import kotlin.math.pow
 import kotlin.math.roundToInt
 
 @Composable
-fun NowPlayingScreen(player: PlayerUi, artwork: Bitmap?, onOpenEq: () -> Unit, onOpenSound: () -> Unit) {
+fun NowPlayingScreen(
+    player: PlayerUi,
+    artwork: Bitmap?,
+    onOpenEq: () -> Unit,
+    onOpenSound: () -> Unit,
+    showHistory: Boolean = false,
+    onShowHistory: (Boolean) -> Unit = {},
+) {
+    // Nothing playing (or the history asked for): the songs played lately, YouTube Music style.
+    if (!player.hasMedia || showHistory) {
+        HistoryPage(player, onPlayed = { onShowHistory(false) }, onBack = if (player.hasMedia) ({ onShowHistory(false) }) else null)
+        return
+    }
     val pal = LocalPalette.current
     val device by AudioEngine.output.device.collectAsState()
     val visual = rememberLiveVisual(wave = false) // no waveform on this screen
@@ -96,8 +109,12 @@ fun NowPlayingScreen(player: PlayerUi, artwork: Bitmap?, onOpenEq: () -> Unit, o
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = topInset()).padding(horizontal = PAGE_PAD),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        // Output chip
-        Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 14.dp), horizontalArrangement = Arrangement.Center) {
+        // Output chip, with the history on the right
+        Box(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 14.dp)) {
+            IconButton(onClick = { onShowHistory(true) }, Modifier.align(Alignment.CenterEnd)) {
+                Icon(Icons.Rounded.History, "History", tint = pal.textDim)
+            }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 48.dp), horizontalArrangement = Arrangement.Center) {
             GlassPanel(shape = RoundedCornerShape(50), strength = 0.7f) {
                 Row(
                     Modifier.clip(RoundedCornerShape(50)).clickable(onClick = onOpenSound).padding(horizontal = 14.dp, vertical = 8.dp),
@@ -113,13 +130,6 @@ fun NowPlayingScreen(player: PlayerUi, artwork: Bitmap?, onOpenEq: () -> Unit, o
                 }
             }
         }
-
-        if (!player.hasMedia) {
-            Spacer(Modifier.height(80.dp))
-            Icon(Icons.Rounded.MusicNote, null, tint = pal.textFaint, modifier = Modifier.size(64.dp))
-            Text("Nothing playing yet", color = pal.textDim, modifier = Modifier.padding(top = 12.dp))
-            Text("Pick a song in the Library.", color = pal.textFaint, style = MaterialTheme.typography.bodySmall)
-            return@Column
         }
 
         // Artwork with the live spectrum: wrapped around a smaller cover, or rising behind the

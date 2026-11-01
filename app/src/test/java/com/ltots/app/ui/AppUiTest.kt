@@ -96,10 +96,15 @@ class AppUiTest {
     @Test fun everyTabOpensAndWorks() {
         rule.mainClock.autoAdvance = false
         idle()
+        // The app opens on Home (recommendations).
+        rule.onNodeWithText("For you").assertExists()
+        shot("00_home")
+        tab("Library")
         shot("01_library")
 
+        // Nothing playing: the Playing tab shows the history instead.
         tab("Playing")
-        rule.onNodeWithText("Nothing playing yet").assertIsDisplayed()
+        rule.onNodeWithText("No history yet").assertIsDisplayed()
         shot("02_playing_empty")
 
         tab("EQ")
@@ -175,7 +180,7 @@ class AppUiTest {
         shot("07_sound_page")
         rule.onNodeWithContentDescription("Back").performClick()
         idle(1200)
-        rule.onNodeWithText("Nothing playing yet").assertIsDisplayed()
+        rule.onNodeWithText("No history yet").assertIsDisplayed()
     }
 
     // Paused: hangs on CI (runs out of memory after ~35 min) since the waveform/Stem pitch changes.

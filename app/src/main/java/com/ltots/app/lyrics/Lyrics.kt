@@ -122,6 +122,7 @@ object Lyrics {
             doc = LyricsDoc(
                 synced = c.synced?.let { Lrc.parse(it) }?.takeIf { it.isNotEmpty() },
                 plain = c.plain, instrumental = c.instrumental, source = "LRCLIB", matchedAs = asWhat,
+                recordSec = c.durationSec.takeIf { it > 0 },
             ).takeIf { !it.isEmpty }
         }
         // If LRCLIB only had plain (or nothing), try NetEase for a synced version.
@@ -133,16 +134,47 @@ object Lyrics {
                     synced = Lrc.parse(neSynced).takeIf { it.isNotEmpty() },
                     plain = ne.first.plain, instrumental = ne.first.instrumental,
                     source = "NetEase", matchedAs = ne.second,
+                    recordSec = ne.first.durationSec.takeIf { it > 0 },
                 ).takeIf { !it.isEmpty } ?: doc
             }
         }
         return doc
     }
 
-    /** Saves lyrics the AI match found for [key] (replacing what was there) and shows them. */
+    /**
+     * Saves lyrics the AI match found for [key] (replacing what was there) and shows them. The
+     * lyrics found the normal way are kept aside, so [revert] can bring them back if the AI
+     * button was pressed by mistake. (A song that had no lyrics before has nothing to revert to.)
+     */
     fun saveMatched(key: String, doc: LyricsDoc) {
+        val before = saved(key) as? LyricsDoc
+        // Pressing AI again keeps the original normal lyrics as the ones to go back to.
+        if (before != null && !isAiMatch(before) && !backupFile(key).exists()) {
+            runCatching { backupFile(key).writeText(before.toJson().toString()) }
+        }
+        save(key, doc.copy(note = doc.note.ifBlank { AI_NOTE }))
+        if (_current.value?.first == key) _current.value = key to LyricsState.Found(saved(key) as? LyricsDoc ?: doc)
+    }
+
+    /** The note every AI match carries (how it's recognised as one). */
+    private const val AI_NOTE = "AI recognised the song from its sound"
+
+    /** Whether [doc] came from the AI match (rather than the normal search, an .lrc or the AI timing). */
+    fun isAiMatch(doc: LyricsDoc): Boolean = doc.note.startsWith("AI recognised") || doc.note.startsWith("AI matched")
+
+    private fun backupFile(key: String) = File(file(key).path.removeSuffix(".json") + ".before-ai.json")
+
+    /** Whether [key] has normal lyrics to go back to after an AI match. */
+    fun canRevert(key: String): Boolean = backupFile(key).exists()
+
+    /** Back to the lyrics found the normal way, before the AI match replaced them. */
+    fun revert(key: String): Boolean {
+        val f = backupFile(key)
+        val doc = runCatching { LyricsDoc.fromJson(JSONObject(f.readText())) }.getOrNull() ?: return false
         save(key, doc)
+        f.delete()
         if (_current.value?.first == key) _current.value = key to LyricsState.Found(doc)
+        return true
     }
 
     /** Shows the AI match's progress for [key]. */
@@ -181,6 +213,7 @@ object Lyrics {
         val lines = Lrc.parse(lrcText).takeIf { it.isNotEmpty() } ?: return false
         val doc = LyricsDoc(synced = lines, plain = null, source = "Imported .lrc")
         save(key, doc)
+        runCatching { backupFile(key).delete() }
         if (_current.value?.first == key) _current.value = key to LyricsState.Found(doc)
         return true
     }
@@ -198,6 +231,7 @@ object Lyrics {
     /** Forget the saved result for [key] and search again. */
     fun retry(context: Context, q: SongQuery) {
         runCatching { file(q.key).delete() }
+        runCatching { backupFile(q.key).delete() }
         synchronized(memory) { memory.remove(q.key) }
         show(context, q)
     }

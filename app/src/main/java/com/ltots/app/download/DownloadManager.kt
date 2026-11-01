@@ -17,6 +17,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
+import kotlinx.coroutines.sync.withPermit
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -33,6 +35,8 @@ data class DownloadSettings(
  * playlists up to date.
  */
 object DownloadManager {
+    /** How long the free-lossless check may hold a download up. */
+    private const val LOSSLESS_BUDGET_MS = 3_000L
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private lateinit var app: Context
     private lateinit var downloader: Downloader
@@ -63,6 +67,26 @@ object DownloadManager {
     /** yt-dlp process name currently used by each task (a new one per attempt). */
     private val processIds = java.util.concurrent.ConcurrentHashMap<String, String>()
     private val attempts = java.util.concurrent.atomic.AtomicInteger()
+
+    /**
+     * Stream information read ahead (videoId → it), for the songs about to download: while one
+     * downloads, the next ones' slowest step is already done. Stream addresses expire after a
+     * few hours, so a read-ahead is only used while fresh.
+     */
+    private val readAhead = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.Deferred<Downloader.Prefetched?>>()
+    private val readAheadGate = kotlinx.coroutines.sync.Semaphore(2)
+    private const val READ_AHEAD = 2
+    private const val READ_AHEAD_FRESH_MS = 2 * 3600_000L
+
+    private fun readAheadFor(videoId: String): kotlinx.coroutines.Deferred<Downloader.Prefetched?> =
+        readAhead.getOrPut(videoId) {
+            scope.async {
+                readAheadGate.withPermit {
+                    if (!Engine.ensureReady()) return@withPermit null
+                    runCatching { downloader.readInfo(videoId, "ra-$videoId-${attempts.incrementAndGet()}") }.getOrNull()
+                }
+            }
+        }
 
     private fun killProcesses(taskId: String) {
         val pid = processIds[taskId] ?: return
@@ -262,6 +286,8 @@ object DownloadManager {
                 if (running.size >= limit) break
                 running[t.id] = scope.launch { runTask(t) }
             }
+            // The next songs waiting get their stream information read already.
+            next.filter { it.id !in running && !it.meta.isVideo }.take(READ_AHEAD).forEach { readAheadFor(it.meta.videoId) }
             if (running.isNotEmpty()) startService()
         }
     }
@@ -274,23 +300,41 @@ object DownloadManager {
                 return
             }
             updateTask(task.id) { it.copy(state = TaskState.PREPARING) }
-            val meta = downloader.enrich(task.meta, _settings.value.preferOfficialAudio) { }
-            if (meta.videoId != task.meta.videoId && isDownloaded(meta.videoId)) {
-                updateTask(task.id) { it.copy(meta = meta, state = TaskState.SKIPPED, finishedAt = System.currentTimeMillis()) }
+            // Which video to fetch is settled first (a music video → its official audio); then
+            // three things run at once instead of one after another: yt-dlp reading the stream
+            // information (the slow part), the album / year / cover lookup, and the quick check
+            // for a free lossless copy — which gets a few seconds at most.
+            val chosen = downloader.officialAudio(task.meta, _settings.value.preferOfficialAudio)
+            if (chosen.videoId != task.meta.videoId && isDownloaded(chosen.videoId)) {
+                updateTask(task.id) { it.copy(meta = chosen, state = TaskState.SKIPPED, finishedAt = System.currentTimeMillis()) }
                 return
             }
+            val (meta, lossless, prefetched) = kotlinx.coroutines.coroutineScope {
+                val info = readAheadFor(chosen.videoId)
+                val started = System.currentTimeMillis()
+                // Detached: a slow archive.org answer is simply not waited for.
+                val flac = scope.async { runCatching { FreeLossless().find(chosen) }.getOrNull() }
+                val m = downloader.details(chosen)
+                val left = (LOSSLESS_BUDGET_MS - (System.currentTimeMillis() - started)).coerceAtLeast(1L)
+                val hit = kotlinx.coroutines.withTimeoutOrNull(left) { flac.await() }
+                if (hit == null) flac.cancel()
+                // With a lossless copy, the stream information isn't needed.
+                val pre = if (hit != null) null else info.await()?.takeIf { System.currentTimeMillis() - it.at < READ_AHEAD_FRESH_MS }
+                Triple(m, hit, pre)
+            }
+            readAhead.remove(chosen.videoId)
             updateTask(task.id) { it.copy(meta = meta, state = TaskState.DOWNLOADING, progress = 0f) }
             var lastUi = 0L
             val pid = "${task.id}-${attempts.incrementAndGet()}"
             processIds[task.id] = pid
-            val result = downloader.download(pid, meta) { p, line ->
+            val result = downloader.download(pid, meta, lossless = lossless, prefetched = prefetched, onProgress = { p, line ->
                 val now = System.currentTimeMillis()
                 if (line == "tagging") updateTask(task.id) { it.copy(state = TaskState.TAGGING, progress = 1f) }
                 else if (now - lastUi > 250) {
                     lastUi = now
                     update(save = false) { l -> l.map { if (it.id == task.id && it.state == TaskState.DOWNLOADING) it.copy(progress = p) else it } }
                 }
-            }
+            })
             synchronized(lock) {
                 _downloaded.value = _downloaded.value + (meta.videoId to result.uri.toString()) + (task.meta.videoId to result.uri.toString())
             }

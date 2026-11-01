@@ -122,8 +122,8 @@ internal fun MoodsCard(compact: Boolean = false) {
     val moods by MoodIndex.embeddings.collectAsState()
     val installed = AiModels.Model.MOODS in models.installed
     val downloading = models.downloading == AiModels.Model.MOODS
-    val total = remember(moods) { LocalLibrary.cached()?.size ?: 0 }
-    val missing = remember(moods, total) { LocalLibrary.cached()?.let { MoodIndex.missing(it).size } ?: 0 }
+    val total = remember(moods) { LocalLibrary.cachedSongs()?.size ?: 0 }
+    val missing = remember(moods, total) { LocalLibrary.cachedSongs()?.let { MoodIndex.missing(it).size } ?: 0 }
 
     if (compact && installed && progress == null && missing == 0) return
     Column(Modifier.fillMaxWidth().padding(vertical = 6.dp, horizontal = 2.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {

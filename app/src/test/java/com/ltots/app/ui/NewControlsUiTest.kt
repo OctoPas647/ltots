@@ -121,6 +121,7 @@ class NewControlsUiTest {
     @Test fun newControls() {
         rule.mainClock.autoAdvance = false
         idle()
+        tab("Library")
 
         // 1. Library: no box around the songs; the list runs down the whole page.
         rule.onNodeWithText("Song number 1").assertIsDisplayed()
@@ -370,6 +371,7 @@ class NewControlsUiTest {
     @Test fun finePitch() {
         rule.mainClock.autoAdvance = false
         idle()
+        tab("Library")
         click("Song number 1") // a song in the player shows the pitch controls
         idle(1500)
         tab("Playing")

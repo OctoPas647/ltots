@@ -493,7 +493,7 @@ private fun AppSettingsCard() {
 
             AiLyricsSetting()
 
-            SectionTitle("App settings · song finder accounts")
+            SectionTitle("Accounts · YouTube Music & song finder")
             com.ltots.app.ui.components.FinderAccounts()
             Spacer(Modifier.height(10.dp))
 

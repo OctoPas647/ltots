@@ -78,7 +78,9 @@ object LyricsMatch {
             onStatus("It's ${hit.artist} — ${hit.title}. Getting its lyrics…")
             val doc = lyricsFor(q.key, hit.title, hit.artist, hit.album)
                 ?: throw Failed("It's ${hit.artist} — ${hit.title}, but no lyrics database has it.")
-            return@withContext lineUp(doc, song, pcm.size / ClipAudio.RATE.toDouble(), hit)
+            val fileSec = if (q.durationMs > 0) q.durationMs / 1000.0 else pcm.size / ClipAudio.RATE.toDouble()
+            val lined = lineUp(doc, song, fileSec, hit)
+            return@withContext refine(context, lined, trackId, q.durationMs, onStatus)
         }
 
         // Not a known record: listen for the words instead.
@@ -148,7 +150,7 @@ object LyricsMatch {
         if (synced == null || t == null) {
             return doc.copy(matchedAs = asWhat, note = "AI recognised the song from its sound")
         }
-        val mapped = mapLines(synced, t, fileSec)
+        val mapped = mapLines(synced, wholeSong(t, doc.recordSec, fileSec), fileSec)
         val speedNote = if (abs(t.rate - 1) > 0.02) " · this version plays at %.2f×".format(t.rate) else ""
         return doc.copy(
             synced = mapped.takeIf { it.size >= 2 },
@@ -181,6 +183,50 @@ object LyricsMatch {
         // Median moment, at the speed it was recognised at.
         val (fx, sy) = pts.sortedBy { it.second - fallback * it.first }[pts.size / 2]
         return Timing(fallback, sy - fallback * fx)
+    }
+
+    /**
+     * Shazam's moments are measured against Shazam's own copy of the record, which can start a
+     * little earlier or later than the copy the lyrics were timed to (a different release, more
+     * silence before the music) — that's what made AI lyrics run slightly late. When this file
+     * is the whole song (its length, at the found speed, matches the lyrics' record), its start
+     * is the record's start: the lyrics' own timeline is used, stretched to the file.
+     */
+    internal fun wholeSong(t: Timing, recordSec: Double?, fileSec: Double): Timing {
+        if (recordSec == null || recordSec <= 0 || fileSec <= 0) return t
+        val rate = recordSec / fileSec
+        val sameSpeed = abs(rate - t.rate) <= 0.03 * t.rate
+        val startsTogether = abs(t.intercept) <= 6.0
+        return if (sameSpeed && startsTogether) Timing(rate, 0.0) else t
+    }
+
+    /**
+     * With the on-device speech model there, the AI checks its own timing: it listens for the
+     * words and, if the lines it hears are consistently earlier or later than placed, moves them
+     * all by that much (edits whose start was cut can't use [wholeSong]).
+     */
+    private suspend fun refine(context: Context, doc: LyricsDoc, trackId: Long, durationMs: Long, onStatus: (String) -> Unit): LyricsDoc {
+        val synced = doc.synced ?: return doc
+        if (!com.ltots.app.lyrics.AiSync.modelReady.value || durationMs <= 0) return doc
+        onStatus("Checking the timing by listening for the words…")
+        val texts = synced.filter { it.text.isNotBlank() }
+        val heard = runCatching { com.ltots.app.lyrics.AiSync.hear(context, trackId, texts.joinToString("\n") { it.text }, durationMs) }.getOrNull() ?: return doc
+        val shift = shiftFrom(texts.map { it.timeMs }, heard.lines.map { it.timeMs }, heard.anchors) ?: return doc
+        if (abs(shift) < 150) return doc
+        return doc.copy(synced = synced.map { LyricLine((it.timeMs + shift).coerceAtLeast(0L), it.text) })
+    }
+
+    /**
+     * How far the placed lines are from where they were heard: the median difference over the
+     * heard lines, if there are enough of them and they agree (else null — no change).
+     */
+    internal fun shiftFrom(placed: List<Long>, heard: List<Long>, anchors: List<Int>): Long? {
+        val diffs = anchors.filter { it < placed.size && it < heard.size }.map { heard[it] - placed[it] }.sorted()
+        if (diffs.size < 5) return null
+        val median = diffs[diffs.size / 2]
+        // Most heard lines must agree on it (within 0.7 s), not just half of them.
+        val agree = diffs.count { abs(it - median) <= 700 }
+        return if (agree >= 5 && agree >= 0.6 * diffs.size && abs(median) <= 5000) median else null
     }
 
     /** Record line times → this file's times; lines cut from this version are dropped. */

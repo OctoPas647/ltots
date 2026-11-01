@@ -85,6 +85,7 @@ object ClipLoader {
                     onStatus(if (i == 0) "Getting the sound from ${platform.label}…" else "Trying another way…")
                     val req = YoutubeDLRequest(url).apply {
                         addOption("--no-playlist")
+                        addOption("--cache-dir", Engine.cacheDir())
                         addOption("-f", format)
                         addOption("--write-info-json")
                         addOption("--no-mtime")

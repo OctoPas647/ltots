@@ -30,6 +30,7 @@ object UserSwitch {
         ThemeState.reloadForUser()
         EqProfiles.load()
         AudioEngine.reloadForUser()
+        com.ltots.app.data.ListenHistory.reload()
     }
 
     /** Deletes user [id] and everything they kept; the user in use moves to another first. */

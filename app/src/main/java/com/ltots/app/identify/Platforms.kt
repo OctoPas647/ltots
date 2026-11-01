@@ -153,9 +153,30 @@ object Platforms {
      * Saves the cookies the sign-in page left in the app's web view as a cookies.txt file for
      * the download engine. Returns false when there's nothing that looks like a session.
      */
+    /**
+     * The cookies each site sets only once someone has really signed in. A visit alone leaves
+     * cookies too, so without these the sign-in isn't done yet (it used to count as signed in).
+     */
+    val AUTH_COOKIES: Map<Platform, List<String>> = mapOf(
+        Platform.INSTAGRAM to listOf("sessionid"),
+        Platform.THREADS to listOf("sessionid"),
+        Platform.FACEBOOK to listOf("c_user", "xs"),
+        Platform.TIKTOK to listOf("sessionid", "sessionid_ss", "sid_tt"),
+        Platform.X to listOf("auth_token"),
+    )
+
+    /** Whether the in-app browser holds a real (signed-in) session for [p] right now. */
+    fun browserSignedIn(p: Platform): Boolean {
+        val cm = CookieManager.getInstance()
+        val names = p.cookieUrls.flatMap { u -> cm.getCookie(u)?.split(';')?.map { it.substringBefore('=').trim() }.orEmpty() }.toSet()
+        val wanted = AUTH_COOKIES[p] ?: return names.isNotEmpty()
+        return wanted.any { it in names }
+    }
+
     fun saveSignIn(context: Context, p: Platform): Boolean {
         val cm = CookieManager.getInstance()
         cm.flush()
+        if (!browserSignedIn(p)) return false
         val lines = ArrayList<String>()
         for (u in p.cookieUrls) {
             val domain = "." + (Platform.hostOf(u) ?: continue)

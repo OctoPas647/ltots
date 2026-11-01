@@ -17,7 +17,8 @@ object LyricAlign {
     /** Under this share of lines heard, the result isn't trusted (wrong language, no vocals…). */
     const val MIN_COVERAGE = 0.3
 
-    data class Result(val lines: List<LyricLine>, val coverage: Double)
+    /** [anchors]: the lines whose time was really heard (the rest are placed between them). */
+    data class Result(val lines: List<LyricLine>, val coverage: Double, val anchors: List<Int> = emptyList())
 
     /** Lower case letters and digits only: "Don't" → "dont", "AK-50" → "ak", "50". */
     fun words(text: String): List<String> =
@@ -134,6 +135,6 @@ object LyricAlign {
         }
         // Strictly in order, at least a tenth of a second apart.
         for (k in 1 until out.size) if (out[k] <= out[k - 1]) out[k] = out[k - 1] + 100
-        return Result(lineTexts.mapIndexed { k, t -> LyricLine(out[k], t) }, coverage)
+        return Result(lineTexts.mapIndexed { k, t -> LyricLine(out[k], t) }, coverage, lineTime.indices.filter { lineTime[it] >= 0 })
     }
 }

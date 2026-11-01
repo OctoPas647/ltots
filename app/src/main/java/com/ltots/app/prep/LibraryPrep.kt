@@ -60,6 +60,10 @@ object LibraryPrep {
             PeriodicWorkRequestBuilder<WaveWorker>(1, TimeUnit.DAYS).setConstraints(waveConstraints).build())
         wm.enqueueUniquePeriodicWork("$LYRICS-daily", ExistingPeriodicWorkPolicy.KEEP,
             PeriodicWorkRequestBuilder<LyricsWorker>(1, TimeUnit.DAYS).setConstraints(lyricsConstraints).build())
+        wm.enqueueUniquePeriodicWork("prep-melody-charts", ExistingPeriodicWorkPolicy.KEEP,
+            PeriodicWorkRequestBuilder<MelodyChartsWorker>(1, TimeUnit.DAYS).setConstraints(
+                Constraints.Builder().setRequiredNetworkType(NetworkType.UNMETERED).setRequiresBatteryNotLow(true).build(),
+            ).build())
         wm.enqueueUniquePeriodicWork("$MOODS-daily", ExistingPeriodicWorkPolicy.KEEP,
             PeriodicWorkRequestBuilder<MoodWorker>(1, TimeUnit.DAYS).setConstraints(waveConstraints).build())
     }
@@ -70,6 +74,14 @@ object LibraryPrep {
         val req = OneTimeWorkRequestBuilder<MoodWorker>()
         if (onlyCharging) req.setConstraints(waveConstraints)
         wm.enqueueUniqueWork(MOODS, if (onlyCharging) ExistingWorkPolicy.KEEP else ExistingWorkPolicy.REPLACE, req.build())
+    }
+
+    /** The charts' tunes for melody matching, as soon as there's a connection (first use). */
+    fun runMelodyCharts(context: Context) {
+        val wm = wm(context) ?: return
+        wm.enqueueUniqueWork("prep-melody-charts-now", ExistingWorkPolicy.KEEP,
+            OneTimeWorkRequestBuilder<MelodyChartsWorker>()
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build())
     }
 
     /** "Prepare now" in Sound: run both passes right away, without waiting for the charger. */
@@ -105,7 +117,9 @@ class WaveWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
     override suspend fun doWork(): Result {
         val ctx = applicationContext
         if (!LibraryPrep.hasAudioPermission(ctx)) return Result.success()
-        val tracks = LocalLibrary.load(ctx)
+        // Files the Library isn't sure are songs get listened to first (quick, a few files).
+        runCatching { com.ltots.app.data.SongKinds.classify(ctx, LocalLibrary.load(ctx)) }
+        val tracks = LocalLibrary.loadSongs(ctx)
         var done = 0
         for (t in tracks) {
             if (isStopped) return Result.retry()
@@ -122,6 +136,16 @@ class WaveWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             done++
             if (done % 10 == 0) setProgress(workDataOf("done" to done, "total" to tracks.size))
         }
+        // The tunes of the phone's songs, for recognising covers of them (song finder).
+        runCatching { com.ltots.app.identify.MelodyIndex.addPhoneSongs(ctx, tracks) { !isStopped } }
+        return Result.success()
+    }
+}
+
+/** Once a week on Wi-Fi: the tunes of the most played songs, for recognising covers of them. */
+class MelodyChartsWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
+    override suspend fun doWork(): Result {
+        runCatching { com.ltots.app.identify.MelodyIndex.updateCharts(applicationContext) }
         return Result.success()
     }
 }
@@ -130,7 +154,7 @@ class LyricsWorker(context: Context, params: WorkerParameters) : CoroutineWorker
     override suspend fun doWork(): Result {
         val ctx = applicationContext
         if (!LibraryPrep.hasAudioPermission(ctx)) return Result.success()
-        val tracks = LocalLibrary.load(ctx)
+        val tracks = LocalLibrary.loadSongs(ctx)
         var failures = 0
         for (t in tracks) {
             if (isStopped) return Result.retry()
@@ -153,7 +177,7 @@ class MoodWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         val ctx = applicationContext
         if (!LibraryPrep.hasAudioPermission(ctx)) return Result.success()
         if (!com.ltots.app.identify.AiModels.isInstalled(com.ltots.app.identify.AiModels.Model.MOODS)) return Result.success()
-        val tracks = LocalLibrary.load(ctx)
+        val tracks = LocalLibrary.loadSongs(ctx)
         com.ltots.app.moods.MoodIndex.analyse(ctx, tracks) { !isStopped }
         return if (isStopped) Result.retry() else Result.success()
     }
