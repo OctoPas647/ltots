@@ -371,6 +371,7 @@ class NewControlsUiTest {
     @Test fun finePitch() {
         rule.mainClock.autoAdvance = false
         idle()
+        tab("Library")
         click("Song number 1") // a song in the player shows the pitch controls
         idle(1500)
         tab("Playing")
