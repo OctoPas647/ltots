@@ -41,6 +41,14 @@ enum class RingLayout(val label: String) {
     MIRRORED_FLIPPED("Mirrored, flipped"),
 }
 
+/** When the Library's scroll slider shows. */
+enum class ScrollbarShow(val label: String) {
+    OFF("Hidden"),
+    /** Fades in while the list moves (or the slider is held), then out again. */
+    SCROLLING("While scrolling"),
+    ALWAYS("Always"),
+}
+
 /** Where the spectrum sits behind the full-size cover. */
 enum class BehindLayout(val label: String) {
     /** Rising from the bottom, bass on the left (the original). */
@@ -242,6 +250,17 @@ data class ThemeConfig(
     val coverBarsOpacity: Float? = null,
     /** The Library page's top (title, search, buttons) sits on one liquid-glass panel. */
     val libraryHeaderGlass: Boolean = true,
+    /**
+     * The clock and status icons on the Library page. Off (default): they're hidden there and the
+     * top menu moves up to the very top of the screen, logo in the top-left corner beside the
+     * camera. On: the menu sits right below them. (Hide status bar in App settings hides them
+     * everywhere, this page included.)
+     */
+    val libraryStatusBar: Boolean = false,
+    /** The Library's liquid-glass scroll slider on the right edge. */
+    val scrollbarShow: ScrollbarShow = ScrollbarShow.SCROLLING,
+    /** The slider runs down behind the mini player and nav bar; off: it ends just above them. */
+    val scrollbarFullHeight: Boolean = false,
 )
 
 data class AppSettings(
@@ -359,6 +378,7 @@ object Json {
         put("freeze", t.freezeVisualizer); put("gFlow", t.gradientFlow)
         put("beat", t.coverBeat); put("beatK", t.beatStrength.toDouble()); put("beatSrc", t.beatSource.name); t.coverBarsOpacity?.let { put("coverBars", it.toDouble()) }
         put("libGlass", t.libraryHeaderGlass)
+        put("libStatus", t.libraryStatusBar); put("sbShow", t.scrollbarShow.name); put("sbFull", t.scrollbarFullHeight)
     }
 
     private fun hsvJson(h: Hsv) = JSONArray().put(h.h.toDouble()).put(h.s.toDouble()).put(h.v.toDouble())
@@ -423,6 +443,9 @@ object Json {
             // 100% in version 0.1.48 meant "off": the same as the rest of the cover.
             coverBarsOpacity = if (o.has("coverBars")) o.optDouble("coverBars").toFloat().coerceIn(0f, 1f).takeIf { it < 0.999f } else null,
             libraryHeaderGlass = o.optBoolean("libGlass", d.libraryHeaderGlass),
+            libraryStatusBar = o.optBoolean("libStatus", d.libraryStatusBar),
+            scrollbarShow = runCatching { ScrollbarShow.valueOf(o.optString("sbShow")) }.getOrDefault(d.scrollbarShow),
+            scrollbarFullHeight = o.optBoolean("sbFull", d.scrollbarFullHeight),
         )
     }
 

@@ -52,6 +52,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.ui.platform.LocalConfiguration
+import com.ltots.app.ui.PageBars
+import com.ltots.app.ui.rememberTopArea
+import com.ltots.app.ui.components.GlassScrollbar
+import com.ltots.app.ui.components.LocalScrollbarHost
+import com.ltots.app.ui.components.RegisterScroll
+import com.ltots.app.ui.components.ScrollLabel
+import com.ltots.app.ui.components.ScrollbarHost
+import com.ltots.app.ui.components.initialOf
 import androidx.compose.ui.platform.LocalDensity
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
@@ -183,15 +198,42 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenHistory: () 
     // The top of the page: on one liquid-glass panel (Look > Glass > Glass Library top), or
     // straight on the background. On the panel, the search box and shuffle button are plain
     // tinted shapes rather than glass on glass.
-    val headerGlass = LocalThemeConfig.current.libraryHeaderGlass
+    val cfg = LocalThemeConfig.current
+    val density = LocalDensity.current
+    val headerGlass = cfg.libraryHeaderGlass
     val inner = pal.text.copy(alpha = 0.08f)
+
+    // The very top. By default the clock and status icons are hidden on this page and the menu
+    // moves up to the top of the screen: the logo in the top-left corner, level with the camera
+    // (kept inside the screen's rounded corner, and below the camera if it's right above).
+    // With the clock shown (Look > Library page), the menu sits right below it.
+    val compactTop = !cfg.libraryStatusBar || cfg.hideStatusBar
+    PageBars.HideStatusBar(compactTop && !cfg.hideStatusBar)
+    val area = rememberTopArea()
+    val sidePad = if (headerGlass) 30.dp else 16.dp
+    val screenWidth = LocalConfiguration.current.screenWidthDp.dp
+    var titleRowHeight by remember { mutableStateOf(56.dp) }
+    val rowTop = if (!compactTop) topInset() + (if (headerGlass) 20.dp else 12.dp) else {
+        // Logo and buttons sit centred in the title row.
+        val logoTop = area.minTop(sidePad, 40.dp, 11.dp)
+        val buttonTop = area.minTop(sidePad, 42.dp, 21.dp, fromRight = true, screenWidth = screenWidth)
+        maxOf(logoTop - (titleRowHeight - 40.dp) / 2, buttonTop - (titleRowHeight - 42.dp) / 2, 0.dp)
+    }
+    // The title and song count stop short of a camera in the middle of the top edge.
+    val textStart = sidePad + 40.dp + 12.dp
+    val textMax = if (compactTop && area.hasCutout && area.cutoutBottom > rowTop && area.cutoutLeft > textStart + 60.dp)
+        area.cutoutLeft - textStart - 10.dp else Dp.Unspecified
+
     val top: @Composable ColumnScope.() -> Unit = {
         // Header
-        Row(Modifier.padding(top = 12.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.padding(top = rowTop, bottom = 14.dp).onSizeChanged { with(density) { titleRowHeight = it.height.toDp() } },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Logo(40.dp)
             Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text("LToTS", style = MaterialTheme.typography.displaySmall, color = pal.text)
+            Box(Modifier.weight(1f)) { Column(Modifier.widthIn(max = textMax)) {
+                Text("LToTS", style = MaterialTheme.typography.displaySmall, color = pal.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
                     when {
                         allTracks.isEmpty() -> "Your music"
@@ -200,7 +242,7 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenHistory: () 
                     },
                     style = MaterialTheme.typography.bodySmall, color = pal.textDim, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
-            }
+            } }
             // Top right, opposite the logo: shuffle, then the listening history.
             val round = if (headerGlass) Modifier.clip(CircleShape).background(inner) else Modifier.glass(CircleShape, strength = 0.6f)
             if (filtered.isNotEmpty()) {
@@ -287,6 +329,13 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenHistory: () 
                 remember(filtered, sortBy, if (sortBy == SongSort.COLOR) colors else null) { SongSorter.sort(filtered, sortBy, colors) },
                 player, bottom, onOpenPlayer,
                 note = if (showAll) { t -> com.ltots.app.data.SongKinds.describe(t, kindVerdicts) } else null,
+                // The slider's bubble follows the order: the letter, the genre, or the colour.
+                label = when (sortBy) {
+                    SongSort.TITLE -> { t -> ScrollLabel.Words(initialOf(t.title)) }
+                    SongSort.GENRE -> { t -> ScrollLabel.Words(SongSorter.familyName(t.genre) ?: SongSorter.genreName(t.genre) ?: "No genre") }
+                    SongSort.COLOR -> { t -> colors[t.id]?.let { ScrollLabel.Swatch(it) } }
+                    SongSort.RANDOM -> null
+                },
             )
             view == LibView.MIXES -> MixGrid(remember(filtered, moods) { Mixes.build(filtered, moods, com.ltots.app.moods.MoodIndex.text(context)) }, bottom) { m ->
                 openGroup = Group(m.title, "${m.kind.label} · ${m.subtitle}", m.tracks)
@@ -310,16 +359,20 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenHistory: () 
         }
     }
 
+    // The scroll slider (Look > Library page): starts a few pixels below the top menu and ends
+    // just above the mini player and nav bar, or runs down behind them.
+    val scrollHost = remember { ScrollbarHost() }
+    val sliderBottom = if (cfg.scrollbarFullHeight) WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 12.dp
+        else bottomChrome() - 32.dp + 6.dp
+    var headerHeight by remember { mutableStateOf(0.dp) }
+
     if (headerGlass) {
         // The top floats over the page like the bars at the bottom: the songs scroll on under it
         // (and under the status bar), and its glass blurs and bends them as they pass.
-        val density = LocalDensity.current
-        var headerHeight by remember { mutableStateOf(0.dp) }
         val listLayer = rememberLayerBackdrop()
-        val headerTop = topInset() + 8.dp
         Box(Modifier.fillMaxSize()) {
             Box(Modifier.fillMaxSize().layerBackdrop(listLayer).padding(horizontal = 16.dp)) {
-                CompositionLocalProvider(LocalListTop provides headerHeight + 8.dp, content = list)
+                CompositionLocalProvider(LocalListTop provides headerHeight + 8.dp, LocalScrollbarHost provides scrollHost, content = list)
             }
             // The panel is fixed to the very top of the screen, status bar included, so nothing
             // scrolls into view above it; only its bottom corners are rounded.
@@ -330,14 +383,27 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenHistory: () 
                     shape = RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp),
                     tintBoost = 0.04f,
                 ) {
-                    Column(Modifier.padding(start = 30.dp, end = 30.dp, top = headerTop, bottom = 4.dp), content = top)
+                    Column(Modifier.padding(start = 30.dp, end = 30.dp, bottom = 4.dp), content = top)
                 }
+                // Over the list too, so its glass bends the songs passing under it.
+                GlassScrollbar(
+                    scrollHost, cfg.scrollbarShow,
+                    Modifier.align(Alignment.TopEnd).padding(top = headerHeight + 6.dp, bottom = sliderBottom),
+                )
             }
         }
     } else {
-        Column(Modifier.fillMaxSize().padding(top = topInset()).padding(horizontal = 16.dp)) {
-            Column(content = top)
-            Box(Modifier.fillMaxWidth().weight(1f)) { list() }
+        Box(Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+                Column(Modifier.onSizeChanged { headerHeight = with(density) { it.height.toDp() } }, content = top)
+                Box(Modifier.fillMaxWidth().weight(1f)) {
+                    CompositionLocalProvider(LocalScrollbarHost provides scrollHost) { list() }
+                }
+            }
+            GlassScrollbar(
+                scrollHost, cfg.scrollbarShow,
+                Modifier.align(Alignment.TopEnd).padding(top = headerHeight + 6.dp, bottom = sliderBottom),
+            )
         }
     }
     if (showFilter) LibraryFilterDialog(tracks, settings, onDismiss = { showFilter = false })
@@ -402,8 +468,13 @@ private fun SortBar(
 }
 
 @Composable
-private fun SongList(tracks: List<Track>, player: PlayerUi, bottom: Dp, onPlayed: () -> Unit, note: ((Track) -> String?)? = null) {
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = LocalListTop.current + 2.dp, bottom = bottom)) {
+private fun SongList(
+    tracks: List<Track>, player: PlayerUi, bottom: Dp, onPlayed: () -> Unit,
+    note: ((Track) -> String?)? = null, label: ((Track) -> ScrollLabel?)? = null,
+) {
+    val state = rememberLazyListState()
+    RegisterScroll(state, label = label?.let { l -> { i: Int -> tracks.getOrNull(i)?.let(l) } })
+    LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(top = LocalListTop.current + 2.dp, bottom = bottom)) {
         itemsIndexed(tracks, key = { _, t -> t.id }) { i, t ->
             TrackRow(t, playing = player.trackId == t.id, note = note?.invoke(t)) { player.play(tracks, i); onPlayed() }
         }
@@ -449,7 +520,9 @@ private fun Thumb(trackId: Long, sizeDp: Int) {
 @Composable
 private fun AlbumGrid(groups: List<Group>, bottom: Dp, onOpen: (Group) -> Unit) {
     val pal = LocalPalette.current
-    LazyVerticalGrid(GridCells.Adaptive(150.dp), Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 2.dp, end = 2.dp, top = LocalListTop.current + 4.dp, bottom = bottom),
+    val state = rememberLazyGridState()
+    RegisterScroll(state, label = { i -> groups.getOrNull(i)?.let { ScrollLabel.Words(initialOf(it.title)) } })
+    LazyVerticalGrid(GridCells.Adaptive(150.dp), Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(start = 2.dp, end = 2.dp, top = LocalListTop.current + 4.dp, bottom = bottom),
         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         items(groups, key = { it.tracks.first().albumId }) { g ->
             Column(Modifier.clip(RoundedCornerShape(14.dp)).clickable { onOpen(g) }) {
@@ -491,7 +564,11 @@ private fun MixGrid(mixes: List<Mix>, bottom: Dp, onOpen: (Mix) -> Unit) {
 @Composable
 private fun MixGridBody(mixes: List<Mix>, bottom: Dp, onOpen: (Mix) -> Unit) {
     val pal = LocalPalette.current
-    LazyVerticalGrid(GridCells.Adaptive(150.dp), Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 2.dp, end = 2.dp, top = LocalListTop.current + 4.dp, bottom = bottom),
+    val state = rememberLazyGridState()
+    // The bubble names the section: each section's title, then its mixes.
+    val sections = remember(mixes) { mixes.groupBy { it.kind }.flatMap { (k, g) -> List(g.size + 1) { k.label } } }
+    RegisterScroll(state, label = { i -> sections.getOrNull(i)?.let { ScrollLabel.Words(it) } })
+    LazyVerticalGrid(GridCells.Adaptive(150.dp), Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(start = 2.dp, end = 2.dp, top = LocalListTop.current + 4.dp, bottom = bottom),
         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         for ((kind, group) in mixes.groupBy { it.kind }) {
             item(key = "head:${kind.name}", span = { GridItemSpan(maxLineSpan) }) {
@@ -528,7 +605,9 @@ private fun BigThumb(trackId: Long) {
 @Composable
 private fun ArtistList(groups: List<Group>, bottom: Dp, onOpen: (Group) -> Unit) {
     val pal = LocalPalette.current
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = LocalListTop.current + 2.dp, bottom = bottom)) {
+    val state = rememberLazyListState()
+    RegisterScroll(state, label = { i -> groups.getOrNull(i)?.let { ScrollLabel.Words(initialOf(it.title)) } })
+    LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(top = LocalListTop.current + 2.dp, bottom = bottom)) {
         items(groups, key = { it.title }) { g ->
             Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable { onOpen(g) }.padding(horizontal = 4.dp, vertical = 9.dp),
@@ -561,7 +640,10 @@ private fun GroupDetail(g: Group, player: PlayerUi, bottom: Dp, onBack: () -> Un
                 Icon(Icons.Rounded.PlayArrow, "Play", tint = pal.accent, modifier = Modifier.size(30.dp))
             }
         }
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = bottom)) {
+        // The slider starts below this title row, clear of the play button.
+        val state = rememberLazyListState()
+        RegisterScroll(state, extraTop = 56.dp)
+        LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(bottom = bottom)) {
             itemsIndexed(g.tracks, key = { _, t -> t.id }) { i, t ->
                 TrackRow(t, playing = player.trackId == t.id) { player.play(g.tracks, i); onPlayed() }
             }

@@ -189,6 +189,33 @@ fun LookScreen(artwork: android.graphics.Bitmap? = null) {
         Spacer(Modifier.height(12.dp))
         GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
             Column(Modifier.padding(16.dp)) {
+                SectionTitle("Library page")
+                SwitchRow(
+                    "Clock & icons on Library", cfg.libraryStatusBar && !cfg.hideStatusBar, { on -> set { it.copy(libraryStatusBar = on) } },
+                    sub = if (cfg.hideStatusBar) "Hide status bar is on (Profile > App settings), so they're hidden everywhere: the Library's top menu sits at the very top of the screen."
+                    else "Off: hidden on the Library, and its top menu moves up to the very top of the screen, logo in the top-left corner. On: the menu sits right below them.",
+                    enabled = !cfg.hideStatusBar,
+                )
+                Spacer(Modifier.height(6.dp))
+                Text("Scroll slider", color = pal.text, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "A liquid-glass slider on the right edge of the Library's lists. Hold and drag it to jump; a bubble shows the letter, genre or colour you're at.",
+                    color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 6.dp),
+                )
+                FlowPills {
+                    com.ltots.app.data.ScrollbarShow.entries.forEach { m -> Pill(m.label, cfg.scrollbarShow == m, { set { it.copy(scrollbarShow = m) } }) }
+                }
+                SwitchRow(
+                    "Slider runs behind the bars", cfg.scrollbarFullHeight, { on -> set { it.copy(scrollbarFullHeight = on) } },
+                    sub = "On: it reaches down behind the mini player and nav bar. Off: it ends just above them.",
+                    enabled = cfg.scrollbarShow != com.ltots.app.data.ScrollbarShow.OFF,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
+            Column(Modifier.padding(16.dp)) {
                 SectionTitle("Background")
                 if (cfg.pureBlack) {
                     Text(

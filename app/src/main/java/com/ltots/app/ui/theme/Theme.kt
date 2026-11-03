@@ -233,6 +233,9 @@ object ThemeState {
         beatSource = cur.beatSource,
         coverBarsOpacity = cur.coverBarsOpacity,
         libraryHeaderGlass = cur.libraryHeaderGlass,
+        libraryStatusBar = cur.libraryStatusBar,
+        scrollbarShow = cur.scrollbarShow,
+        scrollbarFullHeight = cur.scrollbarFullHeight,
     )
 
     fun update(transform: (ThemeConfig) -> ThemeConfig) {
