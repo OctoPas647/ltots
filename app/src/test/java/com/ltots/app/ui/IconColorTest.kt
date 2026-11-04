@@ -34,7 +34,11 @@ class IconColorTest {
         val aliases = Regex("""<activity-alias[\s\S]*?</activity-alias>""").findAll(manifest).map { it.value }.toList()
         assertEquals(IconColor.COUNT + 1, aliases.size)
         assertEquals(1, aliases.count { "android:enabled=\"true\"" in it })
-        assertTrue(aliases.all { "category.LAUNCHER" in it && "targetActivity=\".MainActivity\"" in it })
+        // Every icon opens the launcher trampoline, so the task in Recents is MainActivity's and
+        // survives the icon it was opened from being switched off.
+        assertTrue(aliases.all { "category.LAUNCHER" in it && "targetActivity=\".LaunchActivity\"" in it })
+        val launch = Regex("""<activity\s+android:name="\.LaunchActivity"[\s\S]*?/>""").find(manifest)!!.value
+        assertTrue("excludeFromRecents=\"true\"" in launch && "taskAffinity=\"\"" in launch)
         val res = manifest.let { File(File(listOf("src/main", "app/src/main").first { File(it).isDirectory }), "res/mipmap-anydpi-v26") }
         for (i in 0 until IconColor.COUNT) {
             assertTrue("C%02d".format(i) in manifest)

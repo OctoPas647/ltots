@@ -49,11 +49,23 @@
         </activity>
 
 
+        <!-- What the home-screen icon opens: it only starts MainActivity in LToTS's own task and
+             closes. The colour icons below are switched on and off (ui/IconColor.kt), and some
+             launchers (HyperOS) drop an app from Recents when the icon that opened it is
+             switched off; the task in Recents is MainActivity's, which never is. -->
+        <activity
+            android:name=".LaunchActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <!-- The home-screen icon. LToTS shows exactly one of these: the original, or one of 20
              colours that follow the song (see ui/IconColor.kt). -->
         <activity-alias
             android:name=".LauncherDefault"
-            android:targetActivity=".MainActivity"
+            android:targetActivity=".LaunchActivity"
             android:icon="@mipmap/ic_launcher"
             android:roundIcon="@mipmap/ic_launcher"
             android:enabled="true"
@@ -65,7 +77,7 @@
         </activity-alias>
         <activity-alias
             android:name=".LauncherC00"
-            android:targetActivity=".MainActivity"
+            android:targetActivity=".LaunchActivity"
             android:icon="@mipmap/ic_launcher_c00"
             android:roundIcon="@mipmap/ic_launcher_c00"
             android:enabled="false"
@@ -77,7 +89,7 @@
         </activity-alias>
         <activity-alias
             android:name=".LauncherC01"
-            android:targetActivity=".MainActivity"
+            android:targetActivity=".LaunchActivity"
             android:icon="@mipmap/ic_launcher_c01"
             android:roundIcon="@mipmap/ic_launcher_c01"
             android:enabled="false"
@@ -89,7 +101,7 @@
         </activity-alias>
         <activity-alias
             android:name=".LauncherC02"
-            android:targetActivity=".MainActivity"
+            android:targetActivity=".LaunchActivity"
             android:icon="@mipmap/ic_launcher_c02"
             android:roundIcon="@mipmap/ic_launcher_c02"
             android:enabled="false"
@@ -101,7 +113,7 @@
         </activity-alias>
         <activity-alias
             android:name=".LauncherC03"
-            android:targetActivity=".MainActivity"
+            android:targetActivity=".LaunchActivity"
             android:icon="@mipmap/ic_launcher_c03"
             android:roundIcon="@mipmap/ic_launcher_c03"
             android:enabled="false"
@@ -113,7 +125,7 @@
         </activity-alias>
         <activity-alias
             android:name=".LauncherC04"
-            android:targetActivity=".MainActivity"
+            android:targetActivity=".LaunchActivity"
             android:icon="@mipmap/ic_launcher_c04"
             android:roundIcon="@mipmap/ic_launcher_c04"
             android:enabled="false"
@@ -125,7 +137,7 @@
         </activity-alias>
         <activity-alias
             android:name=".LauncherC05"
-            android:targetActivity=".MainActivity"
+            android:targetActivity=".LaunchActivity"
             android:icon="@mipmap/ic_launcher_c05"
             android:roundIcon="@mipmap/ic_launcher_c05"
             android:enabled="false"
@@ -137,7 +149,7 @@
         </activity-alias>
         <activity-alias
             android:name=".LauncherC06"
-            android:targetActivity=".MainActivity"
+            android:targetActivity=".LaunchActivity"
             android:icon="@mipmap/ic_launcher_c06"
             android:roundIcon="@mipmap/ic_launcher_c06"
             android:enabled="false"
@@ -149,7 +161,7 @@
         </activity-alias>
         <activity-alias
             android:name=".LauncherC07"
-            android:targetActivity=".MainActivity"
+            android:targetActivity=".LaunchActivity"
             android:icon="@mipmap/ic_launcher_c07"
             android:roundIcon="@mipmap/ic_launcher_c07"
             android:enabled="false"
@@ -161,7 +173,7 @@
         </activity-alias>
         <activity-alias
             android:name=".LauncherC08"
-            android:targetActivity=".MainActivity"
+            android:targetActivity=".LaunchActivity"
             android:icon="@mipmap/ic_launcher_c08"
             android:roundIcon="@mipmap/ic_launcher_c08"
             android:enabled="false"
@@ -173,7 +185,7 @@
         </activity-alias>
         <activity-alias
             android:name=".LauncherC09"
-            android:targetActivity=".MainActivity"
+            android:targetActivity=".LaunchActivity"
             android:icon="@mipmap/ic_launcher_c09"
             android:roundIcon="@mipmap/ic_launcher_c09"
             android:enabled="false"
@@ -185,7 +197,7 @@
         </activity-alias>
         <activity-alias
             android:name=".LauncherC10"
-            android:targetActivity=".MainActivity"
+            android:targetActivity=".LaunchActivity"
             android:icon="@mipmap/ic_launcher_c10"
             android:roundIcon="@mipmap/ic_launcher_c10"
             android:enabled="false"
@@ -197,7 +209,7 @@
         </activity-alias>
         <activity-alias
             android:name=".LauncherC11"
-            android:targetActivity=".MainActivity"
+            android:targetActivity=".LaunchActivity"
             android:icon="@mipmap/ic_launcher_c11"
             android:roundIcon="@mipmap/ic_launcher_c11"
             android:enabled="false"
@@ -209,7 +221,7 @@
         </activity-alias>
         <activity-alias
             android:name=".LauncherC12"
-            android:targetActivity=".MainActivity"
+            android:targetActivity=".LaunchActivity"
             android:icon="@mipmap/ic_launcher_c12"
             android:roundIcon="@mipmap/ic_launcher_c12"
             android:enabled="false"
@@ -221,7 +233,7 @@
         </activity-alias>
         <activity-alias
             android:name=".LauncherC13"
-            android:targetActivity=".MainActivity"
+            android:targetActivity=".LaunchActivity"
             android:icon="@mipmap/ic_launcher_c13"
             android:roundIcon="@mipmap/ic_launcher_c13"
             android:enabled="false"
@@ -233,7 +245,7 @@
         </activity-alias>
         <activity-alias
             android:name=".LauncherC14"
-            android:targetActivity=".MainActivity"
+            android:targetActivity=".LaunchActivity"
             android:icon="@mipmap/ic_launcher_c14"
             android:roundIcon="@mipmap/ic_launcher_c14"
             android:enabled="false"
@@ -245,7 +257,7 @@
         </activity-alias>
         <activity-alias
             android:name=".LauncherC15"
-            android:targetActivity=".MainActivity"
+            android:targetActivity=".LaunchActivity"
             android:icon="@mipmap/ic_launcher_c15"
             android:roundIcon="@mipmap/ic_launcher_c15"
             android:enabled="false"
@@ -257,7 +269,7 @@
         </activity-alias>
         <activity-alias
             android:name=".LauncherC16"
-            android:targetActivity=".MainActivity"
+            android:targetActivity=".LaunchActivity"
             android:icon="@mipmap/ic_launcher_c16"
             android:roundIcon="@mipmap/ic_launcher_c16"
             android:enabled="false"
@@ -269,7 +281,7 @@
         </activity-alias>
         <activity-alias
             android:name=".LauncherC17"
-            android:targetActivity=".MainActivity"
+            android:targetActivity=".LaunchActivity"
             android:icon="@mipmap/ic_launcher_c17"
             android:roundIcon="@mipmap/ic_launcher_c17"
             android:enabled="false"
@@ -281,7 +293,7 @@
         </activity-alias>
         <activity-alias
             android:name=".LauncherC18"
-            android:targetActivity=".MainActivity"
+            android:targetActivity=".LaunchActivity"
             android:icon="@mipmap/ic_launcher_c18"
             android:roundIcon="@mipmap/ic_launcher_c18"
             android:enabled="false"
@@ -293,7 +305,7 @@
         </activity-alias>
         <activity-alias
             android:name=".LauncherC19"
-            android:targetActivity=".MainActivity"
+            android:targetActivity=".LaunchActivity"
             android:icon="@mipmap/ic_launcher_c19"
             android:roundIcon="@mipmap/ic_launcher_c19"
             android:enabled="false"
