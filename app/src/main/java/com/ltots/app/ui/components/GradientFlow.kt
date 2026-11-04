@@ -7,7 +7,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -161,27 +166,77 @@ object GradientFlow {
 }
 
 /**
- * Draws the Gradient flow light for [artwork] round a cover of side [coverSidePx] centred in this
- * area (the light reaches past the area's edges). [into]: your colour on AMOLED, else null.
+ * Draws the Gradient flow light for [artwork] round a cover of side [coverFraction] of this
+ * area's width, centred in it (the light reaches past the area's edges). [into]: your colour on
+ * AMOLED, else null.
+ *
+ * [reachDown]: how far the light reaches below the cover compared with its other sides (the part
+ * of the light under the cover is stretched downwards). [scale]: the cover's size right now (it
+ * moves with the beat), read while drawing. On the Playing tab the light also fades into black
+ * at the top of the screen ([TopFade]): a still mask fixed to the screen, not to the light, so
+ * the light pumps under it while the fade stays where it is.
  */
 @Composable
-fun GradientFlowLight(artwork: Bitmap?, coverFraction: Float, into: Int?, modifier: Modifier = Modifier) {
+fun GradientFlowLight(
+    artwork: Bitmap?,
+    coverFraction: Float,
+    into: Int?,
+    modifier: Modifier = Modifier,
+    reachDown: Float = 1f,
+    scale: () -> Float = { 1f },
+) {
     val map by produceState<Bitmap?>(null, artwork, into) {
         value = if (artwork == null) null else withContext(Dispatchers.Default) {
             runCatching { GradientFlow.lightMap(GradientFlow.edges(artwork), into) }.getOrNull()
         }
     }
     val img = map?.asImageBitmap() ?: return
-    Canvas(modifier) {
-        val cover = size.width * coverFraction
-        val full = cover * (1 + 2 * GradientFlow.REACH)
+    val cfg = com.ltots.app.ui.theme.LocalThemeConfig.current
+    val fade = com.ltots.app.ui.TopFade.on(cfg)
+    val screenHeight = androidx.compose.ui.platform.LocalWindowInfo.current.containerSize.height.toFloat()
+    // Where this area is on the screen (it scrolls with the page), read while drawing.
+    val windowY = androidx.compose.runtime.remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    // The map row at the cover's bottom edge: everything below it is stretched by [reachDown].
+    val n = img.height
+    val splitRow = (n * (1 + GradientFlow.REACH) / (1 + 2 * GradientFlow.REACH)).roundToInt().coerceIn(1, n - 1)
+    Canvas(modifier.then(if (fade) Modifier.onGloballyPositioned { windowY.floatValue = it.positionInWindow().y } else Modifier)) {
+        val s = scale()
+        val cover = size.width * coverFraction * s
+        val reach = cover * GradientFlow.REACH
         val c = Offset(size.width / 2, size.height / 2)
-        drawImage(
-            img,
-            srcOffset = IntOffset.Zero, srcSize = IntSize(img.width, img.height),
-            dstOffset = IntOffset((c.x - full / 2).roundToInt(), (c.y - full / 2).roundToInt()),
-            dstSize = IntSize(full.roundToInt(), full.roundToInt()),
-            filterQuality = FilterQuality.High,
-        )
+        val left = c.x - cover / 2 - reach
+        val right = c.x + cover / 2 + reach
+        val top = c.y - cover / 2 - reach
+        val coverBottom = c.y + cover / 2
+        val bottom = coverBottom + reach * reachDown.coerceAtLeast(1f)
+        val w = (right - left).roundToInt()
+        fun light() {
+            // Above and beside the cover, and under it, as is.
+            drawImage(
+                img, srcOffset = IntOffset.Zero, srcSize = IntSize(img.width, splitRow),
+                dstOffset = IntOffset(left.roundToInt(), top.roundToInt()),
+                dstSize = IntSize(w, (coverBottom - top).roundToInt()),
+                filterQuality = FilterQuality.High,
+            )
+            // Below the cover, stretched to reach further down.
+            drawImage(
+                img, srcOffset = IntOffset(0, splitRow), srcSize = IntSize(img.width, n - splitRow),
+                dstOffset = IntOffset(left.roundToInt(), coverBottom.roundToInt()),
+                dstSize = IntSize(w, (bottom - coverBottom).roundToInt()),
+                filterQuality = FilterQuality.High,
+            )
+        }
+        if (!fade) { light(); return@Canvas }
+        // Drawn on its own layer (as big as the light), then the fade cuts it away at the top.
+        val bounds = androidx.compose.ui.geometry.Rect(left, top, right, bottom)
+        drawIntoCanvas { canvas ->
+            canvas.saveLayer(bounds, Paint())
+            light()
+            drawRect(
+                com.ltots.app.ui.TopFade.mask(cfg, -windowY.floatValue, if (screenHeight > 0f) screenHeight else size.height * 2f),
+                topLeft = bounds.topLeft, size = bounds.size, blendMode = BlendMode.DstIn,
+            )
+            canvas.restore()
+        }
     }
 }

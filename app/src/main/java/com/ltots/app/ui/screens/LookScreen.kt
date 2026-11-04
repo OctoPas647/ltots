@@ -330,6 +330,39 @@ fun LookScreen(artwork: android.graphics.Bitmap? = null) {
                         else -> "Lights the screen round the cover in the colours of its edges, like a TV's backlight, fading out into the background."
                     },
                 )
+                LabeledSlider(
+                    "Light reaches down", cfg.glowReachDown, { v -> set { it.copy(glowReachDown = v) } }, 1f..4f,
+                    "%.1f×".format(Locale.ROOT, cfg.glowReachDown), enabled = cfg.gradientFlow && !cfg.iconMode,
+                    onReset = { set { it.copy(glowReachDown = 2f) } }, isDefault = kotlin.math.abs(cfg.glowReachDown - 2f) < 0.01f,
+                )
+                Text(
+                    "How far the Gradient flow light reaches below the cover, compared with above and beside it (1× = the same all round).",
+                    color = LocalPalette.current.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 6.dp),
+                )
+                SwitchRow(
+                    "Top fade", cfg.playingTopFade, { on -> set { it.copy(playingTopFade = on) } },
+                    sub = "On the Playing tab, the album-art background and the Gradient flow light fade into black towards the top of the screen. " +
+                        "It's fixed to the screen, so it stays still while the cover moves with the beat.",
+                )
+                if (cfg.playingTopFade) {
+                    LabeledSlider(
+                        "Fade starts", cfg.topFadeStart, { v -> set { it.copy(topFadeStart = v) } }, 0f..0.5f, pct(cfg.topFadeStart) + " down",
+                        onReset = { set { it.copy(topFadeStart = 0f) } }, isDefault = cfg.topFadeStart < 0.005f,
+                    )
+                    LabeledSlider(
+                        "Fade length", cfg.topFadeLength, { v -> set { it.copy(topFadeLength = v) } }, 0.05f..0.8f, pct(cfg.topFadeLength) + " of the screen",
+                        onReset = { set { it.copy(topFadeLength = 0.35f) } }, isDefault = kotlin.math.abs(cfg.topFadeLength - 0.35f) < 0.005f,
+                    )
+                    LabeledSlider(
+                        "Darkness", cfg.topFadeDarkness, { v -> set { it.copy(topFadeDarkness = v) } }, 0f..1f,
+                        if (cfg.topFadeDarkness > 0.995f) "Black" else pct(cfg.topFadeDarkness),
+                        onReset = { set { it.copy(topFadeDarkness = 1f) } }, isDefault = cfg.topFadeDarkness > 0.995f,
+                    )
+                    Text(
+                        "Fade starts: how far down from the top it stays fully dark. Fade length: how soft the blend into the colours is. Darkness: black, or only dimmed.",
+                        color = LocalPalette.current.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 6.dp),
+                    )
+                }
                 Spacer(Modifier.height(6.dp))
                 Text("Style", color = LocalPalette.current.textDim, style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.height(6.dp))

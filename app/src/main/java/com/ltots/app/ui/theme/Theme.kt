@@ -236,6 +236,11 @@ object ThemeState {
         libraryStatusBar = cur.libraryStatusBar,
         scrollbarShow = cur.scrollbarShow,
         scrollbarFullHeight = cur.scrollbarFullHeight,
+        playingTopFade = cur.playingTopFade,
+        topFadeStart = cur.topFadeStart,
+        topFadeLength = cur.topFadeLength,
+        topFadeDarkness = cur.topFadeDarkness,
+        glowReachDown = cur.glowReachDown,
     )
 
     fun update(transform: (ThemeConfig) -> ThemeConfig) {

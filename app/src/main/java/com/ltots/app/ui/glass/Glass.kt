@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.key
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -304,6 +305,16 @@ fun AppBackground(artwork: Bitmap?, modifier: Modifier = Modifier) {
                 )
             )
         )
+        // Playing tab: the top fades into black (Look > Visualizer > Top fade). Fixed to the
+        // screen while the colours and the album art drift under it; it fades in and out with
+        // the tab. The glass panels refract this too, so they darken with it.
+        val fadeShown by com.ltots.app.ui.TopFade.active.collectAsState()
+        val fade by androidx.compose.animation.core.animateFloatAsState(
+            if (fadeShown && com.ltots.app.ui.TopFade.on(cfg)) 1f else 0f, androidx.compose.animation.core.tween(350), label = "topFade",
+        )
+        if (fade > 0.001f) Canvas(Modifier.fillMaxSize()) {
+            drawRect(com.ltots.app.ui.TopFade.overlay(cfg, 0f, size.height, fade))
+        }
     }
 }
 

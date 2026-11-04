@@ -51,6 +51,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
@@ -109,13 +110,22 @@ fun NowPlayingScreen(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = topInset()).padding(horizontal = PAGE_PAD),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        // Output chip, with the history on the right
-        Box(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 14.dp)) {
-            IconButton(onClick = { onShowHistory(true) }, Modifier.align(Alignment.CenterEnd)) {
-                Icon(Icons.Rounded.History, "History", tint = pal.textDim)
+        // The top fades into black on this tab (Look > Visualizer > Top fade).
+        com.ltots.app.ui.TopFade.WhileShown()
+
+        // Output chip, with the history on the right: a glass circle as tall as the chip, on the
+        // same line (both centred on it).
+        var chipHeight by remember { mutableStateOf(36.dp) }
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        Box(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 14.dp), contentAlignment = Alignment.Center) {
+            com.ltots.app.ui.glass.GlassCircleButton({ onShowHistory(true) }, Modifier.align(Alignment.CenterEnd).size(chipHeight)) {
+                Icon(Icons.Rounded.History, "History", tint = pal.text, modifier = Modifier.size(chipHeight * 0.56f))
             }
-        Row(Modifier.fillMaxWidth().padding(horizontal = 48.dp), horizontalArrangement = Arrangement.Center) {
-            GlassPanel(shape = RoundedCornerShape(50), strength = 0.7f) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 48.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+            GlassPanel(
+                Modifier.onSizeChanged { with(density) { chipHeight = it.height.toDp() } },
+                shape = RoundedCornerShape(50), strength = 0.7f,
+            ) {
                 Row(
                     Modifier.clip(RoundedCornerShape(50)).clickable(onClick = onOpenSound).padding(horizontal = 14.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -263,7 +273,16 @@ private fun CoverWithSpectrum(visual: com.ltots.app.ui.components.LiveVisual, ar
         // backlight. On AMOLED it melts into your own colour, elsewhere it fades out.
         if (lookCfg.gradientFlow && artwork != null) {
             val into = if (lookCfg.pureBlack && !lookCfg.dynamicColors) pal.accent.toArgb() else null
-            com.ltots.app.ui.components.GradientFlowLight(artwork, coverFraction, into, Modifier.matchParentSize().then(beatScale))
+            // It moves with the beat by itself (not as a layer), so the top fade over it stays still.
+            com.ltots.app.ui.components.GradientFlowLight(
+                artwork, coverFraction, into, Modifier.matchParentSize(), reachDown = lookCfg.glowReachDown,
+                scale = {
+                    if (!beatOn) 1f else {
+                        @Suppress("UNUSED_VARIABLE") val t = visual.tick
+                        1f + beatAmount * kotlin.math.sqrt(visual.beat)
+                    }
+                },
+            )
         }
         if (wrap) CoverSpectrum(visual, coverFraction, coverCorner, Modifier.fillMaxSize().then(beatScale), intensity = 0.9f)
         else LiveSpectrum(

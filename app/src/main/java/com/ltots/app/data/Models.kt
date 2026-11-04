@@ -261,6 +261,19 @@ data class ThemeConfig(
     val scrollbarShow: ScrollbarShow = ScrollbarShow.SCROLLING,
     /** The slider runs down behind the mini player and nav bar; off: it ends just above them. */
     val scrollbarFullHeight: Boolean = false,
+    /**
+     * Playing tab: the album-art background and the Gradient flow light fade into black towards
+     * the top of the screen. A still gradient fixed to the screen: it doesn't move with the cover.
+     */
+    val playingTopFade: Boolean = true,
+    /** How far down from the top the fade is fully dark, as a share of the screen's height. */
+    val topFadeStart: Float = 0f,
+    /** How long the blend from dark to the full colours is, as a share of the screen's height. */
+    val topFadeLength: Float = 0.35f,
+    /** How dark the top gets: 1 = black, less = only dimmed. */
+    val topFadeDarkness: Float = 1f,
+    /** How far the Gradient flow light reaches below the cover, compared with its other sides (1 = the same). */
+    val glowReachDown: Float = 2f,
 )
 
 data class AppSettings(
@@ -379,6 +392,8 @@ object Json {
         put("beat", t.coverBeat); put("beatK", t.beatStrength.toDouble()); put("beatSrc", t.beatSource.name); t.coverBarsOpacity?.let { put("coverBars", it.toDouble()) }
         put("libGlass", t.libraryHeaderGlass)
         put("libStatus", t.libraryStatusBar); put("sbShow", t.scrollbarShow.name); put("sbFull", t.scrollbarFullHeight)
+        put("tFade", t.playingTopFade); put("tFadeS", t.topFadeStart.toDouble()); put("tFadeL", t.topFadeLength.toDouble())
+        put("tFadeD", t.topFadeDarkness.toDouble()); put("glowDown", t.glowReachDown.toDouble())
     }
 
     private fun hsvJson(h: Hsv) = JSONArray().put(h.h.toDouble()).put(h.s.toDouble()).put(h.v.toDouble())
@@ -446,6 +461,11 @@ object Json {
             libraryStatusBar = o.optBoolean("libStatus", d.libraryStatusBar),
             scrollbarShow = runCatching { ScrollbarShow.valueOf(o.optString("sbShow")) }.getOrDefault(d.scrollbarShow),
             scrollbarFullHeight = o.optBoolean("sbFull", d.scrollbarFullHeight),
+            playingTopFade = o.optBoolean("tFade", d.playingTopFade),
+            topFadeStart = o.optDouble("tFadeS", d.topFadeStart.toDouble()).toFloat().coerceIn(0f, 0.5f),
+            topFadeLength = o.optDouble("tFadeL", d.topFadeLength.toDouble()).toFloat().coerceIn(0.05f, 0.8f),
+            topFadeDarkness = o.optDouble("tFadeD", d.topFadeDarkness.toDouble()).toFloat().coerceIn(0f, 1f),
+            glowReachDown = o.optDouble("glowDown", d.glowReachDown.toDouble()).toFloat().coerceIn(1f, 4f),
         )
     }
 
