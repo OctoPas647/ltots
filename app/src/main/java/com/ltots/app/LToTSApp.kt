@@ -14,6 +14,8 @@ class LToTSApp : Application(), androidx.work.Configuration.Provider {
     override fun onCreate() {
         super.onCreate()
         Store.init(this)
+        com.ltots.app.ui.components.NetImages.init(this)
+        com.ltots.app.recs.SongPreview.init(this)
         val pkg = packageManager.getPackageInfo(packageName, 0)
         ThemeState.init(freshInstall = pkg.firstInstallTime == pkg.lastUpdateTime)
         com.ltots.app.data.EqProfiles.load()

@@ -113,10 +113,22 @@ fun rememberPlayerUi(controller: MediaController?): PlayerUi {
 @Composable
 fun rememberArtwork(trackId: Long, embedded: ByteArray?, px: Int = 768): Bitmap? {
     val context = LocalContext.current
-    val state = produceState<Bitmap?>(null, trackId, embedded) {
-        value = loadArtwork(context, trackId, embedded, px)
+    // In memory already (the next song's cover is fetched ahead, see [prefetchArtwork]): shown in
+    // the same frame as the song change. Otherwise the last cover stays until the new one is
+    // ready, instead of the page flashing empty.
+    val state = produceState(if (trackId >= 0) LocalLibrary.peekArtwork(trackId, px) else null, trackId, embedded) {
+        val cached = if (trackId >= 0) LocalLibrary.peekArtwork(trackId, px) else null
+        value = cached ?: loadArtwork(context, trackId, embedded, px)
     }
     return state.value
+}
+
+/** Loads the cover of the song after [controller]'s current one, so it's ready when it starts. */
+suspend fun prefetchArtwork(context: Context, controller: androidx.media3.common.Player?, px: Int = 768) {
+    val c = controller ?: return
+    val next = c.nextMediaItemIndex.takeIf { it != androidx.media3.common.C.INDEX_UNSET } ?: return
+    val id = runCatching { c.getMediaItemAt(next).mediaMetadata.extras?.getLong("trackId", -1L) }.getOrNull() ?: -1L
+    if (id >= 0) LocalLibrary.artwork(context, id, px)
 }
 
 suspend fun loadArtwork(context: Context, trackId: Long, embedded: ByteArray?, px: Int): Bitmap? {

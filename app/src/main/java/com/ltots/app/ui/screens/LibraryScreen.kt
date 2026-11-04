@@ -337,8 +337,10 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenHistory: () 
                     SongSort.RANDOM -> null
                 },
             )
-            view == LibView.MIXES -> MixGrid(remember(filtered, moods) { Mixes.build(filtered, moods, com.ltots.app.moods.MoodIndex.text(context)) }, bottom) { m ->
-                openGroup = Group(m.title, "${m.kind.label} · ${m.subtitle}", m.tracks)
+            view == LibView.MIXES -> {
+                // Built off the main thread (see Mixes.buildAsync); shown at once when it's known.
+                val mixes by produceState(Mixes.peek(filtered, moods), filtered, moods) { value = Mixes.buildAsync(context, filtered, moods) }
+                mixes?.let { MixGrid(it, bottom) { m -> openGroup = Group(m.title, "${m.kind.label} · ${m.subtitle}", m.tracks) } }
             }
             view == LibView.ALBUMS -> AlbumGrid(
                 remember(filtered) {
@@ -506,7 +508,7 @@ private fun TrackRow(t: Track, playing: Boolean, note: String? = null, onClick: 
 private fun Thumb(trackId: Long, sizeDp: Int) {
     val context = LocalContext.current
     val pal = LocalPalette.current
-    val bmp by produceState<android.graphics.Bitmap?>(null, trackId) { value = LocalLibrary.artwork(context, trackId, 192) }
+    val bmp by produceState(LocalLibrary.peekArtwork(trackId, 192), trackId) { value = LocalLibrary.peekArtwork(trackId, 192) ?: LocalLibrary.artwork(context, trackId, 192) }
     Box(
         Modifier.size(sizeDp.dp).clip(RoundedCornerShape(10.dp)).background(pal.text.copy(alpha = 0.08f)),
         contentAlignment = Alignment.Center,
@@ -594,7 +596,7 @@ private fun MixGridBody(mixes: List<Mix>, bottom: Dp, onOpen: (Mix) -> Unit) {
 private fun BigThumb(trackId: Long) {
     val context = LocalContext.current
     val pal = LocalPalette.current
-    val bmp by produceState<android.graphics.Bitmap?>(null, trackId) { value = LocalLibrary.artwork(context, trackId, 384) }
+    val bmp by produceState(LocalLibrary.peekArtwork(trackId, 384), trackId) { value = LocalLibrary.peekArtwork(trackId, 384) ?: LocalLibrary.artwork(context, trackId, 384) }
     Box(Modifier.fillMaxSize().clip(RoundedCornerShape(14.dp)).background(pal.text.copy(alpha = 0.08f)), contentAlignment = Alignment.Center) {
         val b = bmp
         if (b != null) Image(remember(b) { b.asImageBitmap() }, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)

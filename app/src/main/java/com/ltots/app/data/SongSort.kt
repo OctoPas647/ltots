@@ -59,7 +59,11 @@ object SongSorter {
     // ---- genre -----------------------------------------------------------------------------
 
     /** The genre as written in the file, tidied; null when the file has none. */
-    fun genreName(raw: String?): String? {
+    fun genreName(raw: String?): String? = genreMemo.getOrPut(raw ?: "") { java.util.Optional.ofNullable(genreNameOf(raw)) }.orElse(null)
+
+    private val genreMemo = java.util.concurrent.ConcurrentHashMap<String, java.util.Optional<String>>()
+
+    private fun genreNameOf(raw: String?): String? {
         val g = raw?.trim()?.takeIf { it.isNotEmpty() && it != Track.UNKNOWN } ?: return null
         // Old ID3 tags store a number like "(17)" or "17" (Rock); "(17)Rock" keeps the name.
         val num = Regex("^\\(?(\\d{1,3})\\)?(.*)$").find(g)
@@ -111,7 +115,12 @@ object SongSorter {
      * the name wins, ignoring keywords inside longer ones ("pop-folk" is its own genre, not
      * folk). Database names like "Hip-Hop/Rap" or "R&B/Soul" work the same way.
      */
-    fun familyIndex(raw: String?): Int {
+    fun familyIndex(raw: String?): Int = familyMemo.getOrPut(raw ?: "") { familyIndexOf(raw) }
+
+    /** Sorting a big library compares each genre thousands of times; the answer never changes. */
+    private val familyMemo = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
+    private fun familyIndexOf(raw: String?): Int {
         val g = genreName(raw)?.lowercase(Locale.ROOT) ?: return FAMILIES.size + 1
         // Every keyword found: (start, end, family).
         val hits = ArrayList<Triple<Int, Int, Int>>()

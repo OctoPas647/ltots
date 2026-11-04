@@ -121,7 +121,10 @@ fun HomeScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenGet: () -> Unit
     val history by ListenHistory.items.collectAsState()
     LaunchedEffect(Unit) {
         YtmAccount.load(); ListenHistory.ensureLoaded()
-        // Download buttons are on this page: get the download engine ready ahead of the first tap.
+        // Download buttons are on this page: get the download engine ready ahead of the first tap,
+        // but only once the page has settled (unpacking it right at start-up held up the first
+        // screens; a tap before then readies it by itself).
+        kotlinx.coroutines.delay(4_000)
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.ltots.app.download.Engine.ensureReady() }
     }
     LaunchedEffect(account) { Recommender.load(context) }
@@ -149,11 +152,15 @@ fun HomeScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenGet: () -> Unit
     LaunchedEffect(preview.error) { preview.error?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show(); SongPreview.clearError() } }
 
     // The phone's songs, for the parts that play straight away.
-    val library by produceState(LocalLibrary.cachedSongs() ?: emptyList()) {
+    val library by produceState(emptyList<Track>()) {
+        // The phone's songs as last seen at once (read off the main thread), then fresh.
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { LocalLibrary.cachedSongs() }?.let { value = it }
         if (com.ltots.app.prep.LibraryPrep.hasAudioPermission(context)) value = LocalLibrary.loadSongs(context)
     }
     val moods by com.ltots.app.moods.MoodIndex.embeddings.collectAsState()
-    val mixes = remember(library, moods) { Mixes.build(library, moods, com.ltots.app.moods.MoodIndex.text(context)).take(10) }
+    val mixes by produceState(Mixes.peek(library, moods)?.take(10) ?: emptyList(), library, moods) {
+        value = Mixes.buildAsync(context, library, moods).take(10)
+    }
     val local = remember(history, library) { localPicks(history, library) }
 
     var mood by rememberSaveable { mutableStateOf<String?>(null) }
@@ -711,7 +718,7 @@ private fun RadioCarousel(radios: List<com.ltots.app.recs.Radio>, onOpen: (com.l
 private fun LocalArt(trackId: Long, size: Dp, shape: androidx.compose.ui.graphics.Shape) {
     val context = LocalContext.current
     val pal = LocalPalette.current
-    val bmp by produceState<android.graphics.Bitmap?>(null, trackId) { value = LocalLibrary.artwork(context, trackId, 256) }
+    val bmp by produceState(LocalLibrary.peekArtwork(trackId, 256), trackId) { value = LocalLibrary.peekArtwork(trackId, 256) ?: LocalLibrary.artwork(context, trackId, 256) }
     Box(Modifier.size(size).clip(shape).background(pal.text.copy(alpha = 0.08f)), contentAlignment = Alignment.Center) {
         val b = bmp
         if (b != null) Image(remember(b) { b.asImageBitmap() }, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)

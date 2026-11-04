@@ -12,6 +12,8 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.withPermit
 import java.util.Locale
 
 data class Track(
@@ -244,16 +246,42 @@ object LocalLibrary {
      * quick to draw) and the player gets a sharp large one, instead of whichever size happened
      * to be loaded first. Returns null if the file has none.
      */
+    /**
+     * The cover if it's already in memory at [px] or bigger (a bigger one draws fine scaled
+     * down): to show it in the first frame instead of a placeholder that then flips.
+     */
+    fun peekArtwork(trackId: Long, px: Int): Bitmap? {
+        artCache.get("$trackId@$px")?.let { return it }
+        val bigger = synchronized(sizes) { sizes[trackId] }?.filter { it >= px }?.minOrNull() ?: return null
+        return artCache.get("$trackId@$bigger")
+    }
+    /** The sizes cached for each track. */
+    private val sizes = HashMap<Long, MutableSet<Int>>()
+
     suspend fun artwork(context: Context, trackId: Long, px: Int = 512): Bitmap? = withContext(Dispatchers.IO) {
-        val key = "$trackId@$px"
-        artCache.get(key)?.let { return@withContext it }
+        peekArtwork(trackId, px)?.let { return@withContext it }
         if (synchronized(noArt) { trackId in noArt }) return@withContext null
+        // A few covers at a time: flinging through the library used to start a decode for every
+        // row that flew past (dozens at once), which stuttered the scroll and cost battery. A
+        // row that's gone by the time its turn comes is skipped.
+        decodeGate.withPermit {
+            kotlin.coroutines.coroutineContext.ensureActive()
+            peekArtwork(trackId, px)?.let { return@withPermit it }
+            decodeArtwork(context, trackId, px)
+        }
+    }
+
+    private val decodeGate = kotlinx.coroutines.sync.Semaphore(4)
+
+    private fun decodeArtwork(context: Context, trackId: Long, px: Int): Bitmap? {
+        val key = "$trackId@$px"
         val uri = ContentUris.withAppendedId(MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL), trackId)
         val bmp = runCatching { context.contentResolver.loadThumbnail(uri, Size(px, px), null) }.getOrNull()
         if (bmp != null) {
             bmp.prepareToDraw() // upload to the graphics chip now, not on the first frame that shows it
             artCache.put(key, bmp)
+            synchronized(sizes) { sizes.getOrPut(trackId) { HashSet() } += px }
         } else synchronized(noArt) { noArt += trackId }
-        bmp
+        return bmp
     }
 }

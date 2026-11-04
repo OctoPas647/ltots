@@ -33,6 +33,31 @@ data class Mix(
 object Mixes {
     const val MIN_SONGS = 3
 
+    /** The last few results, so opening Home or the Library again shows the mixes at once. */
+    private val recent = object : LinkedHashMap<String, List<Mix>>(4, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<Mix>>?) = size > 4
+    }
+
+    private fun key(tracks: List<Track>, moods: Map<String, FloatArray>): String {
+        var h = 17L
+        for (t in tracks) h = h * 31 + t.id * 7 + (t.genre?.hashCode() ?: 0)
+        return "${tracks.size}:$h:${moods.size}"
+    }
+
+    /** Already-built mixes for these songs, if there are any (no work on the calling thread). */
+    fun peek(tracks: List<Track>, moods: Map<String, FloatArray>): List<Mix>? = synchronized(recent) { recent[key(tracks, moods)] }
+
+    /**
+     * [build] off the main thread (the AI albums compare every song with every mood): it used to
+     * run while Home and the Library were opening, and held them up.
+     */
+    suspend fun buildAsync(context: android.content.Context, tracks: List<Track>, moods: Map<String, FloatArray>): List<Mix> =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            val k = key(tracks, moods)
+            synchronized(recent) { recent[k] }?.let { return@withContext it }
+            build(tracks, moods, if (moods.isEmpty()) null else com.ltots.app.moods.MoodIndex.text(context)).also { synchronized(recent) { recent[k] = it } }
+        }
+
     fun build(
         tracks: List<Track>,
         moods: Map<String, FloatArray> = emptyMap(),

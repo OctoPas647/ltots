@@ -125,6 +125,9 @@ fun AppRoot() {
     // The listening history on the Playing tab (it shows there anyway when nothing plays).
     var historyOpen by rememberSaveable { mutableStateOf(false) }
     val artwork = rememberArtwork(player.trackId, player.artworkData)
+    // The next song's cover, fetched ahead so it shows the moment that song starts.
+    val appContext = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(player.trackId) { runCatching { com.ltots.app.ui.prefetchArtwork(appContext, player.controller) } }
     val backdrop = rememberLayerBackdrop()
     // The page itself (background + the open tab): the floating bars at the bottom bend and blur
     // it as it scrolls under them, like liquid glass on iOS.
