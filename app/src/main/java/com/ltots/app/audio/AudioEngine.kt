@@ -176,7 +176,14 @@ object AudioEngine : SoundSource {
                 enableAudioOutputPlaybackParams: Boolean,
             ): AudioSink = buildSink(context, chain)
         }
-        val p = ExoPlayer.Builder(context, renderers)
+        // Exact seeking: MP3s without a seek table (most VBR files) were seeked by an estimate, so
+        // tapping a lyrics line (or the seek bar) landed a little off and the lyrics looked out
+        // of step from there on. Index seeking finds the exact spot; files without a header that
+        // says otherwise are treated as constant bitrate so long files still seek fast.
+        val extractors = androidx.media3.extractor.DefaultExtractorsFactory()
+            .setMp3ExtractorFlags(androidx.media3.extractor.mp3.Mp3Extractor.FLAG_ENABLE_INDEX_SEEKING)
+            .setConstantBitrateSeekingEnabled(true)
+        val p = ExoPlayer.Builder(context, renderers, androidx.media3.exoplayer.source.DefaultMediaSourceFactory(context, extractors))
             .setAudioAttributes(attributes, /* handleAudioFocus = */ true)
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_LOCAL)

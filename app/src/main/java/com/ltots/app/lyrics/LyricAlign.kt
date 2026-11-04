@@ -20,6 +20,25 @@ object LyricAlign {
     /** [anchors]: the lines whose time was really heard (the rest are placed between them). */
     data class Result(val lines: List<LyricLine>, val coverage: Double, val anchors: List<Int> = emptyList())
 
+    /**
+     * The largest set of anchored lines (by index) whose times rise with the lines, at least
+     * 0.3 s per line apart: longest increasing subsequence, O(n²) over a song's few dozen lines.
+     */
+    internal fun consistent(lineTime: LongArray): Set<Int> {
+        val idx = lineTime.indices.filter { lineTime[it] >= 0 }
+        if (idx.isEmpty()) return emptySet()
+        val best = IntArray(idx.size) { 1 }
+        val prev = IntArray(idx.size) { -1 }
+        for (b in idx.indices) for (a in 0 until b) {
+            val ok = lineTime[idx[b]] - lineTime[idx[a]] >= 300L * (idx[b] - idx[a])
+            if (ok && best[a] + 1 > best[b]) { best[b] = best[a] + 1; prev[b] = a }
+        }
+        var at = best.indices.maxBy { best[it] }
+        val out = HashSet<Int>()
+        while (at >= 0) { out += idx[at]; at = prev[at] }
+        return out
+    }
+
     /** Lower case letters and digits only: "Don't" → "dont", "AK-50" → "ak", "50". */
     fun words(text: String): List<String> =
         text.lowercase(Locale.ROOT).replace("'", "").replace("’", "")
@@ -88,19 +107,30 @@ object LyricAlign {
             }
         }
 
-        // A line starts where its first matched word was heard, moved back for the words before it.
+        // A line starts where its first matched word was heard, moved back for the words before
+        // it. Only trusted with enough to go on: two of its words heard, or one long word, or a
+        // short line (in a longer line, one short word like "you" or "the" turns up everywhere
+        // and could be from another line).
         val wordMs = hw.map { it.endMs - it.startMs }.sorted().let { it[it.size / 2] }.coerceIn(150L, 700L)
         val lineTime = LongArray(lineTexts.size) { -1L }
+        val matchedIn = IntArray(lineTexts.size)
+        val longIn = BooleanArray(lineTexts.size)
         for (w in 0 until n) {
+            if (wordTime[w] < 0) continue
             val li = lineOf[w]
-            if (wordTime[w] >= 0 && lineTime[li] < 0) lineTime[li] = max(0L, wordTime[w] - posInLine[w] * wordMs)
+            matchedIn[li]++
+            if (lw[w].length >= 5) longIn[li] = true
+            if (lineTime[li] < 0) lineTime[li] = max(0L, wordTime[w] - posInLine[w] * wordMs)
         }
-        // Keep the anchors in order: one that jumps back behind an earlier line is dropped.
-        var last = -1L
-        for (li in lineTime.indices) {
-            if (lineTime[li] < 0) continue
-            if (lineTime[li] <= last) lineTime[li] = -1L else last = lineTime[li]
-        }
+        // (A short line like "Big russian gun" may only ever have one word heard: that's enough.)
+        val lineWords = IntArray(lineTexts.size).also { c -> lineOf.forEach { c[it]++ } }
+        for (li in lineTime.indices) if (lineTime[li] >= 0 && matchedIn[li] < 2 && !longIn[li] && lineWords[li] > 3) lineTime[li] = -1L
+
+        // Keep the anchors that agree with each other: the most lines that are in order and not
+        // squeezed impossibly close (a line needs at least ~0.3 s per line between). A single
+        // misheard line placed far ahead used to throw out every good line after it.
+        val kept = consistent(lineTime)
+        for (li in lineTime.indices) if (li !in kept) lineTime[li] = -1L
         val anchored = lineTime.count { it >= 0 }
         val coverage = anchored.toDouble() / lineTexts.size
         if (anchored == 0 || coverage < MIN_COVERAGE) return null

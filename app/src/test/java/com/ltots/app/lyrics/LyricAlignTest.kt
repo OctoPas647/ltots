@@ -69,4 +69,21 @@ class LyricAlignTest {
     @Test fun vocabularyIsTheLyricsWords() {
         assertEquals(listOf("dont", "stop", "ak", "50"), LyricAlign.vocabulary("Don't stop\nAK-50 don't"))
     }
+
+    @Test fun oneBadLineDoesNotKnockOutTheGoodOnesAfterIt() {
+        // Line 2's words are heard (by mistake) far ahead, at 45 s: the old filter then dropped
+        // every good line until 45 s. Now the bad one is dropped and the rest keep their times.
+        val words = heard(noise = false).filterNot { LyricAlign.words("A month ago when").contains(it.word) } +
+            LyricAlign.words("A month ago when").mapIndexed { k, w -> HeardWord(w, 45_000L + k * 350, 45_300L + k * 350) }
+        val r = LyricAlign.align(plain, words.sortedBy { it.startMs }, 60_000)!!
+        assertTrue("good lines after the bad one keep their own times: ${r.lines.map { it.timeMs }}",
+            close(truth.drop(3), r.lines.drop(3), 800))
+    }
+
+    @Test fun consistentKeepsTheLargestAgreeingSet() {
+        val t = longArrayOf(1_000, 4_000, 30_000, 7_000, 10_000, 13_000, -1, 18_000)
+        val kept = LyricAlign.consistent(t)
+        assertTrue(2 !in kept)
+        assertTrue(listOf(0, 1, 3, 4, 5, 7).all { it in kept })
+    }
 }

@@ -150,7 +150,7 @@ object LyricsMatch {
         if (synced == null || t == null) {
             return doc.copy(matchedAs = asWhat, note = "AI recognised the song from its sound")
         }
-        val mapped = mapLines(synced, wholeSong(t, doc.recordSec, fileSec), fileSec)
+        val mapped = mapLines(synced, wholeSong(snapToNormalSpeed(t, moments), doc.recordSec, fileSec), fileSec)
         val speedNote = if (abs(t.rate - 1) > 0.02) " · this version plays at %.2f×".format(t.rate) else ""
         return doc.copy(
             synced = mapped.takeIf { it.size >= 2 },
@@ -186,6 +186,19 @@ object LyricsMatch {
     }
 
     /**
+     * A file at the record's own speed runs at exactly 1×: a fitted slope of 0.99 or 1.01 is only
+     * measuring noise, and stretching the lyrics by it makes them drift further off as the song
+     * goes on (a second or more by the end). So a slope within 3 % of 1 becomes exactly 1, with
+     * the offset the moments agree on most (their median).
+     */
+    internal fun snapToNormalSpeed(t: Timing, moments: List<Moment>): Timing {
+        if (abs(t.rate - 1.0) > 0.03) return t
+        val offsets = moments.mapNotNull { m -> m.songSec?.let { it - m.fileSec } }.sorted()
+        if (offsets.isEmpty()) return Timing(1.0, t.intercept)
+        return Timing(1.0, offsets[offsets.size / 2])
+    }
+
+    /**
      * Shazam's moments are measured against Shazam's own copy of the record, which can start a
      * little earlier or later than the copy the lyrics were timed to (a different release, more
      * silence before the music) — that's what made AI lyrics run slightly late. When this file
@@ -194,6 +207,13 @@ object LyricsMatch {
      */
     internal fun wholeSong(t: Timing, recordSec: Double?, fileSec: Double): Timing {
         if (recordSec == null || recordSec <= 0 || fileSec <= 0) return t
+        // At normal speed the lengths don't say anything about speed (a longer outro or a bit of
+        // silence would otherwise stretch every line and the lyrics drift): the rate stays 1, and
+        // the start is the record's only when the file is the same length (the whole song).
+        if (abs(t.rate - 1.0) <= 0.03) {
+            val sameLength = abs(recordSec - fileSec) <= 2.0
+            return Timing(1.0, if (sameLength && abs(t.intercept) <= 6.0) 0.0 else t.intercept)
+        }
         val rate = recordSec / fileSec
         val sameSpeed = abs(rate - t.rate) <= 0.03 * t.rate
         val startsTogether = abs(t.intercept) <= 6.0
@@ -211,9 +231,44 @@ object LyricsMatch {
         onStatus("Checking the timing by listening for the words…")
         val texts = synced.filter { it.text.isNotBlank() }
         val heard = runCatching { com.ltots.app.lyrics.AiSync.hear(context, trackId, texts.joinToString("\n") { it.text }, durationMs) }.getOrNull() ?: return doc
-        val shift = shiftFrom(texts.map { it.timeMs }, heard.lines.map { it.timeMs }, heard.anchors) ?: return doc
+        val placed = texts.map { it.timeMs }
+        val heardTimes = heard.lines.map { it.timeMs }
+        // Lyrics that run slower or faster than the song (they drift): straighten them out.
+        driftFrom(placed, heardTimes, heard.anchors)?.let { (slope, offset) ->
+            return doc.copy(synced = synced.map { LyricLine((it.timeMs * slope + offset).toLong().coerceAtLeast(0L), it.text) })
+        }
+        val shift = shiftFrom(placed, heardTimes, heard.anchors) ?: return doc
         if (abs(shift) < 150) return doc
         return doc.copy(synced = synced.map { LyricLine((it.timeMs + shift).coerceAtLeast(0L), it.text) })
+    }
+
+    /**
+     * When the heard lines get steadily further from the placed ones through the song (the
+     * lyrics run at the wrong speed), the straight line placed → heard: (slope, offset in ms).
+     * Theil–Sen (the median of the slopes between pairs of lines), so a few misheard lines don't
+     * bend it. Null when there's no real drift, too few lines, or they don't agree.
+     */
+    internal fun driftFrom(placed: List<Long>, heard: List<Long>, anchors: List<Int>): Pair<Double, Double>? {
+        val pts = anchors.filter { it < placed.size && it < heard.size }.map { placed[it].toDouble() to heard[it].toDouble() }
+        if (pts.size < 8) return null
+        val span = pts.maxOf { it.first } - pts.minOf { it.first }
+        if (span < 60_000) return null // under a minute: a drift can't be told from noise
+        val slopes = ArrayList<Double>()
+        for (a in pts.indices) for (b in a + 1 until pts.size) {
+            val dx = pts[b].first - pts[a].first
+            if (dx > 15_000) slopes += (pts[b].second - pts[a].second) / dx
+        }
+        if (slopes.size < 10) return null
+        slopes.sort()
+        val slope = slopes[slopes.size / 2]
+        if (slope !in 0.9..1.1) return null
+        val offsets = pts.map { it.second - slope * it.first }.sorted()
+        val offset = offsets[offsets.size / 2]
+        // Worth it only if it changes the end of the song by over half a second.
+        if (abs((slope - 1.0) * pts.maxOf { it.first }) < 500) return null
+        // Most lines must sit on that line (within 0.7 s).
+        val agree = pts.count { abs(slope * it.first + offset - it.second) <= 700 }
+        return if (agree >= 0.6 * pts.size) slope to offset else null
     }
 
     /**
