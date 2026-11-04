@@ -310,6 +310,8 @@ data class AppSettings(
     val onlyHits: Boolean = false,
     /** Only the songs the user plays most. With [onlyHits] too, a song needs to be either. */
     val onlyMostPlayed: Boolean = false,
+    /** Home tab: the country for trending songs, popular artists and charts ("ZZ" = worldwide). */
+    val chartsRegion: String = "ZZ",
 )
 
 /** Hand-written JSON (de)serialisation — no reflection, so it survives R8 untouched. */
@@ -482,6 +484,7 @@ object Json {
         put("hiddenArtists", JSONArray(s.hiddenArtists))
         put("onlyHits", s.onlyHits)
         put("onlyMostPlayed", s.onlyMostPlayed)
+        put("region", s.chartsRegion)
     }
 
     fun settings(o: JSONObject) = AppSettings(
@@ -500,5 +503,6 @@ object Json {
         hiddenArtists = o.optJSONArray("hiddenArtists")?.let { a -> List(a.length()) { a.getString(it) } } ?: emptyList(),
         onlyHits = o.optBoolean("onlyHits", false),
         onlyMostPlayed = o.optBoolean("onlyMostPlayed", false),
+        chartsRegion = o.optString("region", "ZZ").ifBlank { "ZZ" },
     )
 }

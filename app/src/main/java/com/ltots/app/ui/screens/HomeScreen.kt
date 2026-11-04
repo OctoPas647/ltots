@@ -125,6 +125,26 @@ fun HomeScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenGet: () -> Unit
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.ltots.app.download.Engine.ensureReady() }
     }
     LaunchedEffect(account) { Recommender.load(context) }
+    // Popular music (charts, new albums, radios) for the chosen country.
+    val settings by com.ltots.app.audio.AudioEngine.settings.collectAsState()
+    val discover by com.ltots.app.recs.Discover.feed.collectAsState()
+    LaunchedEffect(settings.chartsRegion, account) { com.ltots.app.recs.Discover.load(context) }
+    // The all-time numbers start with what's already in the history (once).
+    LaunchedEffect(history.isNotEmpty()) {
+        if (history.isNotEmpty()) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.ltots.app.data.ListenStats.backfill(history) }
+    }
+    val statsVersion by com.ltots.app.data.ListenStats.version.collectAsState()
+    var showStats by rememberSaveable { mutableStateOf(false) }
+    var wrappedYear by rememberSaveable { mutableStateOf<Int?>(null) }
+    var pickRegion by remember { mutableStateOf(false) }
+    // A radio opened from the Radios shelf: its songs replace the page, like a mood.
+    var radio by remember { mutableStateOf<com.ltots.app.recs.Radio?>(null) }
+    var radioSongs by remember { mutableStateOf<List<RecSong>?>(null) }
+    LaunchedEffect(radio) {
+        radioSongs = null
+        radio?.let { r -> radioSongs = runCatching { com.ltots.app.recs.Discover.radioSongs(r) }.getOrDefault(emptyList()) }
+    }
+    androidx.activity.compose.BackHandler(enabled = radio != null) { radio = null }
     LaunchedEffect(feed) { feed?.shelves?.firstOrNull()?.songs?.let { SongPreview.warmUp(it.map { r -> r.song }) } }
     LaunchedEffect(preview.error) { preview.error?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show(); SongPreview.clearError() } }
 
@@ -159,6 +179,12 @@ fun HomeScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenGet: () -> Unit
         lessOf = { a -> Recommender.lessOfArtist(a) },
     )
 
+    // Songs you've played most of all (all time, imports included), from the phone.
+    val most = remember(statsVersion, library) {
+        val byKey = library.associateBy { com.ltots.app.data.ListenStats.key(it.title, it.artist) }
+        com.ltots.app.data.ListenStats.summary(null).songs.mapNotNull { s -> byKey[s.key]?.let { it to s } }.take(15)
+    }
+
     Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = topInset() + 10.dp, bottom = bottomChrome() + if (preview.active) 76.dp else 0.dp)) {
             // Greeting, refresh, account
@@ -178,7 +204,7 @@ fun HomeScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenGet: () -> Unit
                         )
                     }
                     if (loading) CircularProgressIndicator(color = pal.accent, strokeWidth = 2.5.dp, modifier = Modifier.padding(10.dp).size(22.dp))
-                    else IconButton(onClick = { scope.launch { Recommender.load(context, force = true) } }) {
+                    else IconButton(onClick = { scope.launch { Recommender.load(context, force = true); com.ltots.app.recs.Discover.load(context, force = true) } }) {
                         Icon(Icons.Rounded.Refresh, "New picks", tint = pal.text)
                     }
                     AccountButton(account) {
@@ -190,8 +216,8 @@ fun HomeScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenGet: () -> Unit
             // Mood chips (YouTube Music)
             item("chips") {
                 LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 12.dp)) {
-                    item { Pill("For you", mood == null, { mood = null }) }
-                    items(MOODS) { m -> Pill(m, mood == m, { mood = if (mood == m) null else m }) }
+                    item { Pill("For you", mood == null && radio == null, { mood = null; radio = null }) }
+                    items(MOODS) { m -> Pill(m, mood == m, { radio = null; mood = if (mood == m) null else m }) }
                 }
             }
 
@@ -203,12 +229,27 @@ fun HomeScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenGet: () -> Unit
                 else item("moodq") { QuickPicks(ms, preview, actions) }
             }
 
+            radio?.let { r ->
+                item("radioh") { ShelfHeader(small = "Radio", title = r.title, sub = "Songs like ${r.seed.title}" + (if (r.seed.artistText.isNotBlank()) " by ${r.seed.artistText}" else "") + " · tap one to preview") }
+                val rs = radioSongs
+                if (rs == null) item("radiol") { LoadingRow() }
+                else if (rs.isEmpty()) item("radio0") { Hint("Couldn't load this radio — check your connection.") }
+                else item("radioq") { QuickPicks(rs, preview, actions) }
+                item("radiob") { Pill("← Back to Home", false, { radio = null }, Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
+            }
+
             // Jump back in (Spotify's grid), from the phone
-            if (mood == null && local.jumpBackIn.isNotEmpty()) item("jump") {
+            if (mood == null && radio == null && local.jumpBackIn.isNotEmpty()) item("jump") {
                 JumpBackIn(local.jumpBackIn, onPlay = { t -> playLocal(listOf(t) + library.filter { it.albumId == t.albumId && it.id != t.id && t.album.isNotBlank() }) })
             }
 
-            if (account == null && mood == null) item("signin") {
+            // The year's listening, and the way into Wrapped and the stats.
+            if (mood == null && radio == null) item("listening") {
+                @Suppress("UNUSED_EXPRESSION") statsVersion
+                com.ltots.app.ui.screens.ListeningCard(onOpenStats = { showStats = true }, onOpenWrapped = { wrappedYear = it })
+            }
+
+            if (account == null && mood == null && radio == null) item("signin") {
                 GlassPanel(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), tintBoost = 0.05f) {
                     Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
@@ -223,7 +264,7 @@ fun HomeScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenGet: () -> Unit
             }
 
             val f = feed
-            if (mood == null) {
+            if (mood == null && radio == null) {
                 if (f == null && loading) item("load") { LoadingRow() }
                 if (f == null && !loading) item("err") {
                     Hint(error ?: "Play some songs and recommendations show up here. New picks: ↻ at the top.")
@@ -253,12 +294,49 @@ fun HomeScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenGet: () -> Unit
                 }
             }
 
+            if (mood == null && radio == null && most.size >= 3) {
+                item("mosth") { ShelfHeader(small = "Your favourites", title = "Most played", sub = "The songs you keep coming back to") }
+                item("most") {
+                    LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        items(most, key = { it.first.id }) { (t, st) ->
+                            LocalCard(t, note = "${st.plays} plays · ${st.ms / 60_000} min") { playLocal(most.map { it.first }, most.indexOfFirst { it.first.id == t.id }) }
+                        }
+                    }
+                }
+            }
+
+            // What's popular: trending, top songs and artists in your region, new albums, radios.
+            val d = discover
+            if (mood == null && radio == null && d != null) {
+                val region = com.ltots.app.recs.Discover.regionName(d.region)
+                if (d.trending.isNotEmpty()) {
+                    item("trendh") { RegionHeader("Trending", if (d.region == "ZZ") "Trending worldwide" else "Trending in $region") { pickRegion = true } }
+                    item("trend") { SongCarousel(d.trending.map { RecSong(it, 0.0, "Trending") }, preview, actions) }
+                }
+                if (d.topSongs.isNotEmpty()) {
+                    item("toph") { RegionHeader("Charts", if (d.region == "ZZ") "Top songs worldwide" else "Top songs in $region") { pickRegion = true } }
+                    item("top") { QuickPicks(d.topSongs.map { RecSong(it, 0.0, "Top song") }, preview, actions) }
+                }
+                if (d.artists.isNotEmpty()) {
+                    item("arth") { ShelfHeader(small = "Charts", title = "Popular artists", sub = if (d.region == "ZZ") "Most played worldwide" else "Most played in $region") }
+                    item("art") { ArtistCarousel(d.artists) { link -> Inbox.sharedText.value = link; onOpenGet() } }
+                }
+                if (d.albums.isNotEmpty()) {
+                    item("albh") { ShelfHeader(small = "New & popular", title = "Albums & singles", sub = "Just out on YouTube Music") }
+                    item("alb") { CollectionCarousel(d.albums) { link -> Inbox.sharedText.value = link; onOpenGet() } }
+                }
+                if (d.radios.isNotEmpty()) {
+                    item("radh") { ShelfHeader(small = "Radios", title = "Popular radios", sub = "Endless songs like the ones you love and what's hot") }
+                    item("rad") { RadioCarousel(d.radios) { radio = it } }
+                }
+            }
+
             // From the phone: your mixes (Spotify's "Made for you") and songs to play again.
-            if (mood == null && mixes.isNotEmpty()) {
+            if (mood == null && radio == null && mixes.isNotEmpty()) {
                 item("mixh") { ShelfHeader(small = "Made for you", title = "Your mixes", sub = "From the songs on your phone") }
                 item("mix") { MixCarousel(mixes) { m -> playLocal(m.tracks) } }
             }
-            if (mood == null && local.listenAgain.isNotEmpty()) {
+            if (mood == null && radio == null && local.listenAgain.isNotEmpty()) {
                 item("againh") { ShelfHeader(small = null, title = "Listen again", sub = null) }
                 item("again") {
                     LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -269,6 +347,13 @@ fun HomeScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenGet: () -> Unit
             if (mood == null && f != null && f.basedOn.isNotEmpty()) item("based") {
                 Hint("Based on " + f.basedOn.take(4).joinToString(", ") { "“$it”" } + ". Long-press a song for Not interested.")
             }
+        }
+
+        if (showStats) com.ltots.app.ui.screens.StatsDialog(onDismiss = { showStats = false }, onOpenWrapped = { showStats = false; wrappedYear = it })
+        wrappedYear?.let { y -> com.ltots.app.ui.screens.WrappedDialog(y) { wrappedYear = null } }
+        if (pickRegion) RegionPicker(settings.chartsRegion, onDismiss = { pickRegion = false }) { code ->
+            pickRegion = false
+            com.ltots.app.audio.AudioEngine.updateSettings { it.copy(chartsRegion = code) }
         }
 
         // The preview playing, with its download button.
@@ -538,12 +623,86 @@ private fun MixCarousel(mixes: List<Mix>, onPlay: (Mix) -> Unit) {
 }
 
 @Composable
-private fun LocalCard(t: Track, onPlay: () -> Unit) {
+private fun LocalCard(t: Track, note: String? = null, onPlay: () -> Unit) {
     val pal = LocalPalette.current
     Column(Modifier.width(130.dp).clip(RoundedCornerShape(12.dp)).combinedClickable(onClick = onPlay)) {
         LocalArt(t.id, 130.dp, RoundedCornerShape(12.dp))
         Text(t.title, color = pal.text, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
         Text(t.artist.takeIf { it != Track.UNKNOWN } ?: "", color = pal.textDim, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (note != null) Text(note, color = pal.accent, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+    }
+}
+
+/** A shelf header with the region to change, on the right. */
+@Composable
+private fun RegionHeader(small: String, title: String, onPick: () -> Unit) {
+    Row(verticalAlignment = Alignment.Bottom) {
+        Box(Modifier.weight(1f)) { ShelfHeader(small = small, title = title, sub = null) }
+        Pill("Region ▾", false, onPick, Modifier.padding(end = 16.dp, bottom = 10.dp))
+    }
+}
+
+/** Every country (and worldwide) to pick the charts from. */
+@Composable
+private fun RegionPicker(current: String, onDismiss: () -> Unit, onPick: (String) -> Unit) {
+    val pal = LocalPalette.current
+    val all = remember { com.ltots.app.recs.Discover.regions() }
+    var q by remember { mutableStateOf("") }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Close") } },
+        title = { Text("Charts from") },
+        text = {
+            Column {
+                androidx.compose.material3.OutlinedTextField(q, { q = it }, singleLine = true, placeholder = { Text("Search countries") }, modifier = Modifier.fillMaxWidth())
+                LazyColumn(Modifier.fillMaxWidth().height(360.dp).padding(top = 8.dp)) {
+                    items(all.filter { it.second.contains(q, true) || it.first.equals(q, true) }, key = { it.first }) { (code, name) ->
+                        Text(
+                            name, color = if (code == current) pal.accent else pal.text, fontWeight = if (code == current) FontWeight.Bold else FontWeight.Normal,
+                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).combinedClickable(onClick = { onPick(code) }).padding(vertical = 10.dp, horizontal = 6.dp),
+                        )
+                    }
+                }
+            }
+        },
+    )
+}
+
+/** Popular artists: round photos; they open on the Get tab. */
+@Composable
+private fun ArtistCarousel(artists: List<com.ltots.app.ytm.YtArtist>, onOpen: (String) -> Unit) {
+    val pal = LocalPalette.current
+    LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        items(artists, key = { it.browseId }) { a ->
+            Column(
+                Modifier.width(110.dp).clip(RoundedCornerShape(12.dp)).combinedClickable(onClick = { onOpen("https://music.youtube.com/channel/${a.browseId}") }),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                NetImage(a.thumbUrl, 110.dp, CircleShape, placeholder = Icons.Rounded.Person, px = 300)
+                Text(a.title, color = pal.text, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
+            }
+        }
+    }
+}
+
+/** Radios: the song's cover with "Radio" over it; tapping opens its songs to preview. */
+@Composable
+private fun RadioCarousel(radios: List<com.ltots.app.recs.Radio>, onOpen: (com.ltots.app.recs.Radio) -> Unit) {
+    val pal = LocalPalette.current
+    LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        items(radios, key = { it.seed.videoId }) { r ->
+            Column(Modifier.width(150.dp).clip(RoundedCornerShape(12.dp)).combinedClickable(onClick = { onOpen(r) })) {
+                Box(Modifier.size(150.dp)) {
+                    NetImage(r.thumbUrl, 150.dp, RoundedCornerShape(12.dp), px = 400)
+                    Box(Modifier.matchParentSize().clip(RoundedCornerShape(12.dp))
+                        .background(Brush.verticalGradient(listOf(Color.Transparent, pal.accent.copy(alpha = 0.75f)))))
+                    Text("RADIO", color = Color.White, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.align(Alignment.BottomStart).padding(10.dp))
+                }
+                Text(r.title, color = pal.text, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
+                Text(r.subtitle, color = pal.textDim, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
     }
 }
 

@@ -97,13 +97,17 @@ object ListenHistory {
     /** Adds the time played since the last event; logs the song once it has played a moment. */
     private fun settle() {
         val c = current ?: return
-        if (playingSince > 0) current = c.copy(listenedMs = c.listenedMs + (System.currentTimeMillis() - playingSince))
+        val added = if (playingSince > 0) System.currentTimeMillis() - playingSince else 0L
+        if (playingSince > 0) current = c.copy(listenedMs = c.listenedMs + added)
         playingSince = 0L
         val now = current ?: return
         if (!logged && now.listenedMs >= LOG_AFTER_MS) {
             logged = true
             publish(listOf(now) + _items.value)
+            // The all-time numbers (Home's stats and Wrapped): one play, and the time so far.
+            runCatching { ListenStats.addPlay(now.title, now.artist, now.album, now.listenedMs) }
         } else if (logged) {
+            runCatching { ListenStats.addTime(now.title, now.artist, added) }
             // Update the listened time of the entry already logged (always the newest one).
             val list = _items.value
             if (list.isNotEmpty() && list[0].key == now.key && list[0].at == now.at) publish(listOf(now) + list.drop(1))

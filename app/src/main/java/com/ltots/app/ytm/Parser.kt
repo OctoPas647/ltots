@@ -357,6 +357,30 @@ object Parser {
         return out
     }
 
+    /** Every card and row on a page (library grids, new releases), in page order, once each. */
+    fun parseItems(root: JSONObject): List<YtItem> {
+        val out = ArrayList<YtItem>()
+        findAll(root, "musicTwoRowItemRenderer").forEach { r -> parseTwoRowItem(r as JSONObject)?.let { out += it } }
+        findAll(root, "musicResponsiveListItemRenderer").forEach { r -> parseListItem(r as JSONObject)?.let { out += it } }
+        return out.distinctBy {
+            when (it) {
+                is YtSong -> it.videoId
+                is YtAlbum -> it.browseId
+                is YtPlaylist -> it.browseId
+                is YtArtist -> it.browseId
+            }
+        }
+    }
+
+    /** The history page in its groups ("Today", "Yesterday", "This week", "October 2026"…). */
+    fun parseHistorySections(root: JSONObject): List<Pair<String, List<YtSong>>> =
+        findAll(root, "musicShelfRenderer").mapNotNull { sh ->
+            sh as JSONObject
+            val title = text(sh.opt("title")).ifBlank { return@mapNotNull null }
+            val songs = findAll(sh.opt("contents"), "musicResponsiveListItemRenderer").mapNotNull { parseListItem(it as JSONObject) as? YtSong }
+            if (songs.isEmpty()) null else title to songs
+        }
+
     /** The signed-in user's YouTube Music history: songs, newest first. */
     fun parseHistory(root: JSONObject): List<YtSong> =
         findAll(root, "musicResponsiveListItemRenderer").mapNotNull { parseListItem(it as JSONObject) as? YtSong }

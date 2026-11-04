@@ -97,14 +97,14 @@ object InnerTube {
     }
 
     /** Full playlist, following "load more" pages up to [maxTracks]. */
-    suspend fun playlist(playlistId: String, maxTracks: Int = 5000): Collection = withContext(Dispatchers.IO) {
+    suspend fun playlist(playlistId: String, maxTracks: Int = 5000, auth: Boolean = false): Collection = withContext(Dispatchers.IO) {
         val browseId = if (playlistId.startsWith("VL")) playlistId else "VL$playlistId"
-        var page = Parser.parseCollection(browseId, post("browse", JSONObject().put("browseId", browseId)))
+        var page = Parser.parseCollection(browseId, post("browse", JSONObject().put("browseId", browseId), auth = auth))
         val tracks = page.tracks.toMutableList()
         var cont = page.continuation
         var guard = 0
         while (cont != null && tracks.size < maxTracks && guard++ < 100) {
-            val (more, next) = Parser.parseContinuationTracks(post("browse", JSONObject().put("continuation", cont)))
+            val (more, next) = Parser.parseContinuationTracks(post("browse", JSONObject().put("continuation", cont), auth = auth))
             if (more.isEmpty()) break
             tracks += more
             cont = next
@@ -132,6 +132,38 @@ object InnerTube {
     /** What the signed-in user played on YouTube Music lately, newest first. */
     suspend fun history(): List<YtSong> = withContext(Dispatchers.IO) {
         Parser.parseHistory(post("browse", JSONObject().put("browseId", "FEmusic_history"), auth = true))
+    }
+
+    /** The signed-in user's liked songs ("Liked music"), newest first. */
+    suspend fun likedSongs(max: Int = 200): List<YtSong> = playlist("LM", max, auth = true).tracks
+
+    /** A page of the signed-in user's library: their playlists, saved albums or subscribed artists. */
+    private suspend fun library(browseId: String): List<YtItem> = withContext(Dispatchers.IO) {
+        Parser.parseItems(post("browse", JSONObject().put("browseId", browseId), auth = true))
+    }
+
+    suspend fun libraryPlaylists(): List<YtPlaylist> = library("FEmusic_liked_playlists").filterIsInstance<YtPlaylist>()
+    suspend fun savedAlbums(): List<YtAlbum> = library("FEmusic_liked_albums").filterIsInstance<YtAlbum>()
+    suspend fun subscribedArtists(): List<YtArtist> = library("FEmusic_library_corpus_artists").filterIsInstance<YtArtist>()
+
+    /**
+     * YouTube Music's charts for [country] (ISO code, or "ZZ" for worldwide): its shelves, such
+     * as top songs, top artists and trending. Works signed out.
+     */
+    suspend fun charts(country: String): List<SearchSection> = withContext(Dispatchers.IO) {
+        val body = JSONObject().put("browseId", "FEmusic_charts")
+            .put("formData", JSONObject().put("selectedValues", org.json.JSONArray().put(country)))
+        Parser.parseHome(post("browse", body))
+    }
+
+    /** New albums and singles (YouTube Music's "New releases"). */
+    suspend fun newReleases(): List<YtItem> = withContext(Dispatchers.IO) {
+        Parser.parseItems(post("browse", JSONObject().put("browseId", "FEmusic_new_releases_albums")))
+    }
+
+    /** The signed-in user's history in YouTube Music's own groups, newest first. */
+    suspend fun historyGroups(): List<Pair<String, List<YtSong>>> = withContext(Dispatchers.IO) {
+        Parser.parseHistorySections(post("browse", JSONObject().put("browseId", "FEmusic_history"), auth = true))
     }
 
     /** Title, artists, album, year and square cover for one song. */

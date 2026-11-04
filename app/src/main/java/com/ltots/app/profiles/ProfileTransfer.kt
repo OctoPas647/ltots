@@ -31,6 +31,7 @@ object UserSwitch {
         EqProfiles.load()
         AudioEngine.reloadForUser()
         com.ltots.app.data.ListenHistory.reload()
+        com.ltots.app.data.ListenStats.reload()
     }
 
     /** Deletes user [id] and everything they kept; the user in use moves to another first. */

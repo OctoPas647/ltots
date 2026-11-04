@@ -155,7 +155,7 @@ object Recommender {
             _loading.value = true
             _error.value = null
             try {
-                val built = build(context)
+                val built = build(context, force)
                 stale = false
                 _feed.value = built
                 Store.writeLater(feedFile()) { writeFeed(built).toString() }
@@ -169,7 +169,7 @@ object Recommender {
         }
     }
 
-    private suspend fun build(context: Context): HomeFeed = coroutineScope {
+    private suspend fun build(context: Context, force: Boolean = false): HomeFeed = coroutineScope {
         ListenHistory.ensureLoaded()
         val history = ListenHistory.items.value
         val library = runCatching { LocalLibrary.loadSongs(context) }.getOrDefault(emptyList())
@@ -182,6 +182,9 @@ object Recommender {
         val signed = YtmAccount.signedIn
         val ytHome = if (signed) async { runCatching { InnerTube.home() }.getOrDefault(emptyList()) } else null
         val ytHistory = if (signed) runCatching { InnerTube.history() }.getOrDefault(emptyList()) else emptyList()
+        // The accounts the user signed in to: YouTube Music likes, playlists, subscriptions and
+        // saved albums; Instagram's saved and liked reels; songs found with the song finder.
+        val account = runCatching { AccountTaste.load(context, force) }.getOrDefault(AccountTaste.Signals())
 
         // 1. Taste: seed songs and how much the user likes each artist.
         val now = System.currentTimeMillis()
@@ -189,8 +192,18 @@ object Recommender {
             .map { Seed(Suggestions.key(it.meta.title, it.meta.artist), it.meta.title, it.meta.artist, 0.6 * decay(now - it.finishedAt), videoId = it.meta.videoId) }
         val local = Taste.seeds(history, plays, library, now)
         val fromYt = ytHistory.take(30).mapIndexed { i, s -> Seed("yt:" + s.videoId, s.title, s.artistText, 0.9 * exp(-i / 10.0), videoId = s.videoId) }
-        val all = Taste.combine(local + downloads + fromYt)
-        val artistLove = Taste.artistAffinity(all)
+        val fromAccounts = account.songs.filter { it.title.isNotBlank() }.map {
+            Seed(it.videoId?.let { v -> "yt:$v" } ?: Suggestions.key(it.title, it.artist), it.title, it.artist, it.weight, videoId = it.videoId)
+        }
+        // What they've played most of all time, imported plays (Spotify, Last.fm…) included.
+        val allTime = runCatching { com.ltots.app.data.ListenStats.summary(null).songs.take(40) }.getOrDefault(emptyList())
+        val topMs = allTime.firstOrNull()?.ms?.takeIf { it > 0 }?.toDouble() ?: 1.0
+        val fromStats = allTime.map { Seed(it.key, it.title, it.artist, 0.3 * (it.ms / topMs)) }
+        val all = Taste.combine(local + downloads + fromYt + fromAccounts + fromStats)
+        // Artists they follow or saved albums of count as loved, even before they're played here.
+        val artistLove = Taste.artistAffinity(all).toMutableMap().also { m ->
+            account.artists.forEach { (a, w) -> m[a] = maxOf(m[a] ?: 0.0, w) }
+        }
         val seeds = Taste.pickSeeds(all, SEEDS)
         if (seeds.isEmpty() && ytHome == null) throw NothingYet()
 
@@ -215,7 +228,7 @@ object Recommender {
         fun skip(s: YtSong): Boolean {
             val k = Suggestions.key(s.title, s.artists.firstOrNull()?.name)
             val a = norm(s.artists.firstOrNull()?.name ?: "")
-            return s.videoId in have || k in onPhone || k in seedKeys || s.videoId in fb.notInterested || k in fb.notInterested ||
+            return s.videoId in have || s.videoId in account.likedIds || k in onPhone || k in seedKeys || s.videoId in fb.notInterested || k in fb.notInterested ||
                 a in hidden || hidden.any { h -> s.artists.any { norm(it.name) == h } }
         }
 

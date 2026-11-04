@@ -111,6 +111,8 @@ object SongFinder {
                 currentLabel = clip.label
                 (_state.value as? FinderState.Working)?.let { _state.value = it.copy(label = clip.label) }
                 val rows = identifier.run(clip)
+                // What was found counts towards the Home tab's picks.
+                runCatching { com.ltots.app.recs.FinderFinds.record(rows) }
                 _state.value = if (rows.isEmpty()) FinderState.Failed(clip.label, noMatchMessage(), progress)
                 else FinderState.Results(clip.label, rows, progress)
             } catch (e: CancellationException) {
