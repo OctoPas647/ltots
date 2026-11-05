@@ -58,7 +58,8 @@ object MoodIndex {
                     }
                 }
             }
-            _embeddings.value = HashMap(data)
+            // Songs that couldn't be read are kept (so they aren't retried), but never handed out.
+            _embeddings.value = data.filterValues { it.isNotEmpty() }
         }
     }
 

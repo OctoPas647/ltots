@@ -67,7 +67,8 @@ class Clap(model: File, threads: Int = 2) : Closeable {
 
         fun dot(a: FloatArray, b: FloatArray): Float {
             var s = 0f
-            for (i in a.indices) s += a[i] * b[i]
+            // Safe with mismatched or empty vectors (an unreadable song): those just score 0.
+            for (i in 0 until minOf(a.size, b.size)) s += a[i] * b[i]
             return s
         }
 

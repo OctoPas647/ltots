@@ -63,8 +63,13 @@ object Mixes {
         moods: Map<String, FloatArray> = emptyMap(),
         text: com.ltots.app.moods.ClapText? = null,
     ): List<Mix> {
-        val ai = if (moods.isEmpty() || text == null) emptyList()
-        else com.ltots.app.moods.MoodMixes.albums(tracks, moods, text) + com.ltots.app.moods.MoodMixes.themes(tracks, moods, text)
+        // Only real embeddings of the usual size (an unreadable song is stored empty).
+        val dim = moods.values.firstOrNull { it.isNotEmpty() }?.size ?: 0
+        val usable = if (dim == 0) emptyMap() else moods.filterValues { it.size == dim }
+        val ai = if (usable.isEmpty() || text == null) emptyList()
+        else runCatching {
+            com.ltots.app.moods.MoodMixes.albums(tracks, usable, text) + com.ltots.app.moods.MoodMixes.themes(tracks, usable, text)
+        }.getOrElse { emptyList() }
         return ai + soundtracks(tracks) + decades(tracks) + genres(tracks)
     }
 
