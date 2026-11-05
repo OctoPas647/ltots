@@ -326,6 +326,12 @@
                 <action android:name="androidx.media3.session.MediaSessionService" />
             </intent-filter>
         </service>
+        <!-- The crash report (its own process, so it can always open). -->
+        <activity
+            android:name=".CrashActivity"
+            android:exported="false"
+            android:process=":crash"
+            android:theme="@android:style/Theme.Material.NoActionBar" />
         <receiver
             android:name=".playback.SleepTimer$Receiver"
             android:exported="false" />

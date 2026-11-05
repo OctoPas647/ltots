@@ -13,9 +13,12 @@ class LToTSApp : Application(), androidx.work.Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
+        // The crash report screen runs in its own small process: nothing else starts there.
+        if (CrashReport.isCrashProcess(this)) return
+        CrashReport.install(this)
         Store.init(this)
         // Screen on/off and charging, for everything that saves battery with the screen off.
-        com.ltots.app.playback.ScreenState.init(this)
+        runCatching { com.ltots.app.playback.ScreenState.init(this) }
         com.ltots.app.ui.components.NetImages.init(this)
         com.ltots.app.recs.SongPreview.init(this)
         val pkg = packageManager.getPackageInfo(packageName, 0)
@@ -25,7 +28,7 @@ class LToTSApp : Application(), androidx.work.Configuration.Provider {
         com.ltots.app.audio.BeatIndex.init(this)
         com.ltots.app.lyrics.Lyrics.init(this)
         com.ltots.app.lyrics.AiSync.init(this)
-        com.ltots.app.audio.PowerStats.init(this)
+        runCatching { com.ltots.app.audio.PowerStats.init(this) }
         AudioEngine.init(this)
         com.ltots.app.download.DownloadManager.init(this)
         com.ltots.app.identify.SongFinder.init(this)

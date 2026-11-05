@@ -121,9 +121,9 @@ object AudioEngine : SoundSource {
         scope.launch { tap.info.collect { reapplyBitPerfect() } }
         // Battery EQ follows every EQ change (edits, presets, a new song's own EQ) as it happens.
         scope.launch { effectiveEq.collect { syncPhoneEq() } }
-        PreRender.init(appContext)
+        runCatching { PreRender.init(appContext) }
         // Screen on/off: the audio buffer, the screen-off sound modes, pre-rendering.
-        scope.launch { ScreenState.screenOn.collect { on -> onScreen(on) } }
+        scope.launch { ScreenState.screenOn.collect { on -> runCatching { onScreen(on) } } }
         // Beats only feed the cover's Move with the beat, so they're worked out only while that's
         // on and the screen is on (the songs that played meanwhile are done when it turns on).
         scope.launch {

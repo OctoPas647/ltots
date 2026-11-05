@@ -54,7 +54,7 @@ class PlaybackService : MediaSessionService() {
         )
         session = MediaSession.Builder(this, player)
             .setSessionActivity(openApp)
-            .setMediaButtonPreferences(listOf(sleepButton()))
+            .setMediaButtonPreferences(sleepButtons())
             .setCallback(object : MediaSession.Callback {
                 // The sleep timer's moon button in the notification and on the lock screen.
                 override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult =
@@ -91,8 +91,11 @@ class PlaybackService : MediaSessionService() {
             })
             .build()
         SleepTimer.init(this)
-        SleepTimer.onChanged = { session?.setMediaButtonPreferences(listOf(sleepButton())) }
+        SleepTimer.onChanged = { runCatching { session?.setMediaButtonPreferences(sleepButtons()) } }
     }
+
+    /** The notification's extra buttons (none if the moon can't be made on this phone). */
+    private fun sleepButtons(): List<CommandButton> = runCatching { listOf(sleepButton()) }.getOrDefault(emptyList())
 
     /** The moon: filled while the timer runs. Tap starts the usual length, or stops it. */
     private fun sleepButton(): CommandButton {
