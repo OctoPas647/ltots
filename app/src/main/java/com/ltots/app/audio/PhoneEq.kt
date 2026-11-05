@@ -1,5 +1,6 @@
 package com.ltots.app.audio
 
+import android.media.audiofx.BassBoost
 import android.media.audiofx.Equalizer
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,13 +21,18 @@ class PhoneEq {
         /** The phone has no EQ LToTS can use, or another app is in control of it. */
         data class Unavailable(val reason: String) : Status
         /** Attached; [levels] are what the phone's bands are set to (all 0 = switched off). */
-        data class Ready(val layout: PhoneEqLayout, val levels: FloatArray) : Status
+        data class Ready(val layout: PhoneEqLayout, val levels: FloatArray, val bassDb: Float = 0f) : Status
     }
 
     private val _status = MutableStateFlow<Status>(Status.Off)
     val status: StateFlow<Status> = _status
 
     private var effect: Equalizer? = null
+    /** The phone's bass boost, used with the EQ for the deepest bass (null if there isn't one). */
+    private var bass: BassBoost? = null
+    private var bassApplied = 0f
+    /** Whether the phone has a bass boost LToTS can use on this audio. */
+    val bassAvailable: Boolean get() = bass != null
     private var session = 0
     var layout: PhoneEqLayout? = null
         private set
@@ -57,6 +63,8 @@ class PhoneEq {
         session = audioSession
         layout = l
         applied = null
+        bass = runCatching { BassBoost(PRIORITY, audioSession).takeIf { it.strengthSupported } }.getOrNull()
+        bassApplied = 0f
         _status.value = Status.Ready(l, FloatArray(l.bandCount))
         return true
     }
@@ -75,7 +83,7 @@ class PhoneEq {
             val on = levels.any { abs(it) >= 0.05f }
             if (eq.enabled != on) eq.enabled = on
             applied = levels.copyOf()
-            _status.value = Status.Ready(l, levels.copyOf())
+            _status.value = Status.Ready(l, levels.copyOf(), bassApplied)
         } catch (t: Throwable) {
             // Changing it fails when another app (a system sound app, say) has taken control.
             val other = runCatching { !eq.hasControl() }.getOrDefault(false)
@@ -83,6 +91,23 @@ class PhoneEq {
                 if (other) "Another app is using the phone's built-in EQ right now." else "The phone's built-in EQ stopped responding."
             )
         }
+    }
+
+    /**
+     * The bass boost in dB (0 switches it off). Its strength (0..1000) is mapped evenly onto
+     * 0..[BatteryEqFit.BASS_MAX_DB]; phones differ a little in exactly how much a strength boosts.
+     */
+    fun applyBass(db: Float) {
+        val b = bass ?: return
+        if (abs(db - bassApplied) < 0.05f) return
+        runCatching {
+            val strength = (db / BatteryEqFit.BASS_MAX_DB * 1000f).roundToInt().coerceIn(0, 1000)
+            if (strength > 0) b.setStrength(strength.toShort())
+            val on = strength > 0
+            if (b.enabled != on) b.enabled = on
+            bassApplied = db
+            (_status.value as? Status.Ready)?.let { _status.value = it.copy(bassDb = db) }
+        }.onFailure { runCatching { b.release() }; bass = null; bassApplied = 0f }
     }
 
     /** What the phone's EQ actually has right now: (switched on, band levels in dB), or null. */
@@ -94,6 +119,10 @@ class PhoneEq {
 
     /** Let go of the phone's EQ (Battery EQ off, or the player closed). */
     fun release(off: Boolean = false) {
+        runCatching { bass?.enabled = false }
+        runCatching { bass?.release() }
+        bass = null
+        bassApplied = 0f
         runCatching { effect?.enabled = false }
         runCatching { effect?.release() }
         effect = null

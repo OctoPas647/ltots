@@ -287,6 +287,13 @@ class Analyzer(private val tap: AnalyzerTap, val bands: Int = 96) {
         // Centre the window on "now", but never read past what the audio thread has written.
         val end = minOf(centre + r.size / 2, head)
         val start = end - r.size
+        // Native: the window, the FFT and the magnitudes in one go (several times less work).
+        NativeDsp.plan(r.size)?.let { (plan, lock) ->
+            synchronized(lock) {
+                NativeDsp.spectrum(plan, src, tap.size - 1, start, r.window, r.mags, binFrom, binTo, 2f / (r.size * 0.5f))
+            }
+            return
+        }
         for (i in 0 until r.size) {
             r.re[i] = src[tap.indexOf(start + i)] * r.window[i]
             r.im[i] = 0f
@@ -396,6 +403,7 @@ class Fft(private val n: Int) {
     }
 
     fun transform(re: FloatArray, im: FloatArray) {
+        NativeDsp.plan(n)?.let { (plan, lock) -> synchronized(lock) { NativeDsp.fftFloat(plan, re, im) }; return }
         for (i in 0 until n) {
             val j = rev[i]
             if (j > i) {

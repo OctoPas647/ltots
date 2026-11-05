@@ -31,6 +31,11 @@ class MixedFft(val n: Int) {
 
     /** In-place forward transform (no scaling). */
     fun forward(re: DoubleArray, im: DoubleArray) {
+        // Native when available: the same algorithm, several times faster.
+        com.ltots.app.audio.NativeDsp.plan(n)?.let { (plan, lock) ->
+            synchronized(lock) { com.ltots.app.audio.NativeDsp.fftDouble(plan, re, im) }
+            return
+        }
         rec(re, im, 0, 1, scratchRe, scratchIm, 0, n, 0)
         System.arraycopy(scratchRe, 0, re, 0, n)
         System.arraycopy(scratchIm, 0, im, 0, n)

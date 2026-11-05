@@ -90,6 +90,18 @@ internal fun ScreenOffSettings() {
         color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 10.dp),
     )
 
+    if (settings.screenOffEq == ScreenOffEq.FIVE_BAND || settings.batteryEq) {
+        val blocked = AudioEngine.bassBoostBlocked
+        SwitchRow(
+            "Use the phone's bass boost too", settings.bassBoostHelp && !blocked,
+            { on -> AudioEngine.updateSettings { it.copy(bassBoostHelp = on) } },
+            sub = if (blocked) "Not used: on this phone the bass boost stops the audio chip playing by itself, which would cost more battery than it saves."
+            else "Adds the phone's own bass boost for the deepest bass, so bass-heavy curves come much closer to your real EQ. " +
+                "Only used when it makes the curve clearly closer. If it turns out to stop the audio chip playing by itself, LToTS leaves it out from then on.",
+            enabled = !blocked,
+        )
+    }
+
     Text("Pitch & speed with the screen off", color = pal.text, style = MaterialTheme.typography.bodyMedium)
     SegmentedToggle(
         ScreenOffPitch.entries.map { it.label }, settings.screenOffPitch.ordinal, Modifier.padding(vertical = 8.dp),
@@ -99,6 +111,8 @@ internal fun ScreenOffSettings() {
             ScreenOffPitch.SAME -> "Pitch and speed exactly as set, with the engine you chose."
             ScreenOffPitch.LIGHTER -> "The lighter Rubber Band engine: about half the processing, slightly less polished. " +
                 "(Natural voices always uses the full engine.)"
+            ScreenOffPitch.LIGHTEST -> "Lighter, and speed changes at original pitch use Sonic, Android's own simple speed changer: " +
+                "the least processing of all, can sound a little choppy on music."
             ScreenOffPitch.OFF -> "Original pitch and speed while the screen is off."
         },
         color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 10.dp),
@@ -110,14 +124,17 @@ internal fun ScreenOffSettings() {
     }
     SwitchRow(
         "Pre-render", settings.preRender, { on -> AudioEngine.updateSettings { it.copy(preRender = on) } },
-        sub = "While a song plays with the screen off, the next one is worked out ahead with its exact EQ and pitch " +
+        sub = "While a song plays with the screen off or while you're in another app, the next one is worked out ahead with its exact EQ and pitch " +
             "(a few seconds of work) into a high-quality file the audio chip plays by itself, so the processor sleeps " +
-            "through the song. Uses up to 300 MB of cache, cleared automatically. Songs with a changed speed stay live. " +
+            "through the song. Uses up to 300 MB of cache, cleared automatically. A changed speed is never baked in: " +
+            (if (AudioEngine.chipSpeed) "the audio chip changes it itself. " else "those songs stay live. ") +
             if (format != null) "This phone's audio chip takes $format." else "This phone's audio chip doesn't take any format LToTS can make here, so this has no effect.",
         enabled = settings.directPlayback,
     )
     Text(
-        if (active) "Screen-off modes are in effect right now." else "Needs Power-saving playback (below) to be on.".takeIf { !settings.directPlayback } ?: "",
+        (if (AudioEngine.chipSpeed) "This phone's audio chip changes speed by itself, so a speed change at original pitch needs no processing. "
+        else "This phone's audio chip can't change speed by itself, so speed changes are processed by LToTS. ") +
+            (if (active) "Screen-off modes are in effect right now." else if (!settings.directPlayback) "Pre-render needs Power-saving playback (below) to be on." else ""),
         color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 10.dp),
     )
 }

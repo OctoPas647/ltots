@@ -286,6 +286,10 @@ data class AppSettings(
     val preserveFormants: Boolean = false,
     /** Use Rubber Band's lighter engine for pitch/speed (about half the battery, slightly less polish). */
     val efficientPitch: Boolean = false,
+    /** Lightest: speed changes at original pitch use Sonic (much cheaper than Rubber Band, a bit rougher). */
+    val lightestSpeed: Boolean = false,
+    /** 5-band mode also uses the phone's own bass boost for the lowest bass (when the phone has one). */
+    val bassBoostHelp: Boolean = true,
     /** Pitch/speed used for every song when [perSongPitchSpeed] is off. */
     val globalPitchCents: Int = 0,
     val globalSpeed: Float = 1f,
@@ -349,6 +353,8 @@ enum class ScreenOffPitch(val label: String) {
     SAME("Same"),
     /** The lighter Rubber Band engine (about half the processing). */
     LIGHTER("Lighter"),
+    /** Lighter, and speed changes at original pitch with Sonic (the cheapest). */
+    LIGHTEST("Lightest"),
     /** Original pitch and speed with the screen off. */
     OFF("Off"),
 }
@@ -515,6 +521,7 @@ object Json {
         put("perSongPS", s.perSongPitchSpeed)
         put("bands", s.analyzerBands)
         put("formants", s.preserveFormants); put("effPitch", s.efficientPitch)
+        put("lightSpeed", s.lightestSpeed); put("bassHelp", s.bassBoostHelp)
         put("gPitch", s.globalPitchCents); put("gSpeed", s.globalSpeed.toDouble()); put("gTape", s.globalTape)
         put("direct", s.directPlayback)
         put("batteryEq", s.batteryEq)
@@ -540,6 +547,8 @@ object Json {
         analyzerBands = o.optInt("bands", 96),
         preserveFormants = o.optBoolean("formants", false),
         efficientPitch = o.optBoolean("effPitch", false),
+        lightestSpeed = o.optBoolean("lightSpeed", false),
+        bassBoostHelp = o.optBoolean("bassHelp", true),
         globalPitchCents = o.optInt("gPitch", 0),
         globalSpeed = o.optDouble("gSpeed", 1.0).toFloat(),
         globalTape = o.optBoolean("gTape", false),

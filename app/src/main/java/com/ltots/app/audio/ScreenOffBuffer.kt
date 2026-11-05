@@ -29,8 +29,8 @@ import java.lang.ref.WeakReference
 object ScreenOffBuffer {
     /** What the buffer holds with the screen on (Media3's usual size). */
     const val SHORT_MS = 500
-    /** What it holds with the screen off. */
-    const val LONG_MS = 4000
+    /** What it holds with the screen off (or LToTS in the background). */
+    const val LONG_MS = 8000
 
     private var track = WeakReference<AudioTrack>(null)
     private var sampleRate = 48000

@@ -189,7 +189,9 @@ object AudioEngine : SoundSource {
     }
 
     override val preserveFormants: Boolean get() = initialized && settings.value.preserveFormants
-    override val efficientPitch: Boolean get() = initialized && (settings.value.efficientPitch || leanPitch == ScreenOffPitch.LIGHTER)
+    override val efficientPitch: Boolean get() = initialized &&
+        (settings.value.efficientPitch || leanPitch == ScreenOffPitch.LIGHTER || leanPitch == ScreenOffPitch.LIGHTEST)
+    override val lightestSpeed: Boolean get() = initialized && (settings.value.lightestSpeed || leanPitch == ScreenOffPitch.LIGHTEST)
 
     private fun scaleOf(cents: Int, speed: Float, tape: Boolean): Double =
         if (tape) speed.toDouble() else 2.0.pow(cents / 1200.0)
@@ -501,7 +503,17 @@ object AudioEngine : SoundSource {
         val p = _player.value
         val wanted = (settings.value.batteryEq || leanEq == ScreenOffEq.FIVE_BAND) && p != null
         val ready = wanted && phoneEq.attach(p!!.audioSessionId)
-        if (ready) phoneEq.layout?.let { phoneEq.apply(BatteryEqFit.fit(effectiveEq.value, it)) }
+        if (ready) phoneEq.layout?.let { layout ->
+            val useBass = settings.value.bassBoostHelp && !bassBlocksChip && phoneEq.bassAvailable
+            if (useBass) {
+                val (levels, bass) = BatteryEqFit.fitWithBass(effectiveEq.value, layout)
+                phoneEq.apply(levels)
+                applyBassChecked(bass)
+            } else {
+                phoneEq.apply(BatteryEqFit.fit(effectiveEq.value, layout))
+                phoneEq.applyBass(0f)
+            }
+        }
         if (!wanted) phoneEq.release(off = true)
         val handles = ready && phoneEq.status.value is PhoneEq.Status.Ready
         if (handles != phoneEqHandles) {
@@ -513,12 +525,66 @@ object AudioEngine : SoundSource {
         }
     }
 
+    /**
+     * True once the phone's bass boost turned out to stop the audio chip playing by itself on
+     * this phone: from then on 5-band mode leaves it out (it would cost more than it saves).
+     */
+    private val bassBlocksChip: Boolean
+        get() = runCatching { appContext.getSharedPreferences("phone_audio", Context.MODE_PRIVATE).getBoolean("bassBlocksChip", false) }.getOrDefault(false)
+
+    private var bassCheck: Job? = null
+
+    /**
+     * Switches the bass boost on (or changes it). If the chip was playing by itself and stops
+     * doing so once the bass boost is on, the bass boost can't run on the chip on this phone:
+     * it's switched off again and left out from then on.
+     */
+    private fun applyBassChecked(db: Float) {
+        val wasDirect = _direct.value
+        val was = (phoneEq.status.value as? PhoneEq.Status.Ready)?.bassDb ?: 0f
+        phoneEq.applyBass(db)
+        if (db <= 0f || was > 0f || !wasDirect) return
+        bassCheck?.cancel()
+        bassCheck = scope.launch {
+            delay(4000)
+            val p = _player.value ?: return@launch
+            if (p.isPlaying && !_direct.value && wantsDirect(p)) {
+                runCatching { appContext.getSharedPreferences("phone_audio", Context.MODE_PRIVATE).edit().putBoolean("bassBlocksChip", true).apply() }
+                syncPhoneEq()
+                updateDirect()
+            }
+        }
+    }
+
+    /** Whether the bass boost is in use with the 5-band EQ right now (for the settings). */
+    val bassBoostActive: Boolean get() = ((phoneEq.status.value as? PhoneEq.Status.Ready)?.bassDb ?: 0f) > 0f
+    /** Whether the phone's bass boost was found to stop the chip playing by itself. */
+    val bassBoostBlocked: Boolean get() = initialized && bassBlocksChip
+
     /** Whether [eq] needs LToTS's processor (not when it's flat, when the phone's EQ plays it, or with the screen-off EQ Off). */
     private fun eqNeedsProcessor(eq: EqState): Boolean = !phoneEqHandles && leanEq != ScreenOffEq.OFF && !EqMath.isNeutral(eq)
 
-    /** Whether a pitch / speed needs LToTS's processor (not with screen-off pitch & speed Off). */
-    private fun pitchSpeedNeedsProcessor(cents: Int, speed: Float): Boolean =
-        leanPitch != ScreenOffPitch.OFF && (cents != 0 || abs(speed - 1f) > 1e-4f)
+    /**
+     * Whether a pitch / speed needs LToTS's processor: not with screen-off pitch & speed Off,
+     * and not a speed change at original pitch on a phone whose audio chip changes speed itself.
+     */
+    private fun pitchSpeedNeedsProcessor(cents: Int, speed: Float): Boolean {
+        if (leanPitch == ScreenOffPitch.OFF) return false
+        if (cents != 0) return true
+        if (abs(speed - 1f) <= 1e-4f) return false
+        return !chipSpeed
+    }
+
+    /**
+     * Whether this phone's audio chip can change the speed itself while it plays (Android's
+     * "offloadVariableRateSupported"). Then a speed change at original pitch needs no processing.
+     */
+    val chipSpeed: Boolean by lazy {
+        runCatching {
+            val am = appContext.getSystemService(android.media.AudioManager::class.java)
+            am.getParameters("offloadVariableRateSupported").trim() == "offloadVariableRateSupported=1"
+        }.getOrDefault(false)
+    }
 
     // ---- screen off ----------------------------------------------------------------------------
 
@@ -539,6 +605,12 @@ object AudioEngine : SoundSource {
 
     /** Whether the screen-off settings apply now: the screen is off. */
     private fun screenOffNow() = !ScreenState.screenOn.value && !appInFront
+
+    /**
+     * Whether pre-rendering applies now: LToTS isn't on screen (the screen is off, or you're in
+     * another app). It never changes the sound, and the sound can only be edited in LToTS.
+     */
+    private fun preRenderNow() = !appInFront
 
     private fun targetModes(): Pair<ScreenOffEq, ScreenOffPitch> {
         val s = settings.value
@@ -561,21 +633,26 @@ object AudioEngine : SoundSource {
     }
 
     internal fun onScreen(on: Boolean) {
-        // A long audio buffer with the screen off: the processor wakes several times less often.
-        ScreenOffBuffer.setLong(!on)
+        updateBuffer()
         PowerStats.onScreen(on)
         val p = _player.value
         if (p == null || !p.isPlaying) latchLean()
-        if (on) {
-            PreRender.cancel()
-            refreshRendered(includeCurrent = false)
-        } else maybePreRender()
+        // Entries that no longer fit the modes go back; the next song gets what fits now.
+        refreshRendered(includeCurrent = false)
+        maybePreRender()
     }
+
+    /**
+     * A long audio buffer whenever LToTS isn't on screen (nothing can change the sound then):
+     * the processor, when it has to work, wakes several times less often.
+     */
+    private fun updateBuffer() = ScreenOffBuffer.setLong(!appInFront || !ScreenState.screenOn.value)
 
     /** Called by the activity: true while LToTS is on screen. In front, full quality returns at once. */
     fun setAppInFront(front: Boolean) {
         appInFront = front
         if (!initialized) return
+        updateBuffer()
         if (front) {
             PreRender.cancel()
             latchLean()
@@ -611,11 +688,14 @@ object AudioEngine : SoundSource {
             cents = s.globalPitchCents; speed = s.globalSpeed; tape = s.globalTape
         }
         if (pitchMode == ScreenOffPitch.OFF) { cents = 0; speed = 1f; tape = false }
-        // A changed speed stays live, so the seek bar, lyrics and history keep the song's own timing.
-        if (abs(speed - 1f) > 1e-4f) return null
-        val pitch = scaleOf(cents, speed, tape)
+        // A changed speed is never baked in (the seek bar, lyrics and history keep the song's own
+        // timing): with the chip changing speed itself, only the pitch is; otherwise the song stays live.
+        val sped = abs(speed - 1f) > 1e-4f
+        if (sped && (tape || !chipSpeed)) return null
+        val pitch = if (sped) 2.0.pow(cents / 1200.0) else scaleOf(cents, speed, tape)
         if (eqUsed == null && abs(pitch - 1.0) < 1e-6) return null
-        return PreRender.Job(uri, eqUsed ?: EqState(enabled = false), pitch, s.preserveFormants, s.efficientPitch || pitchMode == ScreenOffPitch.LIGHTER)
+        return PreRender.Job(uri, eqUsed ?: EqState(enabled = false), pitch, s.preserveFormants,
+            s.efficientPitch || pitchMode == ScreenOffPitch.LIGHTER || pitchMode == ScreenOffPitch.LIGHTEST)
     }
 
     /** Screen off: the next song gets its pre-rendered file, ready before it starts. */
@@ -623,7 +703,7 @@ object AudioEngine : SoundSource {
         if (!initialized) return
         val p = _player.value ?: return
         val s = settings.value
-        if (!s.preRender || !s.directPlayback || s.bitPerfectUsb || !screenOffNow()) return
+        if (!s.preRender || !s.directPlayback || s.bitPerfectUsb || !preRenderNow()) return
         val idx = p.nextMediaItemIndex.takeIf { it != C.INDEX_UNSET } ?: return
         val item = p.getMediaItemAt(idx)
         if (PreRender.isRendered(item)) return
@@ -634,7 +714,7 @@ object AudioEngine : SoundSource {
             // Still the next song, still screen off, and still the same sound?
             val i = q.nextMediaItemIndex.takeIf { it != C.INDEX_UNSET } ?: return@request
             val now = q.getMediaItemAt(i)
-            if (now.mediaId != item.mediaId || PreRender.isRendered(now) || !screenOffNow()) return@request
+            if (now.mediaId != item.mediaId || PreRender.isRendered(now) || !preRenderNow()) return@request
             val (e2, p2) = targetModes()
             if (renderJobFor(now, e2, p2)?.key != job.key) return@request
             q.replaceMediaItem(i, PreRender.renderedItem(now, file, job.key))
@@ -727,13 +807,16 @@ object AudioEngine : SoundSource {
     private fun setOffload(p: ExoPlayer, on: Boolean) {
         val mode = if (on) AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_ENABLED else AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_DISABLED
         val cur = p.trackSelectionParameters
-        if (cur.audioOffloadPreferences.audioOffloadMode == mode) return
+        val speedOnChip = abs(p.playbackParameters.speed - 1f) > 1e-4f
+        if (cur.audioOffloadPreferences.audioOffloadMode == mode &&
+            cur.audioOffloadPreferences.isSpeedChangeSupportRequired == speedOnChip) return
         p.trackSelectionParameters = cur.buildUpon()
             .setAudioOffloadPreferences(
                 AudioOffloadPreferences.Builder()
                     .setAudioOffloadMode(mode)
                     .setIsGaplessSupportRequired(false)
-                    .setIsSpeedChangeSupportRequired(false)
+                    // A speed change on the chip itself: only when the chip says it can.
+                    .setIsSpeedChangeSupportRequired(speedOnChip)
                     .build()
             )
             .build()

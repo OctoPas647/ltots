@@ -119,7 +119,10 @@ object BatteryEqFit {
      * Best band levels for [target] within [lo]..[hi]: least squares with the limits respected
      * (coordinate descent, which handles the limits simply and converges quickly for a few bands).
      */
-    private fun leastSquares(shape: Array<DoubleArray>, target: DoubleArray, lo: Double, hi: Double): DoubleArray {
+    private fun leastSquares(shape: Array<DoubleArray>, target: DoubleArray, lo: Double, hi: Double): DoubleArray =
+        leastSquares(shape, target, DoubleArray(shape.size) { lo }, DoubleArray(shape.size) { hi })
+
+    private fun leastSquares(shape: Array<DoubleArray>, target: DoubleArray, lo: DoubleArray, hi: DoubleArray): DoubleArray {
         val n = shape.size
         val m = target.size
         val g = DoubleArray(n)
@@ -131,7 +134,7 @@ object BatteryEqFit {
                 val s = shape[i]
                 var dot = 0.0
                 for (k in 0 until m) dot += s[k] * (target[k] - model[k] + s[k] * g[i])
-                val v = (dot / norm[i]).coerceIn(lo, hi)
+                val v = (dot / norm[i]).coerceIn(lo[i], hi[i])
                 val d = v - g[i]
                 if (d != 0.0) {
                     for (k in 0 until m) model[k] += s[k] * d
@@ -149,17 +152,70 @@ object BatteryEqFit {
      * of [state] taken out, so it lines up with LToTS's own curve on the EQ graph. [points]
      * samples from 20 Hz to 20 kHz, like the graph.
      */
-    fun phoneCurve(state: EqState, layout: PhoneEqLayout, levels: FloatArray, points: Int = 240): FloatArray {
+    fun phoneCurve(state: EqState, layout: PhoneEqLayout, levels: FloatArray, points: Int = 240, bassDb: Float = 0f): FloatArray {
         val freqs = DoubleArray(points) { i -> 20.0 * 1000.0.pow(i / (points - 1.0)) }
         val shift = if (state.enabled) EqMath.inputGainDb(state, FS) else 0.0
-        val r = phoneResponse(layout, levels, freqs)
+        val r = responseWithBass(layout, levels, bassDb, freqs)
         return FloatArray(points) { i -> (r[i] - shift).toFloat() }
     }
 
-    /** How far apart the phone's version and the real curve are (RMS dB over the audible range). */
-    fun errorDb(state: EqState, layout: PhoneEqLayout, levels: FloatArray): Double {
+    // ---- with the phone's bass boost -----------------------------------------------------------
+
+    /** The phone's bass boost, modelled as a low shelf (it lifts only the deep bass). */
+    const val BASS_HZ = 90f
+    const val BASS_MAX_DB = 15f
+
+    private fun bassFilter(db: Float): BiquadCoefs =
+        BiquadCoefs.design(EqBand(0, FilterType.LOW_SHELF, BASS_HZ, db, 0.7f), FS)
+
+    /**
+     * Like [fit], with the phone's bass boost as one more (boost-only) band: levels for the
+     * EQ's bands, then the bass boost in dB. The bass boost is only used when it makes the curve
+     * clearly closer; otherwise it's 0.
+     */
+    fun fitWithBass(state: EqState, layout: PhoneEqLayout): Pair<FloatArray, Float> {
+        val plain = fit(state, layout)
+        val n = layout.bandCount
+        if (n == 0 || !state.enabled || EqMath.isNeutral(state)) return plain to 0f
         val t = target(state)
-        val got = phoneResponse(layout, levels, grid)
-        return kotlin.math.sqrt(t.indices.sumOf { (t[it] - got[it]).let { d -> d * d } } / t.size)
+        val shape = Array(n + 1) { i ->
+            val c = if (i < n) bandFilter(layout, i, 6f) else bassFilter(6f)
+            DoubleArray(grid.size) { k -> c.magnitudeDb(grid[k], FS) / 6.0 }
+        }
+        val lo = DoubleArray(n + 1) { if (it < n) layout.minDb.toDouble() else 0.0 }
+        val hi = DoubleArray(n + 1) { if (it < n) layout.maxDb.toDouble() else BASS_MAX_DB.toDouble() }
+        val levels = FloatArray(n)
+        var bass = 0f
+        var aim = t
+        repeat(4) {
+            val g = leastSquares(shape, aim, lo, hi)
+            for (i in 0 until n) levels[i] = g[i].toFloat()
+            bass = g[n].toFloat()
+            val got = responseWithBass(layout, levels, bass, grid)
+            aim = DoubleArray(grid.size) { k -> aim[k] + (t[k] - got[k]) }
+        }
+        val rounded = FloatArray(n) { i -> if (levels[i].isFinite()) (levels[i] * 10f).roundToInt() / 10f else 0f }
+        val b = if (bass.isFinite()) (bass * 10f).roundToInt() / 10f else 0f
+        // Worth it only if the bass gets clearly closer and nothing else gets worse.
+        val before = errorDb(state, layout, plain)
+        val after = errorDb(state, layout, rounded, b)
+        val bassBefore = errorDb(state, layout, plain, 0f, maxHz = 250.0)
+        val bassAfter = errorDb(state, layout, rounded, b, maxHz = 250.0)
+        return if (b >= 0.5f && bassAfter < bassBefore - 0.5 && after <= before + 0.05) rounded to b else plain to 0f
+    }
+
+    private fun responseWithBass(layout: PhoneEqLayout, levels: FloatArray, bassDb: Float, freqs: DoubleArray): DoubleArray {
+        val base = phoneResponse(layout, levels, freqs)
+        if (bassDb <= 0f) return base
+        val sh = bassFilter(bassDb)
+        return DoubleArray(freqs.size) { k -> base[k] + sh.magnitudeDb(freqs[k], FS) }
+    }
+
+    /** How far apart the phone's version and the real curve are (RMS dB over the audible range). */
+    fun errorDb(state: EqState, layout: PhoneEqLayout, levels: FloatArray, bassDb: Float = 0f, maxHz: Double = 1e9): Double {
+        val t = target(state)
+        val got = responseWithBass(layout, levels, bassDb, grid)
+        val idx = t.indices.filter { grid[it] <= maxHz }
+        return kotlin.math.sqrt(idx.sumOf { (t[it] - got[it]).let { d -> d * d } } / idx.size)
     }
 }

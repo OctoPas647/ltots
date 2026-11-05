@@ -104,7 +104,7 @@ fun EqScreen(player: PlayerUi) {
     val phoneReady = phoneEq as? com.ltots.app.audio.PhoneEq.Status.Ready
     val phoneCurve = remember(eq, phoneReady, batteryEq) {
         if (!batteryEq || phoneReady == null || !eq.enabled || com.ltots.app.audio.EqMath.isNeutral(eq)) null
-        else com.ltots.app.audio.BatteryEqFit.phoneCurve(eq, phoneReady.layout, phoneReady.levels)
+        else com.ltots.app.audio.BatteryEqFit.phoneCurve(eq, phoneReady.layout, phoneReady.levels, bassDb = phoneReady.bassDb)
     }
     val visual = rememberLiveVisual()
     var selectedId by remember { mutableStateOf<Long?>(null) }

@@ -535,6 +535,13 @@ private fun AppSettingsCard() {
                     if (settings.efficientPitch && settings.preserveFormants) " Not used while Natural voices is on: only the full engine keeps voices natural." else "",
             )
             SwitchRow(
+                "Lightest speed engine", settings.lightestSpeed,
+                { on -> AudioEngine.updateSettings { it.copy(lightestSpeed = on) } },
+                sub = "Speed changes at original pitch use Sonic, Android's own simple speed changer, instead of Rubber Band: " +
+                    "far less processing (and battery), but it can sound a little choppy on music. Pitch changes and tape mode aren't affected " +
+                    "(tape mode is already the cheapest: plain resampling).",
+            )
+            SwitchRow(
                 "Battery card", settings.batteryStats, { on -> AudioEngine.updateSettings { it.copy(batteryStats = on) } },
                 sub = "Shows, at the top of this page, how your last listening session played: how much the audio chip played by " +
                     "itself, how much was pre-rendered or processed, and how much battery the phone used meanwhile.",

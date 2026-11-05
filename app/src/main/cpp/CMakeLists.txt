@@ -5,13 +5,18 @@ project(ltots_native C CXX)
 # Built as a single compilation unit with its own FFT and resampler, plus the JNI bindings.
 set(RB ${CMAKE_CURRENT_SOURCE_DIR}/rubberband)
 
+# The same library also carries LToTS's own native DSP (ltots/ltots_dsp.cpp): the EQ's filter
+# cascade, the tape-mode resampler and the FFTs (see NativeDsp.kt).
 add_library(rubberband-jni SHARED
     ${RB}/single/RubberBandSingle.cpp
-    ${RB}/src/jni/RubberBandStretcherJNI.cpp)
+    ${RB}/src/jni/RubberBandStretcherJNI.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ltots/ltots_dsp.cpp)
 
 target_include_directories(rubberband-jni PRIVATE ${RB} ${RB}/src)
 target_compile_features(rubberband-jni PRIVATE cxx_std_17)
-target_compile_options(rubberband-jni PRIVATE -O3 -Wno-unused-parameter)
+# -ffast-math lets the compiler vectorise Rubber Band's (and the EQ's) float loops with NEON:
+# the same setting the desktop build for the tests has always used.
+target_compile_options(rubberband-jni PRIVATE -O3 -ffast-math -fno-math-errno -Wno-unused-parameter)
 # Android 15+ devices may use 16 KB memory pages.
 target_link_options(rubberband-jni PRIVATE "-Wl,-z,max-page-size=16384")
 target_link_libraries(rubberband-jni PRIVATE log)

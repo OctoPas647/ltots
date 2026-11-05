@@ -24,6 +24,19 @@ import kotlin.math.abs
 @UnstableApi
 class TimePitchProcessor(@Volatile var source: SoundSource = StaticSoundSource()) : BaseAudioProcessor() {
 
+    /**
+     * Which engine is in the path: none, Rubber Band, the native resampler (tape: pitch moves
+     * with speed, which is exactly resampling, about 10× cheaper than a pitch shifter) or Sonic
+     * (Lightest: speed changes at original pitch, much cheaper than Rubber Band, a bit rougher).
+     */
+    private enum class Mode { PASS, RB, TAPE, SONIC }
+    private var mode = Mode.PASS
+    private var lightest = false
+    private var resampler = 0L
+    private var sonic: androidx.media3.common.audio.SonicAudioProcessor? = null
+    private var tapeIn = FloatArray(0)
+    private var tapeOut = FloatArray(0)
+
     private var rb: RubberBandStretcher? = null
     private var rbRate = 0
     private var rbChannels = 0
@@ -81,14 +94,17 @@ class TimePitchProcessor(@Volatile var source: SoundSource = StaticSoundSource()
         pitch = source.pitchScaleFor(mediaId)
         formants = source.preserveFormants
         efficient = source.efficientPitch
+        lightest = source.lightestSpeed
         seenVersion = source.version
         pendingFrames = 0
         endHandled = false
         engaged = false
+        mode = Mode.PASS
         if (needsEngine()) engage()
     }
 
     override fun onReset() {
+        releaseLight()
         rb?.dispose()
         rb = null
         rbRate = 0
@@ -114,8 +130,45 @@ class TimePitchProcessor(@Volatile var source: SoundSource = StaticSoundSource()
     /** If the native engine can't start, keep playing untouched rather than failing. */
     @Volatile var engineError: Throwable? = null; private set
 
+    /** The engine that fits the current pitch and speed. */
+    private fun chooseMode(): Mode = when {
+        !needsEngine() -> Mode.PASS
+        lightest && abs(pitch - 1.0) < 1e-6 -> Mode.SONIC
+        NativeDsp.available && abs(pitch - speed) < 1e-9 -> Mode.TAPE
+        else -> Mode.RB
+    }
+
+    private fun releaseLight() {
+        if (resampler != 0L) { NativeDsp.resamplerDestroy(resampler); resampler = 0L }
+        sonic?.reset()
+        sonic = null
+    }
+
     private fun engage() {
-        if (engineError != null) return
+        mode = chooseMode()
+        releaseLight()
+        when (mode) {
+            Mode.PASS -> { engaged = false; return }
+            Mode.TAPE -> {
+                resampler = NativeDsp.resamplerCreate(channels, speed)
+                framesIn = 0; framesOut = 0
+                engaged = true
+                return
+            }
+            Mode.SONIC -> {
+                sonic = androidx.media3.common.audio.SonicAudioProcessor().apply {
+                    setSpeed(speed.toFloat())
+                    setPitch(1f)
+                    configure(AudioFormat(sampleRate, channels, C.ENCODING_PCM_FLOAT))
+                    flush(AudioProcessor.StreamMetadata.DEFAULT)
+                }
+                framesIn = 0; framesOut = 0
+                engaged = true
+                return
+            }
+            Mode.RB -> {}
+        }
+        if (engineError != null) { mode = Mode.PASS; return }
         try {
             engageUnsafe()
         } catch (t: Throwable) {
@@ -166,21 +219,37 @@ class TimePitchProcessor(@Volatile var source: SoundSource = StaticSoundSource()
         val p = source.pitchScaleFor(mediaId)
         val f = source.preserveFormants
         val e = source.efficientPitch
-        if (!engaged || usesFaster(e, f) != usesFaster(efficient, formants)) {
-            // Not running yet, or switching engines (a fresh start, heard as a tiny skip).
-            pitch = p
-            formants = f
+        val l = source.lightestSpeed
+        // Which engine the new settings want.
+        val oldPitch = pitch; val oldLightest = lightest
+        pitch = p; lightest = l
+        val wanted = chooseMode()
+        pitch = oldPitch; lightest = oldLightest
+
+        if (engaged && mode == Mode.RB && wanted == Mode.RB && usesFaster(e, f) == usesFaster(efficient, formants)) {
+            // Same Rubber Band engine: pitch and formants change live, sample-accurately.
+            lightest = l
             efficient = e
-            engaged = false
-            if (needsEngine()) engage()
+            val s = rb ?: return
+            if (p != pitch) { pitch = p; s.setPitchScale(p) }
+            if (f != formants) {
+                formants = f
+                s.setFormantOption(if (f) RubberBandStretcher.OptionFormantPreserved else 0)
+            }
             return
         }
-        val s = rb ?: return
-        if (p != pitch) { pitch = p; s.setPitchScale(p) }
-        if (f != formants) {
-            formants = f
-            s.setFormantOption(if (f) RubberBandStretcher.OptionFormantPreserved else 0)
+        if (engaged && wanted == mode && mode != Mode.RB && p == pitch) {
+            // A light engine with nothing that affects it changed.
+            formants = f; efficient = e; lightest = l
+            return
         }
+        // Not running yet, or switching engines (a fresh start, heard as a tiny skip).
+        pitch = p
+        formants = f
+        efficient = e
+        lightest = l
+        engaged = false
+        if (needsEngine()) engage() else { releaseLight(); mode = Mode.PASS }
     }
 
     override fun queueInput(inputBuffer: ByteBuffer) {
@@ -200,6 +269,15 @@ class TimePitchProcessor(@Volatile var source: SoundSource = StaticSoundSource()
             totalOut += frames
             inputBuffer.position(inputBuffer.limit())
             out.flip()
+            return
+        }
+
+        if (mode == Mode.TAPE) { tapeProcess(inputBuffer, frames, last = false); return }
+        if (mode == Mode.SONIC) {
+            val so = sonic!!
+            so.queueInput(inputBuffer)
+            inputBuffer.position(inputBuffer.limit())
+            emitBuffer(so.output)
             return
         }
 
@@ -227,6 +305,31 @@ class TimePitchProcessor(@Volatile var source: SoundSource = StaticSoundSource()
     override fun onQueueEndOfStream() {
         if (endHandled) return
         endHandled = true
+        if (engaged && mode == Mode.TAPE) {
+            tapeProcess(null, 0, last = true)
+            engaged = false
+            return
+        }
+        if (engaged && mode == Mode.SONIC) {
+            val so = sonic!!
+            so.queueEndOfStream()
+            val out = ArrayList<ByteBuffer>()
+            var guard = 0
+            while (!so.isEnded && guard++ < 1000) {
+                val o = so.output
+                if (!o.hasRemaining()) break
+                out += ByteBuffer.allocate(o.remaining()).order(ByteOrder.nativeOrder()).put(o).also { it.flip() }
+            }
+            val total = out.sumOf { it.remaining() }
+            if (total > 0) {
+                val dst = replaceOutputBuffer(total)
+                for (b in out) dst.put(b)
+                dst.flip()
+                totalOut += total / (4 * channels)
+            }
+            engaged = false
+            return
+        }
         val s = rb
         if (!engaged || s == null) return
         pendingFrames = 0
@@ -248,6 +351,39 @@ class TimePitchProcessor(@Volatile var source: SoundSource = StaticSoundSource()
     }
 
     private var endHandled = false
+
+    /** Tape mode: the native resampler, a block at a time (and its tail at the end). */
+    private fun tapeProcess(input: ByteBuffer?, frames: Int, last: Boolean) {
+        val ch = channels
+        val n = frames * ch
+        if (tapeIn.size < maxOf(n, 1)) tapeIn = FloatArray(maxOf(n, 1))
+        if (input != null && n > 0) {
+            input.order(ByteOrder.nativeOrder()).asFloatBuffer().get(tapeIn, 0, n)
+            input.position(input.limit())
+        }
+        val cap = if (last) (1 shl 16) else (frames / speed).toInt() + 512
+        if (tapeOut.size < cap * ch) tapeOut = FloatArray(cap * ch)
+        val got = NativeDsp.resamplerProcess(resampler, tapeIn, frames, tapeOut, cap, last)
+        framesIn += frames
+        framesOut += got
+        if (got <= 0) return
+        val m = got * ch
+        val out = replaceOutputBuffer(m * 4)
+        out.asFloatBuffer().put(tapeOut, 0, m)
+        out.position(m * 4)
+        out.flip()
+        totalOut += got
+    }
+
+    /** Hands on what a light engine produced. */
+    private fun emitBuffer(o: ByteBuffer) {
+        val bytes = o.remaining()
+        if (bytes <= 0) return
+        val out = replaceOutputBuffer(bytes)
+        out.put(o)
+        out.flip()
+        totalOut += bytes / (4 * channels)
+    }
 
     private fun drain(s: RubberBandStretcher) {
         val ch = channels
@@ -299,7 +435,12 @@ class TimePitchProcessor(@Volatile var source: SoundSource = StaticSoundSource()
     }
 
     /** True while the R2 engine is in use. */
-    val usesFasterEngine: Boolean get() = engaged && usesFaster(efficient, formants)
+    val usesFasterEngine: Boolean get() = engaged && mode == Mode.RB && usesFaster(efficient, formants)
+
+    /** Which engine is working now: "none", "rubberband", "tape" or "sonic" (for tests and diagnostics). */
+    val engineName: String get() = if (!engaged) "none" else when (mode) {
+        Mode.PASS -> "none"; Mode.RB -> "rubberband"; Mode.TAPE -> "tape"; Mode.SONIC -> "sonic"
+    }
 
     companion object {
         const val CHUNK = 1024

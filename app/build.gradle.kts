@@ -24,16 +24,18 @@ val buildNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
 val hostLibDir = layout.buildDirectory.dir("hostlib")
 val buildHostRubberBand by tasks.registering(Exec::class) {
     val rb = file("src/main/cpp/rubberband")
+    val dsp = file("src/main/cpp/ltots/ltots_dsp.cpp")
     val out = hostLibDir.map { it.file("librubberband-jni.so") }
     val javaHome = File(System.getProperty("java.home"))
     inputs.dir(rb)
+    inputs.file(dsp)
     outputs.file(out)
     doFirst { hostLibDir.get().asFile.mkdirs() }
     commandLine(
         "g++", "-O3", "-ffast-math", "-fPIC", "-shared", "-std=c++17",
         "-I$rb", "-I$rb/src",
         "-I${javaHome}/include", "-I${javaHome}/include/linux",
-        "$rb/single/RubberBandSingle.cpp", "$rb/src/jni/RubberBandStretcherJNI.cpp",
+        "$rb/single/RubberBandSingle.cpp", "$rb/src/jni/RubberBandStretcherJNI.cpp", dsp.absolutePath,
         "-o", out.get().asFile.absolutePath,
     )
 }

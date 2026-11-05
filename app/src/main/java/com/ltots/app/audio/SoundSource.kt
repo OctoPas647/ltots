@@ -19,6 +19,8 @@ interface SoundSource {
     val preserveFormants: Boolean
     /** Use the lighter (battery-saving) pitch/speed engine. */
     val efficientPitch: Boolean get() = false
+    /** Lightest: speed changes at original pitch use Sonic instead of Rubber Band. */
+    val lightestSpeed: Boolean get() = false
 }
 
 /** A fixed source for tests and for before the app is initialised. */
@@ -27,6 +29,7 @@ open class StaticSoundSource(
     var pitch: Double = 1.0,
     override var preserveFormants: Boolean = false,
     override var efficientPitch: Boolean = false,
+    override var lightestSpeed: Boolean = false,
 ) : SoundSource {
     @Volatile override var version: Int = 0
     override fun eqFor(mediaId: String?) = eq

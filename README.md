@@ -274,8 +274,22 @@ newer APK updates the app and keeps your settings.
     seconds, into a 256 kb/s Opus or 320 kb/s AAC file (whichever the phone's audio chip takes), and
     the chip plays that by itself. Up to 300 MB of cache; any EQ or pitch edit puts songs back on
     their own files. Songs with a changed speed stay live.
-  - with the screen off the audio buffer grows from 0.5 s to 4 s, so the processor (when it has
-    to work) wakes about 8× less often; beats for Move with the beat are only worked out while
+  - **Native DSP** (cpp/ltots/ltots_dsp.cpp): the EQ's filter cascade (left and right together
+    in one NEON register), the live spectrum's FFT, the double-precision FFT used by the song
+    finder, beats and moods, and a windowed-sinc resampler all run as native code instead of
+    Kotlin. Rubber Band is built with -ffast-math so its loops vectorise.
+  - **Tape mode** (pitch moves with speed) is plain resampling now, not a pitch shifter: about
+    10× less work and a truer tape sound. **Lightest speed engine** (switch, and a screen-off
+    option): speed changes at original pitch with Media3's Sonic instead of Rubber Band.
+  - **Speed on the audio chip**: on phones whose chip changes speed itself
+    (offloadVariableRateSupported), a speed change at original pitch keeps the chip playing by
+    itself; pre-rendered songs then only bake in the pitch.
+  - **5-band + bass boost**: the 5-band mode also uses the phone's bass boost for the deepest bass
+    when it clearly brings the curve closer; if it turns out to stop the chip playing by itself,
+    it's left out from then on.
+  - pre-render works whenever LToTS isn't on screen (screen off or another app), and the audio
+    buffer is 8 s then (0.5 s while LToTS is open), so the processor (when it has to work) wakes
+    about 16× less often; beats for Move with the beat are only worked out while
     that's on and the screen is on; the home-screen icon colour waits for the screen;
   - **Sleep timer**: the moon on the Playing tab, or in the notification / lock screen (starts the
     usual length, tap again to stop). Fade-out, finish the song, and the lengths are in Profile.

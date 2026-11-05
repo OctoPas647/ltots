@@ -26,7 +26,16 @@ class EqProcessor(
     @Volatile var source: SoundSource = StaticSoundSource(),
 ) : BaseAudioProcessor() {
 
-    private class Plan(val sections: Array<Section>, val gain: Double, val state: EqState)
+    private class Plan(val sections: Array<Section>, val gain: Double, val state: EqState) {
+        /** For the native cascade: every section's coefficients, and room for their memory. */
+        val coefs = DoubleArray(sections.size * 5).also { k ->
+            sections.forEachIndexed { i, s ->
+                val c = s.coefs
+                k[i * 5] = c.b0; k[i * 5 + 1] = c.b1; k[i * 5 + 2] = c.b2; k[i * 5 + 3] = c.a1; k[i * 5 + 4] = c.a2
+            }
+        }
+        val memory = DoubleArray(sections.sumOf { it.channels * 2 })
+    }
 
     private var plan: Plan? = null
     /** Previous plan while a crossfade is running. */
@@ -212,6 +221,17 @@ class EqProcessor(
             return
         }
         val ch = channels
+        if (NativeDsp.available) {
+            // Native: the whole cascade without a call per sample (and on ARM, left and right
+            // together). The sections' memory goes in and comes back out around it.
+            val mem = p.memory
+            var o = 0
+            for (s in secs) { s.saveTo(mem, o); o += 2 * s.channels }
+            NativeDsp.cascade(x, frames, ch, g, p.coefs, mem, secs.size)
+            o = 0
+            for (s in secs) { s.loadFrom(mem, o); o += 2 * s.channels }
+            return
+        }
         var i = 0
         for (f in 0 until frames) {
             for (c in 0 until ch) {
@@ -273,6 +293,15 @@ class EqProcessor(
             z1[c] = k.b1 * x - k.a1 * y + z2[c]
             z2[c] = k.b2 * x - k.a2 * y
             return y
+        }
+
+        /** Memory as z1 per channel then z2 per channel, at [at] (the native cascade's layout). */
+        fun saveTo(m: DoubleArray, at: Int) {
+            z1.copyInto(m, at); z2.copyInto(m, at + channels)
+        }
+
+        fun loadFrom(m: DoubleArray, at: Int) {
+            m.copyInto(z1, 0, at, at + channels); m.copyInto(z2, 0, at + channels, at + 2 * channels)
         }
 
         fun copyStateFrom(o: Section) {
