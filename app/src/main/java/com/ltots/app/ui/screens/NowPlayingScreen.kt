@@ -121,6 +121,8 @@ fun NowPlayingScreen(
             com.ltots.app.ui.glass.GlassCircleButton({ onShowHistory(true) }, Modifier.align(Alignment.CenterEnd).size(chipHeight)) {
                 Icon(Icons.Rounded.History, "History", tint = pal.text, modifier = Modifier.size(chipHeight * 0.56f))
             }
+            // The sleep timer, on the other side of the output chip.
+            SleepTimerButton(chipHeight, Modifier.align(Alignment.CenterStart))
         Row(Modifier.fillMaxWidth().padding(horizontal = 48.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
             GlassPanel(
                 Modifier.onSizeChanged { with(density) { chipHeight = it.height.toDp() } },

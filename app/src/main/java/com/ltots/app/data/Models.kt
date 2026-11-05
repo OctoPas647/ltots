@@ -312,7 +312,46 @@ data class AppSettings(
     val onlyMostPlayed: Boolean = false,
     /** Home tab: the country for trending songs, popular artists and charts ("ZZ" = worldwide). */
     val chartsRegion: String = "ZZ",
+    /** Screen off: what happens to the EQ (battery first: the phone's own 5-band EQ). */
+    val screenOffEq: ScreenOffEq = ScreenOffEq.FIVE_BAND,
+    /** Screen off: what happens to pitch and speed (battery first: the lighter engine). */
+    val screenOffPitch: ScreenOffPitch = ScreenOffPitch.LIGHTER,
+    /**
+     * Screen off: sound that still needs LToTS's processing is worked out ahead, a song at a
+     * time, into a file the audio chip plays by itself, so the processor sleeps.
+     */
+    val preRender: Boolean = true,
+    /** Sleep timer: lengths offered, in minutes. */
+    val sleepPresets: List<Int> = listOf(15, 30, 45, 60, 90),
+    /** Sleep timer: the length the notification's moon button starts. */
+    val sleepMinutes: Int = 30,
+    /** Sleep timer: the music fades out over the last [sleepFadeSeconds] instead of stopping dead. */
+    val sleepFade: Boolean = true,
+    val sleepFadeSeconds: Int = 30,
+    /** Sleep timer: when the time is up, let the song that's playing finish first. */
+    val sleepFinishSong: Boolean = false,
+    /** Profile: show the card with how efficiently the last listening session played. */
+    val batteryStats: Boolean = true,
 )
+
+/** What the EQ does while the screen is off. */
+enum class ScreenOffEq(val label: String) {
+    /** Exactly the same EQ (processed by LToTS, or pre-rendered). */
+    SAME("Same"),
+    /** The phone's own EQ plays a fitted 5-band version, so the audio chip plays by itself. */
+    FIVE_BAND("5-band"),
+    /** No EQ at all with the screen off. */
+    OFF("Off"),
+}
+
+/** What pitch and speed do while the screen is off. */
+enum class ScreenOffPitch(val label: String) {
+    SAME("Same"),
+    /** The lighter Rubber Band engine (about half the processing). */
+    LIGHTER("Lighter"),
+    /** Original pitch and speed with the screen off. */
+    OFF("Off"),
+}
 
 /** Hand-written JSON (de)serialisation — no reflection, so it survives R8 untouched. */
 object Json {
@@ -485,6 +524,14 @@ object Json {
         put("onlyHits", s.onlyHits)
         put("onlyMostPlayed", s.onlyMostPlayed)
         put("region", s.chartsRegion)
+        put("offEq", s.screenOffEq.name)
+        put("offPitch", s.screenOffPitch.name)
+        put("preRender", s.preRender)
+        put("sleepPresets", JSONArray(s.sleepPresets))
+        put("sleepMin", s.sleepMinutes)
+        put("sleepFade", s.sleepFade); put("sleepFadeS", s.sleepFadeSeconds)
+        put("sleepFinish", s.sleepFinishSong)
+        put("batteryStats", s.batteryStats)
     }
 
     fun settings(o: JSONObject) = AppSettings(
@@ -504,5 +551,15 @@ object Json {
         onlyHits = o.optBoolean("onlyHits", false),
         onlyMostPlayed = o.optBoolean("onlyMostPlayed", false),
         chartsRegion = o.optString("region", "ZZ").ifBlank { "ZZ" },
+        screenOffEq = runCatching { ScreenOffEq.valueOf(o.optString("offEq")) }.getOrDefault(ScreenOffEq.FIVE_BAND),
+        screenOffPitch = runCatching { ScreenOffPitch.valueOf(o.optString("offPitch")) }.getOrDefault(ScreenOffPitch.LIGHTER),
+        preRender = o.optBoolean("preRender", true),
+        sleepPresets = o.optJSONArray("sleepPresets")?.let { a -> List(a.length()) { a.optInt(it) }.filter { it in 1..600 }.distinct().sorted() }
+            ?.takeIf { it.isNotEmpty() } ?: listOf(15, 30, 45, 60, 90),
+        sleepMinutes = o.optInt("sleepMin", 30).coerceIn(1, 600),
+        sleepFade = o.optBoolean("sleepFade", true),
+        sleepFadeSeconds = o.optInt("sleepFadeS", 30).coerceIn(5, 120),
+        sleepFinishSong = o.optBoolean("sleepFinish", false),
+        batteryStats = o.optBoolean("batteryStats", true),
     )
 }

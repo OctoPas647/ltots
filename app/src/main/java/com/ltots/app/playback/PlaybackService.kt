@@ -2,13 +2,17 @@ package com.ltots.app.playback
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.ltots.app.MainActivity
@@ -36,6 +40,7 @@ class PlaybackService : MediaSessionService() {
         val player = AudioEngine.buildPlayer(this)
         player.addListener(object : Player.Listener {
             override fun onEvents(player: Player, events: Player.Events) {
+                if (events.contains(Player.EVENT_IS_PLAYING_CHANGED) && !player.isPlaying) SleepTimer.onPaused()
                 if (!events.containsAny(Player.EVENT_PLAY_WHEN_READY_CHANGED, Player.EVENT_PLAYBACK_STATE_CHANGED)) return
                 handler.removeCallbacks(releaseIdle)
                 if (!player.playWhenReady && player.playbackState != Player.STATE_IDLE) {
@@ -49,7 +54,29 @@ class PlaybackService : MediaSessionService() {
         )
         session = MediaSession.Builder(this, player)
             .setSessionActivity(openApp)
+            .setMediaButtonPreferences(listOf(sleepButton()))
             .setCallback(object : MediaSession.Callback {
+                // The sleep timer's moon button in the notification and on the lock screen.
+                override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult =
+                    MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                        .setAvailableSessionCommands(
+                            MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon().add(SLEEP_COMMAND).build()
+                        )
+                        .build()
+
+                override fun onCustomCommand(
+                    session: MediaSession,
+                    controller: MediaSession.ControllerInfo,
+                    customCommand: SessionCommand,
+                    args: Bundle,
+                ): ListenableFuture<SessionResult> {
+                    if (customCommand.customAction == SLEEP_ACTION) {
+                        SleepTimer.toggle(this@PlaybackService)
+                        return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                    }
+                    return super.onCustomCommand(session, controller, customCommand, args)
+                }
+
                 // Controllers don't pass the playable URI across, so restore it from requestMetadata.
                 override fun onAddMediaItems(
                     mediaSession: MediaSession,
@@ -63,6 +90,19 @@ class PlaybackService : MediaSessionService() {
                 )
             })
             .build()
+        SleepTimer.init(this)
+        SleepTimer.onChanged = { session?.setMediaButtonPreferences(listOf(sleepButton())) }
+    }
+
+    /** The moon: filled while the timer runs. Tap starts the usual length, or stops it. */
+    private fun sleepButton(): CommandButton {
+        val on = SleepTimer.state.value != null
+        return CommandButton.Builder(CommandButton.ICON_UNDEFINED)
+            .setCustomIconResId(if (on) com.ltots.app.R.drawable.ic_sleep_on else com.ltots.app.R.drawable.ic_sleep)
+            .setDisplayName(if (on) "Stop sleep timer" else "Sleep timer (${AudioEngine.settings.value.sleepMinutes} min)")
+            .setSessionCommand(SLEEP_COMMAND)
+            .setSlots(CommandButton.SLOT_OVERFLOW)
+            .build()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
@@ -74,6 +114,8 @@ class PlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         handler.removeCallbacks(releaseIdle)
+        SleepTimer.onChanged = null
+        SleepTimer.cancel()
         session?.run {
             release()
             session = null
@@ -84,5 +126,7 @@ class PlaybackService : MediaSessionService() {
 
     private companion object {
         const val IDLE_RELEASE_MS = 10 * 60 * 1000L
+        const val SLEEP_ACTION = "com.ltots.app.SLEEP_TIMER_TOGGLE"
+        val SLEEP_COMMAND = SessionCommand(SLEEP_ACTION, Bundle.EMPTY)
     }
 }

@@ -45,6 +45,9 @@ object StreamIds {
         val tl = meta.timeline
         if (tl.isEmpty) return null
         val p = tl.getPeriodByUid(uid, period.get()!!)
-        tl.getWindow(p.windowIndex, window.get()!!).mediaItem.mediaId.takeIf { it.isNotBlank() }
+        val item = tl.getWindow(p.windowIndex, window.get()!!).mediaItem
+        val id = item.mediaId.takeIf { it.isNotBlank() } ?: return null
+        // A pre-rendered file has its EQ and pitch in it already (see PreRender).
+        if (PreRender.isRendered(item)) id + PreRender.ID_SUFFIX else id
     }.getOrNull()
 }

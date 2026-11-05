@@ -54,11 +54,16 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         com.ltots.app.ui.IconColor.onForeground(true)
+        // Screen-off sound modes give way to full quality while LToTS is open.
+        com.ltots.app.audio.AudioEngine.setAppInFront(true)
     }
 
     override fun onStop() {
         super.onStop()
-        if (!isChangingConfigurations) com.ltots.app.ui.IconColor.onForeground(false)
+        if (!isChangingConfigurations) {
+            com.ltots.app.ui.IconColor.onForeground(false)
+            com.ltots.app.audio.AudioEngine.setAppInFront(false)
+        }
     }
 
     override fun onResume() {

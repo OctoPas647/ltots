@@ -264,6 +264,26 @@ newer APK updates the app and keeps your settings.
     fitted to its few fixed bands, so on phones whose EQ can run on the audio chip the chip keeps
     playing by itself even with an EQ on. The EQ tab draws the simplified curve dashed; the switch says
     live whether it's working on your phone.
+  - **Screen off** (Profile > App settings · screen off): what the EQ does with the screen off —
+    *Same*, *5-band* (the phone's own EQ plays a fitted version so the chip plays by itself; the
+    default) or *Off* — and pitch & speed — *Same*, *Lighter* (the R2 engine; the default) or *Off*.
+    The switch happens between songs (or at once while paused), never mid-song, and opening LToTS
+    brings full quality straight back.
+  - **Pre-render** (on by default): with the screen off, the next song that still needs LToTS's
+    processing is worked out ahead — its exact EQ and pitch, the same engine as live — in a few
+    seconds, into a 256 kb/s Opus or 320 kb/s AAC file (whichever the phone's audio chip takes), and
+    the chip plays that by itself. Up to 300 MB of cache; any EQ or pitch edit puts songs back on
+    their own files. Songs with a changed speed stay live.
+  - with the screen off the audio buffer grows from 0.5 s to 4 s, so the processor (when it has
+    to work) wakes about 8× less often; beats for Move with the beat are only worked out while
+    that's on and the screen is on; the home-screen icon colour waits for the screen;
+  - **Sleep timer**: the moon on the Playing tab, or in the notification / lock screen (starts the
+    usual length, tap again to stop). Fade-out, finish the song, and the lengths are in Profile.
+    One alarm and nothing ticking; "Precise timing" lets it stop on the dot while the processor
+    sleeps;
+  - **Battery card** (Profile, switchable): how the last listening session played — the share played
+    by the chip by itself, pre-rendered or processed, time with the screen off, and the phone's
+    mAh per hour of listening;
   - the player only wakes when the audio output actually needs more sound, instead of every
     10 ms;
   - after 10 minutes paused, the decoder and audio output are released (play resumes exactly

@@ -18,6 +18,7 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.media3.session.MediaSessionService
@@ -364,6 +365,24 @@ class NewControlsUiTest {
         click("Battery EQ (experimental)")
         idle(1000)
         assertTrue(!AudioEngine.batteryEqActive.value)
+    }
+
+    /** Profile: screen-off EQ / pitch choices, pre-render, the sleep timer's settings and the battery card switch. */
+    @Config(qualifiers = "w411dp-h2300dp-xxhdpi")
+    @Test fun screenOffAndSleepSettings() {
+        rule.mainClock.autoAdvance = false
+        idle()
+        tab("Profile")
+        rule.onNodeWithText("EQ with the screen off").performScrollTo()
+        idle()
+        screen("45_profile_screen_off")
+        // Pick Off for the EQ (the first "Off" on the page is the EQ's).
+        rule.onAllNodesWithText("Off")[0].performSemanticsAction(SemanticsActions.OnClick)
+        idle(500)
+        assertTrue(AudioEngine.settings.value.screenOffEq == com.ltots.app.data.ScreenOffEq.OFF)
+        click("Finish the song")
+        assertTrue(AudioEngine.settings.value.sleepFinishSong)
+        AudioEngine.updateSettings { com.ltots.app.data.AppSettings() }
     }
 
     /** Pitch can be tuned to the cent: fine slider, ±1 ct, and typing an exact value or A = 432 Hz. */

@@ -142,6 +142,9 @@ fun ProfileScreen() {
         }
         Spacer(Modifier.height(14.dp))
 
+        // How the last listening session played (Battery card, App settings).
+        BatteryStatsCard()
+
         UsersCard(onExport = { id, name -> export(ProfileTransfer.fileName("user", name)) { ProfileTransfer.userJson(context, id) } }, onImport = ::import)
         Spacer(Modifier.height(12.dp))
         LookProfilesCard(
@@ -497,6 +500,9 @@ private fun AppSettingsCard() {
             com.ltots.app.ui.components.FinderAccounts()
             Spacer(Modifier.height(10.dp))
 
+            ScreenOffSettings()
+            SleepTimerSettings()
+
             SectionTitle("App settings · quality & battery")
             SwitchRow(
                 "Power-saving playback", settings.directPlayback,
@@ -527,6 +533,11 @@ private fun AppSettingsCard() {
                 { on -> AudioEngine.updateSettings { it.copy(efficientPitch = on) } },
                 sub = "Uses the lighter Rubber Band engine: about half the processing (and battery) while pitch or speed is changed, with slightly less polished sound. Nothing runs at original pitch and speed either way." +
                     if (settings.efficientPitch && settings.preserveFormants) " Not used while Natural voices is on: only the full engine keeps voices natural." else "",
+            )
+            SwitchRow(
+                "Battery card", settings.batteryStats, { on -> AudioEngine.updateSettings { it.copy(batteryStats = on) } },
+                sub = "Shows, at the top of this page, how your last listening session played: how much the audio chip played by " +
+                    "itself, how much was pre-rendered or processed, and how much battery the phone used meanwhile.",
             )
         }
     }

@@ -2,6 +2,7 @@ package com.ltots.app.ui
 
 import android.content.ComponentName
 import android.content.Context
+import com.ltots.app.playback.ScreenState
 import android.content.pm.PackageManager
 import android.graphics.Color
 import com.ltots.app.ui.theme.DynamicColor
@@ -24,7 +25,7 @@ import kotlinx.coroutines.launch
  * of hue, res/mipmap-anydpi-v26/ic_launcher_cNN) as activity aliases and switches which one is
  * enabled. Switching while LToTS is open can make some launchers close it, so it only happens
  * while the app is in the background: when you leave it, and on later song changes while you're
- * away (at most once a minute). Grey covers keep the original icon.
+ * away (at most once a minute, and only while the screen is on). Grey covers keep the original icon.
  */
 object IconColor {
     const val COUNT = 20
@@ -47,9 +48,12 @@ object IconColor {
         _enabled.value = prefs().getBoolean("enabled", true)
         // Song changes while LToTS is in the background.
         scope.launch {
-            combine(DynamicColor.colors, ThemeState.config, inFront, _enabled) { _, _, front, _ -> front }
+            // Not while the screen is off: nobody sees the icon then, and every swap makes the
+            // launcher (and other apps listening for package changes) wake up and redo work.
+            // The swap waits and happens when the screen turns back on.
+            combine(DynamicColor.colors, ThemeState.config, inFront, _enabled, ScreenState.screenOn) { _, _, front, _, on -> !front && on }
                 .debounce(3_000)
-                .collect { front -> if (!front && System.currentTimeMillis() - lastSwitch > MIN_GAP_MS) apply() }
+                .collect { due -> if (due && System.currentTimeMillis() - lastSwitch > MIN_GAP_MS) apply() }
         }
     }
 
@@ -62,7 +66,7 @@ object IconColor {
     /** Called by the activity: true while it's on screen. Leaving the app swaps the icon. */
     fun onForeground(front: Boolean) {
         inFront.value = front
-        if (!front) scope.launch { apply() }
+        if (!front && ScreenState.screenOn.value) scope.launch { apply() }
     }
 
     /** The colour the UI shows right now, as the theme computes it. */

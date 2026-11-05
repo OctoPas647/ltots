@@ -14,6 +14,9 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import com.ltots.app.data.AppSettings
+import com.ltots.app.data.ScreenOffEq
+import com.ltots.app.data.ScreenOffPitch
+import com.ltots.app.playback.ScreenState
 import com.ltots.app.data.SongProfile
 import com.ltots.app.data.Store
 import kotlinx.coroutines.Job
@@ -23,6 +26,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicInteger
@@ -116,9 +121,27 @@ object AudioEngine : SoundSource {
         scope.launch { tap.info.collect { reapplyBitPerfect() } }
         // Battery EQ follows every EQ change (edits, presets, a new song's own EQ) as it happens.
         scope.launch { effectiveEq.collect { syncPhoneEq() } }
+        PreRender.init(appContext)
+        // Screen on/off: the audio buffer, the screen-off sound modes, pre-rendering.
+        scope.launch { ScreenState.screenOn.collect { on -> onScreen(on) } }
+        // Beats only feed the cover's Move with the beat, so they're worked out only while that's
+        // on and the screen is on (the songs that played meanwhile are done when it turns on).
+        scope.launch {
+            combine(ScreenState.screenOn, com.ltots.app.ui.theme.ThemeState.config.map { it.coverBeat }.distinctUntilChanged()) { on, beat -> on && beat }
+                .collect { if (it) prepareBeats() }
+        }
     }
 
     private fun changed() { versionCounter.incrementAndGet() }
+
+    /**
+     * The sound was changed by hand (EQ, pitch, speed, a setting, another user): heard at once,
+     * so pre-rendered songs that no longer match go back to their own files.
+     */
+    private fun edited() {
+        changed()
+        refreshRendered(includeCurrent = true)
+    }
 
     /**
      * Another user became the one in use: their settings, default EQ and each song's own EQ,
@@ -134,7 +157,7 @@ object AudioEngine : SoundSource {
             loadGlobalPitchSpeed()
             applySpeedToPlayer()
         }
-        changed()
+        edited()
         updateDirect()
         syncPhoneEq()
     }
@@ -145,14 +168,20 @@ object AudioEngine : SoundSource {
 
     override fun eqFor(mediaId: String?): EqState {
         if (!initialized) return EqState(enabled = false)
+        // A pre-rendered file already has its EQ in it.
+        if (mediaId != null && mediaId.endsWith(PreRender.ID_SUFFIX)) return EqState(enabled = false)
         // Battery EQ: the phone's own EQ shapes the sound, so LToTS's stays out of the way.
         if (phoneEqHandles) return EqState(enabled = false)
+        // Screen off with the EQ set to Off.
+        if (leanEq == ScreenOffEq.OFF) return EqState(enabled = false)
         val prof = mediaId?.let { Store.loadProfile(it) }
         return prof?.eq ?: defaultEq.value
     }
 
     override fun pitchScaleFor(mediaId: String?): Double {
         if (!initialized) return 1.0
+        if (mediaId != null && mediaId.endsWith(PreRender.ID_SUFFIX)) return 1.0
+        if (leanPitch == ScreenOffPitch.OFF) return 1.0
         val s = settings.value
         if (!s.perSongPitchSpeed || mediaId == null) return scaleOf(_pitchCents.value, _speed.value, _tape.value)
         val p = Store.loadProfile(mediaId)
@@ -160,7 +189,7 @@ object AudioEngine : SoundSource {
     }
 
     override val preserveFormants: Boolean get() = initialized && settings.value.preserveFormants
-    override val efficientPitch: Boolean get() = initialized && settings.value.efficientPitch
+    override val efficientPitch: Boolean get() = initialized && (settings.value.efficientPitch || leanPitch == ScreenOffPitch.LIGHTER)
 
     private fun scaleOf(cents: Int, speed: Float, tape: Boolean): Double =
         if (tape) speed.toDouble() else 2.0.pow(cents / 1200.0)
@@ -174,7 +203,7 @@ object AudioEngine : SoundSource {
                 context: Context,
                 enableFloatOutput: Boolean,
                 enableAudioOutputPlaybackParams: Boolean,
-            ): AudioSink = buildSink(context, chain)
+            ): AudioSink = buildSink(context, chain, ScreenOffBuffer.provider(context))
         }
         // Exact seeking: MP3s without a seek table (most VBR files) were seeked by an estimate, so
         // tapping a lyrics line (or the seek bar) landed a little off and the lyrics looked out
@@ -193,8 +222,11 @@ object AudioEngine : SoundSource {
             .build()
         p.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                // Between songs is when the screen-off sound modes switch (no gap mid-song).
+                latchLean()
                 onSongChanged(mediaItem)
                 prepareBeats()
+                maybePreRender()
                 com.ltots.app.data.PlayStats.onSong(mediaItem?.mediaId?.takeIf { it.isNotBlank() }, mediaItem?.mediaMetadata?.durationMs ?: 0L, p.isPlaying)
                 val md = mediaItem?.mediaMetadata
                 com.ltots.app.data.ListenHistory.onSong(
@@ -206,12 +238,17 @@ object AudioEngine : SoundSource {
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 _isPlaying.value = isPlaying
+                // Nothing is heard while paused, so modes can switch right away.
+                if (!isPlaying) latchLean()
+                PowerStats.onPlaying(isPlaying)
                 com.ltots.app.data.PlayStats.onPlaying(isPlaying)
                 com.ltots.app.data.ListenHistory.onPlaying(isPlaying)
                 // A song playing ends a recommendation preview.
                 if (isPlaying) com.ltots.app.recs.SongPreview.stop()
             }
-            override fun onTimelineChanged(timeline: Timeline, reason: Int) { updateDirect(); prepareBeats() }
+            override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+                updateDirect(); prepareBeats(); keepRenderedFiles(); maybePreRender()
+            }
             override fun onAudioSessionIdChanged(audioSessionId: Int) = syncPhoneEq()
         })
         _player.value = p
@@ -230,7 +267,10 @@ object AudioEngine : SoundSource {
         DefaultAudioSink.Builder(context)
             .setAudioProcessorChain(chain)
             .setExperimentalAudioOffloadListener(object : ExoPlayer.AudioOffloadListener {
-                override fun onOffloadedPlayback(offloaded: Boolean) { _direct.value = offloaded }
+                override fun onOffloadedPlayback(offloaded: Boolean) {
+                    _direct.value = offloaded
+                    PowerStats.onDirect(offloaded)
+                }
             })
             .apply { if (output != null) setAudioOutputProvider(output) }
             .build()
@@ -245,7 +285,9 @@ object AudioEngine : SoundSource {
         _direct.value = false
     }
 
-    private fun uriOf(item: MediaItem?): android.net.Uri? = item?.localConfiguration?.uri ?: item?.requestMetadata?.mediaUri
+    /** The song's own file (for a pre-rendered queue entry too). */
+    private fun uriOf(item: MediaItem?): android.net.Uri? =
+        PreRender.originalUri(item) ?: item?.localConfiguration?.uri ?: item?.requestMetadata?.mediaUri
 
     /** The playing song's file and the next one in the queue. */
     /** The playing song and the next [count] - 1 in the queue. */
@@ -264,6 +306,8 @@ object AudioEngine : SoundSource {
 
     /** Beats for the playing song and the next two, so each is ready before it plays. */
     private fun prepareBeats() {
+        // Only for Move with the beat, and only while someone can see it.
+        if (!com.ltots.app.ui.theme.ThemeState.config.value.coverBeat || !ScreenState.screenOn.value) return
         runCatching { BeatIndex.request(appContext, upcomingUris(3)) }
     }
 
@@ -274,6 +318,7 @@ object AudioEngine : SoundSource {
     }
 
     private fun onSongChanged(item: MediaItem?) {
+        PowerStats.onRendered(PreRender.isRendered(item))
         val key = item?.mediaId?.takeIf { it.isNotBlank() }
         _songKey.value = key
         _songUri.value = uriOf(item)
@@ -304,7 +349,7 @@ object AudioEngine : SoundSource {
             defaultEq.value = updated
             Store.saveDefaultEq(updated)
         }
-        changed()
+        edited()
         updateDirect(settle = true)
     }
 
@@ -313,7 +358,7 @@ object AudioEngine : SoundSource {
         val prof = (_songProfile.value ?: SongProfile()).copy(eq = effectiveEq.value)
         _songProfile.value = prof
         Store.saveProfile(key, prof)
-        changed()
+        edited()
         updateDirect()
     }
 
@@ -322,7 +367,7 @@ object AudioEngine : SoundSource {
         val prof = _songProfile.value?.copy(eq = null)
         _songProfile.value = prof
         Store.saveProfile(key, prof)
-        changed()
+        edited()
         updateDirect()
     }
 
@@ -340,7 +385,7 @@ object AudioEngine : SoundSource {
         if (c == _pitchCents.value) return
         _pitchCents.value = c
         persist()
-        changed()
+        edited()
         updateDirect(settle = true)
     }
 
@@ -358,7 +403,7 @@ object AudioEngine : SoundSource {
         // change speed), and only return to it once the speed is back to normal.
         updateDirect(settle = true)
         applySpeedToPlayer()
-        changed()
+        edited()
     }
 
     fun setTape(on: Boolean) {
@@ -377,7 +422,8 @@ object AudioEngine : SoundSource {
 
     private fun applySpeedToPlayer() {
         val p = _player.value ?: return
-        val s = _speed.value
+        // Screen off with pitch & speed set to Off: original speed.
+        val s = if (leanPitch == ScreenOffPitch.OFF) 1f else _speed.value
         if (abs(p.playbackParameters.speed - s) > 1e-4f || p.playbackParameters.pitch != 1f) {
             p.playbackParameters = PlaybackParameters(s, 1f)
         }
@@ -432,7 +478,7 @@ object AudioEngine : SoundSource {
             reapplyBitPerfect(forceRebuild = true)
         }
         if (old.batteryEq != new.batteryEq) syncPhoneEq()
-        changed()
+        edited()
         updateDirect()
     }
 
@@ -453,7 +499,7 @@ object AudioEngine : SoundSource {
     private fun syncPhoneEq() {
         if (!initialized) return
         val p = _player.value
-        val wanted = settings.value.batteryEq && p != null
+        val wanted = (settings.value.batteryEq || leanEq == ScreenOffEq.FIVE_BAND) && p != null
         val ready = wanted && phoneEq.attach(p!!.audioSessionId)
         if (ready) phoneEq.layout?.let { phoneEq.apply(BatteryEqFit.fit(effectiveEq.value, it)) }
         if (!wanted) phoneEq.release(off = true)
@@ -467,15 +513,169 @@ object AudioEngine : SoundSource {
         }
     }
 
-    /** Whether [eq] needs LToTS's processor (not when it's flat, or when the phone's EQ plays it). */
-    private fun eqNeedsProcessor(eq: EqState): Boolean = !phoneEqHandles && !EqMath.isNeutral(eq)
+    /** Whether [eq] needs LToTS's processor (not when it's flat, when the phone's EQ plays it, or with the screen-off EQ Off). */
+    private fun eqNeedsProcessor(eq: EqState): Boolean = !phoneEqHandles && leanEq != ScreenOffEq.OFF && !EqMath.isNeutral(eq)
+
+    /** Whether a pitch / speed needs LToTS's processor (not with screen-off pitch & speed Off). */
+    private fun pitchSpeedNeedsProcessor(cents: Int, speed: Float): Boolean =
+        leanPitch != ScreenOffPitch.OFF && (cents != 0 || abs(speed - 1f) > 1e-4f)
+
+    // ---- screen off ----------------------------------------------------------------------------
+
+    /**
+     * The screen-off modes in effect (Same / Same while the screen is on). They're read on the
+     * audio thread, and only switch between songs, while paused, or when LToTS opens, so the
+     * sound never changes (or drops out) in the middle of a song.
+     */
+    @Volatile private var leanEq = ScreenOffEq.SAME
+    @Volatile private var leanPitch = ScreenOffPitch.SAME
+
+    /** True while LToTS's own screen is in front: then everything is at full quality. */
+    @Volatile private var appInFront = false
+
+    private val _screenOffModes = MutableStateFlow(false)
+    /** Whether screen-off sound modes are in effect right now. */
+    val screenOffModes: StateFlow<Boolean> = _screenOffModes
+
+    /** Whether the screen-off settings apply now: the screen is off. */
+    private fun screenOffNow() = !ScreenState.screenOn.value && !appInFront
+
+    private fun targetModes(): Pair<ScreenOffEq, ScreenOffPitch> {
+        val s = settings.value
+        return if (screenOffNow()) s.screenOffEq to s.screenOffPitch else ScreenOffEq.SAME to ScreenOffPitch.SAME
+    }
+
+    /** Takes on the modes for now. Called between songs, while paused, and when LToTS opens. */
+    private fun latchLean() {
+        if (!initialized) return
+        val (e, p) = targetModes()
+        if (e == leanEq && p == leanPitch) return
+        leanEq = e
+        leanPitch = p
+        _screenOffModes.value = e != ScreenOffEq.SAME || p != ScreenOffPitch.SAME
+        changed()
+        syncPhoneEq()
+        applySpeedToPlayer()
+        updateDirect()
+        refreshRendered(includeCurrent = true)
+    }
+
+    internal fun onScreen(on: Boolean) {
+        // A long audio buffer with the screen off: the processor wakes several times less often.
+        ScreenOffBuffer.setLong(!on)
+        PowerStats.onScreen(on)
+        val p = _player.value
+        if (p == null || !p.isPlaying) latchLean()
+        if (on) {
+            PreRender.cancel()
+            refreshRendered(includeCurrent = false)
+        } else maybePreRender()
+    }
+
+    /** Called by the activity: true while LToTS is on screen. In front, full quality returns at once. */
+    fun setAppInFront(front: Boolean) {
+        appInFront = front
+        if (!initialized) return
+        if (front) {
+            PreRender.cancel()
+            latchLean()
+            refreshRendered(includeCurrent = true)
+        } else {
+            val p = _player.value
+            if (p == null || !p.isPlaying) latchLean()
+            maybePreRender()
+        }
+    }
+
+    // ---- pre-render ----------------------------------------------------------------------------
+
+    /**
+     * What a pre-rendered file of [item] has to contain under these modes, or null when the
+     * song needs no processing (or can't be pre-rendered: a changed speed, a stream).
+     */
+    private fun renderJobFor(item: MediaItem, eqMode: ScreenOffEq, pitchMode: ScreenOffPitch): PreRender.Job? {
+        val uri = uriOf(item) ?: return null
+        if (uri.scheme != "content" && uri.scheme != "file") return null
+        val s = settings.value
+        val id = item.mediaId.takeIf { it.isNotBlank() }
+        val prof = id?.let { Store.loadProfile(it) }
+        val eq = prof?.eq ?: defaultEq.value
+        val phoneTakes = (eqMode == ScreenOffEq.FIVE_BAND || s.batteryEq) && phoneEq.status.value !is PhoneEq.Status.Unavailable
+        val eqUsed = eq.takeIf { eqMode != ScreenOffEq.OFF && !phoneTakes && !EqMath.isNeutral(it) }
+        var cents: Int
+        var speed: Float
+        var tape: Boolean
+        if (s.perSongPitchSpeed && id != null) {
+            cents = prof?.pitchCents ?: 0; speed = prof?.speed ?: 1f; tape = prof?.tape ?: false
+        } else {
+            cents = s.globalPitchCents; speed = s.globalSpeed; tape = s.globalTape
+        }
+        if (pitchMode == ScreenOffPitch.OFF) { cents = 0; speed = 1f; tape = false }
+        // A changed speed stays live, so the seek bar, lyrics and history keep the song's own timing.
+        if (abs(speed - 1f) > 1e-4f) return null
+        val pitch = scaleOf(cents, speed, tape)
+        if (eqUsed == null && abs(pitch - 1.0) < 1e-6) return null
+        return PreRender.Job(uri, eqUsed ?: EqState(enabled = false), pitch, s.preserveFormants, s.efficientPitch || pitchMode == ScreenOffPitch.LIGHTER)
+    }
+
+    /** Screen off: the next song gets its pre-rendered file, ready before it starts. */
+    private fun maybePreRender() {
+        if (!initialized) return
+        val p = _player.value ?: return
+        val s = settings.value
+        if (!s.preRender || !s.directPlayback || s.bitPerfectUsb || !screenOffNow()) return
+        val idx = p.nextMediaItemIndex.takeIf { it != C.INDEX_UNSET } ?: return
+        val item = p.getMediaItemAt(idx)
+        if (PreRender.isRendered(item)) return
+        val (e, pm) = targetModes()
+        val job = renderJobFor(item, e, pm) ?: return
+        PreRender.request(appContext, job, attributes.platformAudioAttributes) { file ->
+            val q = _player.value ?: return@request
+            // Still the next song, still screen off, and still the same sound?
+            val i = q.nextMediaItemIndex.takeIf { it != C.INDEX_UNSET } ?: return@request
+            val now = q.getMediaItemAt(i)
+            if (now.mediaId != item.mediaId || PreRender.isRendered(now) || !screenOffNow()) return@request
+            val (e2, p2) = targetModes()
+            if (renderJobFor(now, e2, p2)?.key != job.key) return@request
+            q.replaceMediaItem(i, PreRender.renderedItem(now, file, job.key))
+        }
+    }
+
+    /**
+     * Puts pre-rendered queue entries that no longer match what should be heard back on their
+     * own files. The playing one only when [includeCurrent] (it picks up where it was).
+     */
+    private fun refreshRendered(includeCurrent: Boolean) {
+        val p = _player.value ?: return
+        for (i in p.mediaItemCount - 1 downTo 0) {
+            val item = p.getMediaItemAt(i)
+            if (!PreRender.isRendered(item)) continue
+            val current = i == p.currentMediaItemIndex
+            if (current && !includeCurrent) continue
+            val (e, pm) = if (current) leanEq to leanPitch else targetModes()
+            if (renderJobFor(item, e, pm)?.key == PreRender.keyOf(item)) continue
+            if (current) {
+                val pos = p.currentPosition
+                p.replaceMediaItem(i, PreRender.originalItem(item))
+                p.seekTo(i, pos)
+            } else p.replaceMediaItem(i, PreRender.originalItem(item))
+        }
+        keepRenderedFiles()
+    }
+
+    private fun keepRenderedFiles() {
+        val p = _player.value ?: return
+        PreRender.setInUse((0 until p.mediaItemCount).mapNotNull { PreRender.keyOf(p.getMediaItemAt(it)) })
+    }
 
     // ---- direct playback (audio offload) ---------------------------------------------------
 
     private var directJob: Job? = null
 
-    /** Whether [mediaId] plays exactly as recorded: no EQ change, original pitch and speed. */
-    private fun untouched(mediaId: String?): Boolean {
+    /** Whether [item] plays exactly as recorded: no EQ change, original pitch and speed (or pre-rendered). */
+    private fun untouched(item: MediaItem?): Boolean {
+        if (PreRender.isRendered(item)) return true
+        val mediaId = item?.mediaId?.takeIf { it.isNotBlank() }
         val s = settings.value
         val prof = mediaId?.let { Store.loadProfile(it) }
         val eq = prof?.eq ?: defaultEq.value
@@ -483,21 +683,22 @@ object AudioEngine : SoundSource {
         val (cents, speed) = if (s.perSongPitchSpeed && mediaId != null) {
             (prof?.pitchCents ?: 0) to (prof?.speed ?: 1f)
         } else s.globalPitchCents to s.globalSpeed
-        return cents == 0 && abs(speed - 1f) <= 1e-4f
+        return !pitchSpeedNeedsProcessor(cents, speed)
     }
 
     private fun wantsDirect(p: ExoPlayer): Boolean {
         val s = settings.value
         if (!s.directPlayback || s.bitPerfectUsb) return false
-        // What the UI shows right now (covers a slider that is still being dragged)...
-        if (_pitchCents.value != 0 || abs(_speed.value - 1f) > 1e-4f) return false
-        if (eqNeedsProcessor(_songProfile.value?.eq ?: defaultEq.value)) return false
+        if (!PreRender.isRendered(p.currentMediaItem)) {
+            // What the UI shows right now (covers a slider that is still being dragged)...
+            if (pitchSpeedNeedsProcessor(_pitchCents.value, _speed.value)) return false
+            if (eqNeedsProcessor(_songProfile.value?.eq ?: defaultEq.value)) return false
+        }
         // ...and the next song too: with direct playback it's queued on the audio chip ahead
         // of time, so if it needs processing we switch over before it starts.
         val next = p.nextMediaItemIndex
         if (next != C.INDEX_UNSET) {
-            val id = p.getMediaItemAt(next).mediaId.takeIf { it.isNotBlank() }
-            if (!untouched(id)) return false
+            if (!untouched(p.getMediaItemAt(next))) return false
         }
         return true
     }
