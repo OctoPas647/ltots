@@ -233,6 +233,7 @@ object AudioEngine : SoundSource {
                 // Between songs is when the screen-off sound modes switch (no gap mid-song).
                 latchLean()
                 onSongChanged(mediaItem)
+                snapshotUpcoming()
                 prepareBeats()
                 maybePreRender()
                 com.ltots.app.data.PlayStats.onSong(mediaItem?.mediaId?.takeIf { it.isNotBlank() }, mediaItem?.mediaMetadata?.durationMs ?: 0L, p.isPlaying)
@@ -255,8 +256,10 @@ object AudioEngine : SoundSource {
                 if (isPlaying) com.ltots.app.recs.SongPreview.stop()
             }
             override fun onTimelineChanged(timeline: Timeline, reason: Int) {
-                updateDirect(); prepareBeats(); keepRenderedFiles(); maybePreRender()
+                updateDirect(); snapshotUpcoming(); prepareBeats(); keepRenderedFiles(); maybePreRender()
             }
+            override fun onRepeatModeChanged(repeatMode: Int) = snapshotUpcoming()
+            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) = snapshotUpcoming()
             override fun onAudioSessionIdChanged(audioSessionId: Int) = syncPhoneEq()
         })
         _player.value = p
@@ -297,10 +300,33 @@ object AudioEngine : SoundSource {
     private fun uriOf(item: MediaItem?): android.net.Uri? =
         PreRender.originalUri(item) ?: item?.localConfiguration?.uri ?: item?.requestMetadata?.mediaUri
 
-    /** The playing song's file and the next one in the queue. */
-    /** The playing song and the next [count] - 1 in the queue. */
+    /**
+     * The upcoming songs as last seen on the main thread, for callers on any other thread
+     * (ExoPlayer may only be touched on its own thread; it throws otherwise).
+     */
+    @Volatile private var upcomingSnapshot: List<android.net.Uri> = emptyList()
+
+    private fun onPlayerThread(p: Player) = android.os.Looper.myLooper() == p.applicationLooper
+
+    /** Refreshes [upcomingSnapshot] (main thread, whenever the queue or the song changes). */
+    private fun snapshotUpcoming() {
+        val p = _player.value ?: return
+        upcomingSnapshot = runCatching { readUpcoming(p, SNAPSHOT_COUNT) }.getOrDefault(emptyList())
+    }
+
+    private const val SNAPSHOT_COUNT = 3
+
+    /**
+     * The playing song and the next [count] - 1 in the queue. Safe from any thread: off the
+     * player's thread it answers from the snapshot taken on the main thread.
+     */
     fun upcomingUris(count: Int): List<android.net.Uri> {
         val p = _player.value ?: return listOfNotNull(_songUri.value)
+        if (!onPlayerThread(p)) return upcomingSnapshot.take(count).ifEmpty { listOfNotNull(_songUri.value) }
+        return readUpcoming(p, count)
+    }
+
+    private fun readUpcoming(p: Player, count: Int): List<android.net.Uri> {
         val out = ArrayList<android.net.Uri>()
         uriOf(p.currentMediaItem)?.let { out += it }
         var i = p.currentMediaItemIndex
@@ -319,8 +345,10 @@ object AudioEngine : SoundSource {
         runCatching { BeatIndex.request(appContext, upcomingUris(3)) }
     }
 
+    /** The playing song's file and the next one in the queue. Safe from any thread. */
     fun upcomingUris(): List<android.net.Uri> {
         val p = _player.value ?: return listOfNotNull(_songUri.value)
+        if (!onPlayerThread(p)) return upcomingSnapshot.take(2).ifEmpty { listOfNotNull(_songUri.value) }
         val next = p.nextMediaItemIndex.takeIf { it != C.INDEX_UNSET }?.let { uriOf(p.getMediaItemAt(it)) }
         return listOfNotNull(uriOf(p.currentMediaItem), next)
     }

@@ -223,6 +223,32 @@ class ScreenOffTest {
         assertEquals(0, NativeDsp.suspendMask())
     }
 
+    @Test fun upcomingSongsCanBeReadFromAnyThread() {
+        val a = MediaItem.Builder().setMediaId("a").setUri("file:///a.ogg").build()
+        val b = MediaItem.Builder().setMediaId("b").setUri("file:///b.ogg").build()
+        val c = MediaItem.Builder().setMediaId("c").setUri("file:///c.ogg").build()
+        player.setMediaItems(listOf(a, b, c))
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+        val onMain = AudioEngine.upcomingUris(3)
+        assertEquals(listOf("file:///a.ogg", "file:///b.ogg", "file:///c.ogg"), onMain.map { it.toString() })
+
+        // What the beat AI download did (from Dispatchers.IO): used to throw
+        // "Player is accessed on the wrong thread" and crash the app.
+        var fromIo: List<android.net.Uri>? = null
+        var fromIo2: List<android.net.Uri>? = null
+        var error: Throwable? = null
+        val t = Thread {
+            try {
+                fromIo = AudioEngine.upcomingUris(3)
+                fromIo2 = AudioEngine.upcomingUris()
+            } catch (e: Throwable) { error = e }
+        }
+        t.start(); t.join()
+        assertEquals(null, error)
+        assertEquals(onMain, fromIo)
+        assertEquals(onMain.take(2), fromIo2)
+    }
+
     @Test fun renderKeys() {
         val u = android.net.Uri.parse("content://media/1")
         val flat = EqState(enabled = false)

@@ -673,10 +673,14 @@ private fun BeatAiSetting() {
             !installed -> Pill("Download beat AI ($mb MB)", true, {
                 val app = context.applicationContext
                 kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                    runCatching { for (m in parts) com.ltots.app.identify.AiModels.download(m) }
-                        .onSuccess {
-                            com.ltots.app.audio.BeatIndex.request(app, com.ltots.app.audio.AudioEngine.upcomingUris(3))
+                    val ok = runCatching { for (m in parts) com.ltots.app.identify.AiModels.download(m) }.isSuccess
+                    if (ok) {
+                        // The queue is the player's: read it on the main thread.
+                        val next = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            com.ltots.app.audio.AudioEngine.upcomingUris(3)
                         }
+                        com.ltots.app.audio.BeatIndex.request(app, next)
+                    }
                 }
             })
             else -> Pill("Remove beat AI", false, { parts.forEach { com.ltots.app.identify.AiModels.remove(it) } })
