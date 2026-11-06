@@ -291,6 +291,14 @@ newer APK updates the app and keeps your settings.
     buffer is 8 s then (0.5 s while LToTS is open), so the processor (when it has to work) wakes
     about 16× less often; beats for Move with the beat are only worked out while
     that's on and the screen is on; the home-screen icon colour waits for the screen;
+  - **Screen-off power governor** (automatic, straight from the screen-off broadcast): the native
+    processors switch to 8× bigger blocks (Rubber Band, the tape resampler); the live spectrum and
+    beat analysis are suspended inside the native code itself (no FFT runs for them, a half-done
+    beat map is dropped rather than saved, and beats keep going while charging for library prep);
+    and the audio thread moves to the phone's efficiency cores (plus Android 15's power-efficiency
+    hint), as do pre-render and indexing for good. The only wake lock is ExoPlayer's own, which is
+    let go when paused and while the chip plays by itself, and a stream stuck buffering for a
+    minute with the screen off stops holding the phone awake;
   - **Sleep timer**: the moon on the Playing tab, or in the notification / lock screen (starts the
     usual length, tap again to stop). Fade-out, finish the song, and the lengths are in Profile.
     One alarm and nothing ticking; "Precise timing" lets it stop on the dot while the processor

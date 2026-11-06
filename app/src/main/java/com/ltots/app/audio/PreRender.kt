@@ -84,6 +84,8 @@ object PreRender {
     private val thread = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
         Thread({
             runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND) }
+            // Bounded batch work with the screen off: the efficiency cores, always.
+            NativeDsp.markCurrentThread(NativeDsp.THREAD_BACKGROUND)
             r.run()
         }, "ltots-prerender").apply { isDaemon = true }
     }.asCoroutineDispatcher()

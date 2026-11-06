@@ -122,7 +122,13 @@ object AudioEngine : SoundSource {
         // Battery EQ follows every EQ change (edits, presets, a new song's own EQ) as it happens.
         scope.launch { effectiveEq.collect { syncPhoneEq() } }
         runCatching { PreRender.init(appContext) }
-        // Screen on/off: the audio buffer, the screen-off sound modes, pre-rendering.
+        EfficiencyCores.init(appContext)
+        eqProcessor.drivesCores = true
+        // The power governor, straight from the screen-off broadcast (before any coroutine runs):
+        // non-essential DSP stops, the buffers grow, the audio thread moves to the efficiency cores.
+        ScreenState.init(appContext)
+        ScreenState.addListener(powerListener)
+        // Screen on/off: the screen-off sound modes, pre-rendering (these can wait a moment).
         scope.launch { ScreenState.screenOn.collect { on -> runCatching { onScreen(on) } } }
         // Beats only feed the cover's Move with the beat, so they're worked out only while that's
         // on and the screen is on (the songs that played meanwhile are done when it turns on).
@@ -633,7 +639,7 @@ object AudioEngine : SoundSource {
     }
 
     internal fun onScreen(on: Boolean) {
-        updateBuffer()
+        applyPowerState()
         PowerStats.onScreen(on)
         val p = _player.value
         if (p == null || !p.isPlaying) latchLean()
@@ -642,17 +648,54 @@ object AudioEngine : SoundSource {
         maybePreRender()
     }
 
+    // ---- power governor ------------------------------------------------------------------------
+
+    private val powerListener = ScreenState.Listener { _, _ -> runCatching { applyPowerState() } }
+
+    /** Whether the playback is in the background: LToTS isn't on screen, or the screen is off. */
+    private fun backgroundPlayback() = !appInFront || !ScreenState.screenOn.value
+
     /**
-     * A long audio buffer whenever LToTS isn't on screen (nothing can change the sound then):
-     * the processor, when it has to work, wakes several times less often.
+     * Everything the screen and charging state decide about the cost of playing, in one place.
+     * Called synchronously from the screen-off broadcast, when LToTS comes and goes, and when
+     * the charger is plugged in or out. Cheap and idempotent (no I/O, no player calls).
+     *
+     *  - **Buffers** (Kotlin + native): long whenever LToTS isn't on screen (nothing can change
+     *    the sound then), so the processor wakes several times less often and works in bigger
+     *    blocks when it does.
+     *  - **Non-essential DSP**: with the screen off the live spectrum and beat analysis are
+     *    suspended at the native level, and the audio thread stops copying audio for them
+     *    (beat analysis keeps going while charging: that's when library prep runs).
+     *  - **Cores**: background playback runs on the efficiency cores.
      */
-    private fun updateBuffer() = ScreenOffBuffer.setLong(!appInFront || !ScreenState.screenOn.value)
+    private fun applyPowerState() {
+        val screenOn = ScreenState.screenOn.value
+        val background = backgroundPlayback()
+        ScreenOffBuffer.setLong(background)
+        EfficiencyCores.setEfficient(background)
+        tap.suspended = !screenOn
+        var mask = 0
+        if (!screenOn) {
+            mask = mask or NativeDsp.SUSPEND_VISUALS
+            if (!ScreenState.charging.value) mask = mask or NativeDsp.SUSPEND_BEATS
+        }
+        NativeDsp.suspendNonEssential(mask)
+    }
+
+    /** For the battery card and tests: what the governor has in effect right now. */
+    data class PowerState(val longBuffers: Boolean, val blockFrames: Int, val visualsSuspended: Boolean, val beatsSuspended: Boolean, val efficiencyCores: Boolean)
+
+    val powerState: PowerState
+        get() = PowerState(
+            ScreenOffBuffer.isLong, NativeDsp.processBlockFrames, NativeDsp.visualsSuspended,
+            NativeDsp.beatsSuspended, EfficiencyCores.isEfficientWanted,
+        )
 
     /** Called by the activity: true while LToTS is on screen. In front, full quality returns at once. */
     fun setAppInFront(front: Boolean) {
         appInFront = front
         if (!initialized) return
-        updateBuffer()
+        applyPowerState()
         if (front) {
             PreRender.cancel()
             latchLean()

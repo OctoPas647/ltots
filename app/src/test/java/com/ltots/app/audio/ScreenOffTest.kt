@@ -182,6 +182,47 @@ class ScreenOffTest {
         assertEquals("song:b", player.getMediaItemAt(1).mediaId)
     }
 
+    @Test fun powerGovernorFollowsTheScreenAndCharger() {
+        ScreenState.setChargingForTest(false)
+        // LToTS on screen: short buffers, everything running, any core.
+        var s = AudioEngine.powerState
+        assertFalse(s.longBuffers)
+        assertEquals(NativeDsp.SHORT_BLOCK_FRAMES, s.blockFrames)
+        assertFalse(s.visualsSuspended); assertFalse(s.beatsSuspended); assertFalse(s.efficiencyCores)
+
+        // Screen off: straight from the broadcast, before any coroutine runs.
+        AudioEngine.setAppInFront(false)
+        ScreenState.setScreenOnForTest(false)
+        s = AudioEngine.powerState
+        assertTrue(s.longBuffers)
+        assertEquals(NativeDsp.LONG_BLOCK_FRAMES, s.blockFrames)
+        assertTrue(s.visualsSuspended); assertTrue(s.beatsSuspended); assertTrue(s.efficiencyCores)
+        assertEquals(NativeDsp.SUSPEND_VISUALS or NativeDsp.SUSPEND_BEATS, NativeDsp.suspendMask())
+        val release = AudioEngine.tap.watch()
+        assertFalse("nothing copied for the live view", AudioEngine.tap.watching)
+        release()
+
+        // Charging: library prep may work out beats; the visuals stay off.
+        ScreenState.setChargingForTest(true)
+        assertTrue(AudioEngine.powerState.visualsSuspended)
+        assertFalse(AudioEngine.powerState.beatsSuspended)
+        ScreenState.setChargingForTest(false)
+        assertTrue(AudioEngine.powerState.beatsSuspended)
+
+        // Screen on, another app in front: DSP back, still background playback.
+        ScreenState.setScreenOnForTest(true)
+        s = AudioEngine.powerState
+        assertFalse(s.visualsSuspended); assertFalse(s.beatsSuspended)
+        assertTrue(s.longBuffers); assertTrue(s.efficiencyCores)
+
+        // LToTS opened: everything as normal.
+        AudioEngine.setAppInFront(true)
+        s = AudioEngine.powerState
+        assertFalse(s.longBuffers); assertFalse(s.efficiencyCores)
+        assertEquals(NativeDsp.SHORT_BLOCK_FRAMES, s.blockFrames)
+        assertEquals(0, NativeDsp.suspendMask())
+    }
+
     @Test fun renderKeys() {
         val u = android.net.Uri.parse("content://media/1")
         val flat = EqState(enabled = false)

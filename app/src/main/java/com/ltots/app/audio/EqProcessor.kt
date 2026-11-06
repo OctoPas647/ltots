@@ -58,6 +58,12 @@ class EqProcessor(
     /** The song currently flowing through (for tests and diagnostics). */
     val currentMediaId: String? get() = mediaId
 
+    /**
+     * True for the player's own EQ (set by AudioEngine): it's the first stage on the audio
+     * thread, so it keeps that thread on the right cores (see [EfficiencyCores]).
+     */
+    var drivesCores = false
+
     override fun onConfigure(inputAudioFormat: AudioFormat): AudioFormat {
         val enc = inputAudioFormat.encoding
         if (enc != C.ENCODING_PCM_16BIT && enc != C.ENCODING_PCM_FLOAT &&
@@ -130,6 +136,7 @@ class EqProcessor(
 
     override fun queueInput(inputBuffer: ByteBuffer) {
         if (!inputBuffer.hasRemaining()) return
+        if (drivesCores) EfficiencyCores.onAudioThread()
         if (plan == null) plan = buildPlan(source.eqFor(mediaId), null)
         maybeUpdate()
 
@@ -149,7 +156,8 @@ class EqProcessor(
         inputBuffer.position(inputBuffer.limit())
 
         // The live view only needs the signal while it's on screen; with the screen off the
-        // audio thread does no work for it at all.
+        // audio thread does no work for it at all (the tap is suspended by the power governor
+        // the moment the screen goes dark, even if a view is still attached).
         val tap = analyzerTap
         val watching = tap.watching
         if (watching) tap.prepareWrite()

@@ -3,18 +3,128 @@
 // processor, so doing them here instead of in Kotlin means far less work per sample: no array
 // bounds checks or per-sample calls, and on 64-bit ARM the left and right channels of the EQ are
 // filtered together in one NEON register.
+//
+// It also holds the screen-off power governor (see the section below): which non-essential DSP
+// is suspended, how big a block the processors work in, and which processor cores the audio
+// threads may run on.
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include <jni.h>
+#include <atomic>
+#include <cerrno>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <vector>
 #include <algorithm>
+#include <sched.h>
+#include <unistd.h>
 #if defined(__aarch64__)
 #include <arm_neon.h>
 #endif
 
 namespace {
+
+// ---- Power governor ---------------------------------------------------------------------------
+//
+// Screen off, nothing but the sound matters:
+//  - Suspension: the live spectrum (VISUALS) and beat analysis (BEATS) stop at this level, so
+//    no FFT for them runs whatever the Kotlin side asks for. A visual FFT returns at once with
+//    silent bins; a beat FFT on a non-essential thread throws CancellationException, so a beat
+//    map that was half worked out is dropped (never saved wrong) and redone with the screen on.
+//  - Block size: the processors work in bigger blocks (fewer native calls, and the tape
+//    resampler compacts its input far less often).
+//  - Efficiency cores: the audio thread is pinned to the phone's lowest-capacity cluster.
+
+constexpr int SUSPEND_VISUALS = 1;
+constexpr int SUSPEND_BEATS = 2;
+constexpr int THREAD_BACKGROUND = 1;    // always on the efficiency cores (pre-render, indexing)
+constexpr int THREAD_NON_ESSENTIAL = 2; // its FFTs stop while BEATS is suspended
+
+std::atomic<int> g_suspend{0};
+std::atomic<int> g_blockFrames{1024};
+std::atomic<int64_t> g_skipped{0};
+thread_local int t_flags = 0;
+
+struct CoreTopology {
+    cpu_set_t little;  // the lowest-capacity cluster
+    cpu_set_t all;     // every core the phone has
+    int littleCount = 0;
+    int allCount = 0;
+    bool hetero = false; // more than one kind of core (otherwise pinning gains nothing)
+};
+
+long readSysLong(const char* path) {
+    FILE* f = std::fopen(path, "r");
+    if (!f) return -1;
+    long v = -1;
+    if (std::fscanf(f, "%ld", &v) != 1) v = -1;
+    std::fclose(f);
+    return v;
+}
+
+// Each core's capacity (the scheduler's own ranking, Android kernels with EAS), or else its
+// top clock speed. Read once.
+CoreTopology detectCores() {
+    CoreTopology t;
+    CPU_ZERO(&t.little);
+    CPU_ZERO(&t.all);
+    long n = sysconf(_SC_NPROCESSORS_CONF);
+    if (n <= 0) return t;
+    n = std::min<long>(n, CPU_SETSIZE);
+    std::vector<long> cap((size_t)n, -1);
+    char path[128];
+    for (long c = 0; c < n; ++c) {
+        CPU_SET((int)c, &t.all);
+        ++t.allCount;
+        std::snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu%ld/cpu_capacity", c);
+        long v = readSysLong(path);
+        if (v <= 0) {
+            std::snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu%ld/cpufreq/cpuinfo_max_freq", c);
+            v = readSysLong(path);
+        }
+        cap[(size_t)c] = v;
+    }
+    long lo = -1, hi = -1;
+    for (long v : cap) if (v > 0) { lo = lo < 0 ? v : std::min(lo, v); hi = std::max(hi, v); }
+    if (lo <= 0 || hi <= lo) return t; // unreadable, or every core the same
+    for (long c = 0; c < n; ++c) {
+        if (cap[(size_t)c] == lo) { CPU_SET((int)c, &t.little); ++t.littleCount; }
+    }
+    t.hetero = t.littleCount > 0 && t.littleCount < t.allCount;
+    return t;
+}
+
+const CoreTopology& cores() {
+    static const CoreTopology t = detectCores(); // thread-safe one-time init
+    return t;
+}
+
+// Pins (or frees) the calling thread. Returns how many cores it may now use, 0 when there's
+// nothing to do (one kind of core, or a background thread asked to leave), or -errno.
+int setThreadEfficiency(bool efficient) {
+    const CoreTopology& t = cores();
+    if (!t.hetero) return 0;
+    if (!efficient && (t_flags & THREAD_BACKGROUND)) return 0; // stays on the efficiency cores
+    const cpu_set_t* m = efficient ? &t.little : &t.all;
+    // pid 0: the calling thread only (Linux affinity is per thread). The kernel also keeps it
+    // within the cores Android allows the app (its cpuset).
+    if (sched_setaffinity(0, sizeof(cpu_set_t), m) != 0) return -errno;
+    return efficient ? t.littleCount : t.allCount;
+}
+
+bool beatsSuspendedHere() {
+    return (t_flags & THREAD_NON_ESSENTIAL) && (g_suspend.load(std::memory_order_relaxed) & SUSPEND_BEATS);
+}
+
+void throwSuspended(JNIEnv* env) {
+    g_skipped.fetch_add(1, std::memory_order_relaxed);
+    jclass c = env->FindClass("java/util/concurrent/CancellationException");
+    if (c) env->ThrowNew(c, "LToTS: non-essential DSP is suspended while the screen is off");
+}
 
 // ---- EQ: a cascade of biquads (transposed direct form II), double precision -----------------
 //
@@ -146,13 +256,20 @@ struct Resampler {
             ++outTotal;
             t = outTotal * speed;
         }
-        // Drop input that no future output frame will reach.
+        // Drop input that no future output frame will reach. Erasing shifts everything after
+        // it down, so it's done once a whole block has been used up rather than on every call:
+        // with the screen off (big blocks) the buffer is compacted several times less often.
         const int64_t keepFrom = (int64_t)std::floor(t) - half + 1;
-        if (keepFrom > base) {
-            const int64_t drop = std::min<int64_t>(keepFrom - base, (int64_t)(buf.size() / ch));
+        const int64_t usedUp = keepFrom - base;
+        const int block = g_blockFrames.load(std::memory_order_relaxed);
+        if (usedUp > 0 && (usedUp >= block || last)) {
+            const int64_t drop = std::min<int64_t>(usedUp, (int64_t)(buf.size() / ch));
             buf.erase(buf.begin(), buf.begin() + (size_t)drop * ch);
             base += drop;
         }
+        // Room for the next call without growing (no allocation on the audio thread).
+        const size_t want = (size_t)(2 * half + 2 * block + frames) * ch;
+        if (buf.capacity() < want) buf.reserve(want);
         return written;
     }
 };
@@ -328,6 +445,7 @@ JNIEXPORT void JNICALL Java_com_ltots_app_audio_NativeDsp_fftDestroy(JNIEnv*, jc
 
 // Float, power of two, in place (the same convention as the Kotlin Fft class).
 JNIEXPORT void JNICALL Java_com_ltots_app_audio_NativeDsp_fftFloat(JNIEnv* env, jclass, jlong h, jfloatArray jre, jfloatArray jim) {
+    if (beatsSuspendedHere()) { throwSuspended(env); return; }
     auto* P = (FftPlan*)(intptr_t)h;
     float* re = (float*)env->GetPrimitiveArrayCritical(jre, nullptr);
     float* im = (float*)env->GetPrimitiveArrayCritical(jim, nullptr);
@@ -343,6 +461,16 @@ JNIEXPORT void JNICALL Java_com_ltots_app_audio_NativeDsp_spectrum(
         jfloatArray jmags, jint binFrom, jint binTo, jfloat norm) {
     auto* P = (FftPlan*)(intptr_t)h;
     if (!P->pow2) return;
+    if (g_suspend.load(std::memory_order_relaxed) & SUSPEND_VISUALS) {
+        // Screen off: no window, no FFT, no square roots. The bars read silence and fall.
+        g_skipped.fetch_add(1, std::memory_order_relaxed);
+        float* mags = (float*)env->GetPrimitiveArrayCritical(jmags, nullptr);
+        if (mags) {
+            for (int k = binFrom; k < binTo; ++k) mags[k] = 0.f;
+            env->ReleasePrimitiveArrayCritical(jmags, mags, 0);
+        }
+        return;
+    }
     float* ring = (float*)env->GetPrimitiveArrayCritical(jring, nullptr);
     float* win = (float*)env->GetPrimitiveArrayCritical(jwin, nullptr);
     float* mags = (float*)env->GetPrimitiveArrayCritical(jmags, nullptr);
@@ -363,6 +491,7 @@ JNIEXPORT void JNICALL Java_com_ltots_app_audio_NativeDsp_spectrum(
 
 // Double, sizes of 2s and 3s, forward, in place (the same convention as MixedFft.forward).
 JNIEXPORT void JNICALL Java_com_ltots_app_audio_NativeDsp_fftDouble(JNIEnv* env, jclass, jlong h, jdoubleArray jre, jdoubleArray jim) {
+    if (beatsSuspendedHere()) { throwSuspended(env); return; }
     auto* P = (FftPlan*)(intptr_t)h;
     if (P->factors.empty()) return;
     double* re = (double*)env->GetPrimitiveArrayCritical(jre, nullptr);
@@ -374,6 +503,45 @@ JNIEXPORT void JNICALL Java_com_ltots_app_audio_NativeDsp_fftDouble(JNIEnv* env,
     }
     if (im) env->ReleasePrimitiveArrayCritical(jim, im, 0);
     if (re) env->ReleasePrimitiveArrayCritical(jre, re, 0);
+}
+
+// ---- Power governor ---------------------------------------------------------------------------
+
+JNIEXPORT void JNICALL Java_com_ltots_app_audio_NativeDsp_setSuspendMask(JNIEnv*, jclass, jint mask) {
+    g_suspend.store(mask & (SUSPEND_VISUALS | SUSPEND_BEATS), std::memory_order_relaxed);
+}
+
+JNIEXPORT jint JNICALL Java_com_ltots_app_audio_NativeDsp_suspendMask(JNIEnv*, jclass) {
+    return g_suspend.load(std::memory_order_relaxed);
+}
+
+JNIEXPORT jlong JNICALL Java_com_ltots_app_audio_NativeDsp_skippedCount(JNIEnv*, jclass) {
+    return (jlong)g_skipped.load(std::memory_order_relaxed);
+}
+
+// The calling thread: background work (pinned to the efficiency cores for good) and/or
+// non-essential (its FFTs stop while beats are suspended).
+JNIEXPORT void JNICALL Java_com_ltots_app_audio_NativeDsp_markThread(JNIEnv*, jclass, jint flags) {
+    t_flags |= flags & (THREAD_BACKGROUND | THREAD_NON_ESSENTIAL);
+    if (flags & THREAD_BACKGROUND) setThreadEfficiency(true);
+}
+
+JNIEXPORT void JNICALL Java_com_ltots_app_audio_NativeDsp_setBlockFrames(JNIEnv*, jclass, jint frames) {
+    g_blockFrames.store(std::max(64, std::min((int)frames, 1 << 16)), std::memory_order_relaxed);
+}
+
+JNIEXPORT jint JNICALL Java_com_ltots_app_audio_NativeDsp_blockFrames(JNIEnv*, jclass) {
+    return g_blockFrames.load(std::memory_order_relaxed);
+}
+
+JNIEXPORT jint JNICALL Java_com_ltots_app_audio_NativeDsp_setThreadEfficiency(JNIEnv*, jclass, jboolean efficient) {
+    return setThreadEfficiency(efficient == JNI_TRUE);
+}
+
+// How many efficiency cores the phone has (0: all its cores are the same kind).
+JNIEXPORT jint JNICALL Java_com_ltots_app_audio_NativeDsp_efficiencyCoreCount(JNIEnv*, jclass) {
+    const CoreTopology& t = cores();
+    return t.hetero ? t.littleCount : 0;
 }
 
 } // extern "C"

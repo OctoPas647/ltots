@@ -12,18 +12,25 @@ import androidx.media3.exoplayer.audio.ForwardingAudioOutputProvider
 import java.lang.ref.WeakReference
 
 /**
- * The audio output, with a buffer that grows while the screen is off.
+ * The audio output, with buffers that grow while the screen is off — in Kotlin (the phone's
+ * audio buffer) and in the native processors (the block they work in).
  *
  * When LToTS has to process the sound itself (your EQ, pitch or speed), the processor wakes up
  * each time the phone's audio buffer runs low. With the screen on that buffer holds about half
  * a second, so EQ and pitch changes are heard right away. With the screen off nobody moves a
- * slider, so it's let out to [LONG_MS]: the processor fills it in one go and then sleeps several
- * times longer between wake-ups. Pausing, skipping and seeking still act at once (they clear the
- * buffer), and the volume and headphone unplugging aren't affected at all.
+ * slider, so it's let out to [LONG_MS]: Media3's dynamic scheduling then sleeps for about half
+ * of what's buffered (≈4 s) between wake-ups instead of ≈0.25 s, and each wake-up fills the
+ * buffer in one go. Pausing, skipping and seeking still act at once (they clear the buffer), and
+ * the volume and headphone unplugging aren't affected at all.
  *
- * The buffer is made big once, when the output is created, and only the part that's used
- * changes, so switching never interrupts the music. Direct playback (the audio chip playing by
- * itself) has its own, much larger buffer and is left alone.
+ * At the same time the native side moves from [NativeDsp.SHORT_BLOCK_FRAMES] to
+ * [NativeDsp.LONG_BLOCK_FRAMES]: Rubber Band gets 8× bigger blocks per call and the tape
+ * resampler compacts its input 8× less often, so each wake-up is a few long, cache-friendly
+ * runs rather than many short ones.
+ *
+ * The phone's buffer is made big once, when the output is created, and only the part that's
+ * used changes, so switching never interrupts the music. Direct playback (the audio chip playing
+ * by itself) has its own, much larger buffer and is left alone.
  */
 @UnstableApi
 object ScreenOffBuffer {
@@ -35,6 +42,9 @@ object ScreenOffBuffer {
     private var track = WeakReference<AudioTrack>(null)
     private var sampleRate = 48000
     @Volatile private var long = false
+
+    /** Whether the long buffers are in use now. */
+    val isLong: Boolean get() = long
 
     /** Media3's audio output, with room for the long buffer. */
     fun provider(context: Context): AudioOutputProvider {
@@ -57,13 +67,14 @@ object ScreenOffBuffer {
         }
     }
 
-    /** Screen on: the short buffer; screen off: the long one. */
+    /** Screen on: the short buffers; screen off: the long ones. */
     fun setLong(on: Boolean) {
         long = on
+        NativeDsp.preferBlockFrames(if (on) NativeDsp.LONG_BLOCK_FRAMES else NativeDsp.SHORT_BLOCK_FRAMES)
         apply()
     }
 
-    /** About how much audio is waiting to be heard right now, in ms (0 during direct playback). */
+    /** About how much audio the phone's buffer holds now, in ms (0 during direct playback). */
     fun queuedMs(): Long {
         val t = track.get() ?: return 0
         return runCatching { t.bufferSizeInFrames * 1000L / sampleRate }.getOrDefault(0)

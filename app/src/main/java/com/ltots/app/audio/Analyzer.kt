@@ -51,16 +51,27 @@ class AnalyzerTap {
      * Whether a live view is on screen. While nobody watches, the audio thread skips filling
      * the ring entirely (it still keeps time, so the view lines up the moment it reappears).
      */
-    @Volatile var watching = false; private set
+    val watching: Boolean get() = watched && !suspended
+    @Volatile private var watched = false
     private var watchers = 0
     @Volatile private var clearPending = false
+
+    /**
+     * Screen off: the audio thread copies nothing for the live view, even if a view is still
+     * attached (the power governor sets this the moment the screen goes dark).
+     */
+    @Volatile var suspended = false
+        set(v) {
+            if (field && !v) clearPending = true // what's in the ring is from before the screen went off
+            field = v
+        }
 
     /** A live view appeared; returns the function to call when it goes away. */
     fun watch(): () -> Unit {
         synchronized(this) {
             if (watchers++ == 0) {
                 clearPending = true // old audio in the ring is stale; start from silence
-                watching = true
+                watched = true
             }
         }
         var released = false
@@ -68,7 +79,7 @@ class AnalyzerTap {
             synchronized(this) {
                 if (!released) {
                     released = true
-                    if (--watchers == 0) watching = false
+                    if (--watchers == 0) watched = false
                 }
             }
         }
@@ -212,7 +223,8 @@ class Analyzer(private val tap: AnalyzerTap, val bands: Int = 96) {
         lastNanos = now
         val sr = tap.sampleRate
         val head = tap.published
-        if (head < long.size || !playing) {
+        // Screen off: no FFTs at all (the native side refuses them too); the bars just fall.
+        if (head < long.size || !playing || NativeDsp.visualsSuspended) {
             decay(dt)
             return frame
         }

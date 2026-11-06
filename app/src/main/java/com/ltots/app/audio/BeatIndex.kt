@@ -42,6 +42,9 @@ object BeatIndex {
     private val thread = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
         Thread({
             runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND) }
+            // Efficiency cores for good, and its FFTs stop the moment the screen goes off
+            // (unless charging): a half-done map is dropped, never saved, and redone later.
+            NativeDsp.markCurrentThread(NativeDsp.THREAD_BACKGROUND or NativeDsp.THREAD_NON_ESSENTIAL)
             r.run()
         }, "ltots-beats").apply { isDaemon = true }
     }.asCoroutineDispatcher()
@@ -125,6 +128,8 @@ object BeatIndex {
         val have = load(uri)
         val ai = useAi && aiInstalled
         if (have != null && (have.byAi || !ai)) return have
+        // Screen off (not charging): don't even decode; it's redone when the screen is back.
+        if (NativeDsp.beatsSuspended) return have
         withContext(thread) {
             val pcm = runCatching {
                 ClipLoader.decode(context, uri, maxSeconds = MAX_SECONDS, outRate = BeatTracker.RATE, normalized = false)
@@ -134,7 +139,7 @@ object BeatIndex {
                 map = runCatching { BeatTracker.classic(pcm) }.getOrNull()
                 if (map != null) publish(uri, map)
             }
-            if (ai) {
+            if (ai && !NativeDsp.beatsSuspended) {
                 val better = runCatching {
                     BeatTracker.Ai(AiModels.file(AiModels.Model.BEAT_MEL), AiModels.file(AiModels.Model.BEAT_NET)).use { BeatTracker.withAi(it, pcm) }
                 }.getOrNull()

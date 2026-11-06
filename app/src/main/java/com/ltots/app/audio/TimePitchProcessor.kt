@@ -187,7 +187,8 @@ class TimePitchProcessor(@Volatile var source: SoundSource = StaticSoundSource()
             rbOptions = opts
             rbRate = sampleRate
             rbChannels = channels
-            rb!!.setMaxProcessSize(CHUNK)
+            // Room for the screen-off block (see ScreenOffBuffer); the screen-on block is smaller.
+            rb!!.setMaxProcessSize(MAX_CHUNK)
         }
         val s = rb!!
         s.reset()
@@ -283,9 +284,15 @@ class TimePitchProcessor(@Volatile var source: SoundSource = StaticSoundSource()
 
         val s = rb!!
         pendingFrames = 0
+        // Screen on: 1024-frame blocks; screen off: up to 8192 (fewer, longer native calls).
+        val chunk = NativeDsp.processBlockFrames.coerceIn(CHUNK, MAX_CHUNK)
+        if (inBuf[0].size < chunk) {
+            inBuf = Array(ch) { FloatArray(chunk) }
+            outBuf = Array(ch) { FloatArray(chunk * 4) }
+        }
         var left = frames
         while (left > 0) {
-            val n = minOf(left, CHUNK)
+            val n = minOf(left, chunk)
             for (f in 0 until n) for (c in 0 until ch) inBuf[c][f] = inputBuffer.float
             s.process(inBuf, 0, n, false)
             framesIn += n
@@ -444,6 +451,8 @@ class TimePitchProcessor(@Volatile var source: SoundSource = StaticSoundSource()
 
     companion object {
         const val CHUNK = 1024
+        /** The biggest block Rubber Band is given (the screen-off block). */
+        const val MAX_CHUNK = NativeDsp.LONG_BLOCK_FRAMES
 
         /** The lighter R2 engine: asked for, and not needed for natural voices. */
         fun usesFaster(efficient: Boolean, formants: Boolean) = efficient && !formants
