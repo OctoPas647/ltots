@@ -120,6 +120,11 @@ android {
             System.getProperties().stringPropertyNames().filter { it.startsWith("ltots.") }
                 .forEach { test.systemProperty(it, System.getProperty(it)) }
             test.maxHeapSize = "2g"
+            // A failing test prints its whole message and stack in the CI log, not just "AssertionError".
+            test.testLogging {
+                events("failed")
+                exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+            }
             // A native library can only be loaded by one class loader per JVM, and Robolectric
             // tests use their own; so every test class gets a fresh JVM.
             test.setForkEvery(1)

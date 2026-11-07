@@ -57,6 +57,8 @@ class AppUiTest {
             // No real lyrics lookups from UI tests (the lyrics card then shows "offline").
             com.ltots.app.lyrics.Lyrics.api = com.ltots.app.lyrics.LrcLib("http://127.0.0.1:9/api")
             val app = ApplicationProvider.getApplicationContext<Application>()
+            // The simulated phone uses 3-button navigation (with gestures, swiping between tabs is off).
+            android.provider.Settings.Secure.putInt(app.contentResolver, "navigation_mode", 0)
             val ctl = Robolectric.buildService(PlaybackService::class.java).create()
             svc = ctl
             val svc = ctl.get()
@@ -251,8 +253,8 @@ class AppUiTest {
         fun ui() = com.ltots.app.CrashReport.uiSection()
         fun swipeSideways(towardsNext: Boolean) {
             rule.onRoot().performTouchInput {
-                // High on the page, clear of anything that scrolls sideways itself.
-                val y = height * 0.1f
+                // In the empty strip at the very top of the page, clear of anything that scrolls sideways itself.
+                val y = height * 0.04f
                 val (from, to) = if (towardsNext) width * 0.85f to width * 0.15f else width * 0.15f to width * 0.85f
                 swipe(androidx.compose.ui.geometry.Offset(from, y), androidx.compose.ui.geometry.Offset(to, y), durationMillis = 250)
             }
@@ -260,6 +262,7 @@ class AppUiTest {
         }
         try {
             assertTrue(ui(), "tab: HOME" in ui())
+            assertTrue(ui(), "swipe between tabs: on" in ui())
             swipeSideways(towardsNext = true)
             assertTrue(ui(), "tab: LIBRARY" in ui())
             shot("20_swiped_to_library")

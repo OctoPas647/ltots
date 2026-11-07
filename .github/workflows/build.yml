@@ -69,18 +69,27 @@ jobs:
           name: LToTS-${{ steps.apk.outputs.version }}
           path: out/LToTS-${{ steps.apk.outputs.version }}.apk
 
-      # Only main publishes a release: a test build from another branch is kept as this run's
-      # artifact (LToTS-<version>), so it never becomes the "latest release" people install.
+      # main publishes the release everyone installs ("latest"). Any other branch publishes a
+      # pre-release for trying that branch on the phone: never "latest", so the README's install
+      # link keeps pointing at main's newest build.
       - name: Publish release
-        if: env.HAS_KEY == 'true' && github.ref == 'refs/heads/main'
+        if: env.HAS_KEY == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           V="${{ steps.apk.outputs.version }}"
-          gh release create "v$V" out/LToTS.apk "out/LToTS-$V.apk" \
-            --title "LToTS $V" \
-            --notes "Automatic build of $(git rev-parse --short HEAD): $(git log -1 --pretty=%s)" \
-            --latest
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            gh release create "v$V" out/LToTS.apk "out/LToTS-$V.apk" \
+              --title "LToTS $V" \
+              --notes "Automatic build of $(git rev-parse --short HEAD): $(git log -1 --pretty=%s)" \
+              --latest
+          else
+            gh release create "v$V-test" out/LToTS.apk "out/LToTS-$V.apk" \
+              --target "${{ github.sha }}" \
+              --title "LToTS $V (test build: ${{ github.ref_name }})" \
+              --notes "Test build of branch ${{ github.ref_name }} at $(git rev-parse --short HEAD): $(git log -1 --pretty=%s). Installs over the app and keeps your settings." \
+              --prerelease --latest=false
+          fi
 
       - name: Signing key missing
         if: env.HAS_KEY != 'true'
