@@ -60,7 +60,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
@@ -262,16 +261,17 @@ fun AppRoot() {
             last = page
         }
     }
-    SideEffect {
-        CrashReport.note("swipe between tabs", when {
-            gestureNav -> "off (gesture navigation)"
-            cfg.swipeTabs -> "on"
-            else -> "off (setting)"
-        })
-        CrashReport.note("smoothness", effects.name)
-        CrashReport.note("overlay", overlay?.name ?: "none")
-        CrashReport.note("profile tab shows", if (lookOpen) "Look" else "Profile")
+    // What the crash report says about the UI. Each is keyed on its own value, so it updates even
+    // when only a page redraws (the Profile / Look switch is read inside its page, not up here).
+    val swipeNote = when {
+        gestureNav -> "off (gesture navigation)"
+        cfg.swipeTabs -> "on"
+        else -> "off (setting)"
     }
+    LaunchedEffect(swipeNote) { CrashReport.note("swipe between tabs", swipeNote) }
+    LaunchedEffect(effects) { CrashReport.note("smoothness", effects.name) }
+    LaunchedEffect(overlay) { CrashReport.note("overlay", overlay?.name ?: "none") }
+    LaunchedEffect(lookOpen) { CrashReport.note("profile tab shows", if (lookOpen) "Look" else "Profile") }
 
     // Shared links open the Get tab; notifications can ask for a tab too.
     val shared by Inbox.sharedText.collectAsState()
