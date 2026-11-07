@@ -103,10 +103,8 @@ class NewControlsUiTest {
         rule.waitForIdle()
     }
 
-    private fun tab(label: String) {
-        rule.onAllNodesWithText(label)[0].performClick()
-        idle(1200)
-    }
+    /** Opens a tab, or the EQ / Look, which now live inside the Playing and Profile tabs. */
+    private fun tab(label: String) = rule.openPlace(label) { idle(it) }
 
     /** Taps profile [name] in the open EQ profiles menu (the preset of the same name stays put). */
     private fun loadProfile(name: String) {

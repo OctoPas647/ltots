@@ -204,6 +204,12 @@ data class ThemeConfig(
     val hideNavBar: Boolean = true,
     /** Hide the status bar (clock, battery) too, for fully full-screen. */
     val hideStatusBar: Boolean = false,
+    /**
+     * Swipe left and right between the tabs (Profile > Look > Pages). Only works with 3-button
+     * navigation: with gesture navigation the screen edges belong to Android's back gesture, so
+     * swiping between tabs stays off whatever this says.
+     */
+    val swipeTabs: Boolean = true,
     /** Accent follows the current song's cover: the AMOLED Cover theme. */
     val dynamicColors: Boolean = false,
     /**
@@ -422,7 +428,7 @@ object Json {
         put("corner", t.cornerDp.toDouble()); put("dark", t.darkMode)
         put("specStyle", t.spectrumStyle.name); put("specOpacity", t.spectrumOpacity.toDouble())
         put("ghost", t.showPreEqGhost); put("vfps", t.visualizerFps); put("vfpsV", 3)
-        put("black", t.pureBlack); put("hideNav", t.hideNavBar); put("hideStatus", t.hideStatusBar)
+        put("black", t.pureBlack); put("hideNav", t.hideNavBar); put("hideStatus", t.hideStatusBar); put("swipeTabs", t.swipeTabs)
         put("dyn", t.dynamicColors)
         t.accentHsv?.let { put("aHsv", hsvJson(it)) }
         t.glowHsv?.let { put("gHsv", hsvJson(it)) }
@@ -481,6 +487,7 @@ object Json {
             pureBlack = o.optBoolean("black", d.pureBlack),
             hideNavBar = o.optBoolean("hideNav", d.hideNavBar),
             hideStatusBar = o.optBoolean("hideStatus", d.hideStatusBar),
+            swipeTabs = o.optBoolean("swipeTabs", d.swipeTabs),
             // Cover colours belong to the AMOLED Cover theme only (the separate switch is gone).
             dynamicColors = o.optBoolean("dyn", d.dynamicColors) && o.optBoolean("black", d.pureBlack),
             amoledAccent = if (o.has("amAccent")) o.optLong("amAccent") else null,

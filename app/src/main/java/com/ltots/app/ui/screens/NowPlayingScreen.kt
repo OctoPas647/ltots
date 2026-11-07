@@ -99,7 +99,7 @@ fun NowPlayingScreen(
 ) {
     // Nothing playing (or the history asked for): the songs played lately, YouTube Music style.
     if (!player.hasMedia || showHistory) {
-        HistoryPage(player, onPlayed = { onShowHistory(false) }, onBack = if (player.hasMedia) ({ onShowHistory(false) }) else null)
+        HistoryPage(player, onPlayed = { onShowHistory(false) }, onBack = if (player.hasMedia) ({ onShowHistory(false) }) else null, onOpenEq = onOpenEq)
         return
     }
     val pal = LocalPalette.current

@@ -69,7 +69,7 @@ import java.util.Date
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun HistoryPage(player: PlayerUi, onPlayed: () -> Unit, onBack: (() -> Unit)?) {
+fun HistoryPage(player: PlayerUi, onPlayed: () -> Unit, onBack: (() -> Unit)?, onOpenEq: (() -> Unit)? = null) {
     val context = LocalContext.current
     val pal = LocalPalette.current
     LaunchedEffect(Unit) { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { ListenHistory.ensureLoaded() } }
@@ -98,6 +98,8 @@ fun HistoryPage(player: PlayerUi, onPlayed: () -> Unit, onBack: (() -> Unit)?) {
                         color = pal.textDim, style = MaterialTheme.typography.bodySmall,
                     )
                 }
+                // The EQ lives on the Playing tab, which shows this page while nothing plays.
+                if (onOpenEq != null) { Pill("EQ", false, onOpenEq); Spacer(Modifier.width(8.dp)) }
                 if (onBack != null) { Pill("Now playing", true, onBack); Spacer(Modifier.width(8.dp)) }
                 if (items.isNotEmpty()) Pill("Clear", false, { confirmClear = true })
             }

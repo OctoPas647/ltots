@@ -29,6 +29,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Undo
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Person
@@ -93,7 +94,7 @@ import kotlin.math.ln
 import kotlin.math.pow
 
 @Composable
-fun EqScreen(player: PlayerUi) {
+fun EqScreen(player: PlayerUi, onBack: (() -> Unit)? = null) {
     val pal = LocalPalette.current
     val eq by AudioEngine.effectiveEq.collectAsState()
     val profile by AudioEngine.songProfile.collectAsState()
@@ -138,9 +139,21 @@ fun EqScreen(player: PlayerUi) {
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = topInset()).padding(horizontal = 14.dp)) {
         // Header
+        // Opened from the Playing tab: a way back, and the phone's back gesture closes it too.
+        if (onBack != null) androidx.activity.compose.BackHandler(onBack = onBack)
         Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (onBack != null) {
+                GlassCircleButton(onBack, Modifier.size(40.dp)) {
+                    Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back", tint = pal.text, modifier = Modifier.size(22.dp))
+                }
+                Spacer(Modifier.width(10.dp))
+            }
             Column(Modifier.weight(1f)) {
-                Text("Equalizer", style = MaterialTheme.typography.displaySmall, color = pal.text)
+                // Smaller next to the back button, so the title stays on one line beside the buttons.
+                Text(
+                    "Equalizer", color = pal.text, maxLines = 1,
+                    style = if (onBack != null) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.displaySmall,
+                )
                 Text(
                     if (player.hasMedia) player.title else "Plays on every song",
                     color = pal.textDim, style = MaterialTheme.typography.bodySmall, maxLines = 1,

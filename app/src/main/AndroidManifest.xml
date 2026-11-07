@@ -33,6 +33,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
+            android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustResize">
             <!-- "Share → LToTS" from YouTube Music, YouTube, TikTok or a browser:
                  music links download, TikToks and Shorts open the song finder. -->
@@ -331,6 +332,7 @@
             android:name=".CrashActivity"
             android:exported="false"
             android:process=":crash"
+            android:screenOrientation="portrait"
             android:theme="@android:style/Theme.Material.NoActionBar" />
         <receiver
             android:name=".playback.SleepTimer$Receiver"

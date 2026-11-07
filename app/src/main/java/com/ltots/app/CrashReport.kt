@@ -32,6 +32,57 @@ object CrashReport {
 
     fun file(context: Context) = File(context.filesDir, FILE)
 
+    // ---- what the UI was doing -----------------------------------------------------------------
+    // A stack trace alone often can't say which screen or gesture led to a crash (Compose traces
+    // are mostly framework code). The UI keeps these up to date, and every report includes them.
+
+    private val state = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private const val TRAIL_SIZE = 20
+    private val trail = ArrayDeque<String>(TRAIL_SIZE)
+    private val clock = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.ROOT)
+
+    /**
+     * The current value of one piece of UI state ("tab" = "LIBRARY"). Cheap: call it whenever
+     * the value changes, never every frame.
+     */
+    fun note(key: String, value: String) {
+        state[key] = value
+    }
+
+    /** One step the person took or the UI went through ("tab HOME → LIBRARY (swipe)"); the last 20 are kept. */
+    fun step(event: String) {
+        synchronized(trail) {
+            // SimpleDateFormat isn't thread-safe: only used under this lock.
+            val line = runCatching { clock.format(java.util.Date()) }.getOrDefault("?") + "  " + event
+            if (trail.size == TRAIL_SIZE) trail.removeFirst()
+            trail.addLast(line)
+        }
+    }
+
+    /** Something went wrong but was handled (the app carried on): kept as a step in the report. */
+    fun handled(where: String, error: Throwable) {
+        step("handled in $where: ${error.javaClass.simpleName}: ${error.message?.take(160)}")
+    }
+
+    internal fun uiSection(): String = buildString {
+        val keys = state.keys.sorted()
+        val steps = synchronized(trail) { trail.toList() }
+        if (keys.isEmpty() && steps.isEmpty()) return@buildString
+        appendLine("UI at the time:")
+        keys.forEach { appendLine("  $it: ${state[it]}") }
+        if (steps.isNotEmpty()) {
+            appendLine("Last steps (oldest first):")
+            steps.forEach { appendLine("  $it") }
+        }
+        appendLine()
+    }
+
+    /** Clears the UI state and steps (tests). */
+    internal fun clearUi() {
+        state.clear()
+        synchronized(trail) { trail.clear() }
+    }
+
     /** Catches every crash in this process from now on. Call first thing in Application.onCreate. */
     fun install(app: Application) {
         val previous = Thread.getDefaultUncaughtExceptionHandler()
@@ -52,7 +103,7 @@ object CrashReport {
         }
     }
 
-    private fun report(context: Context, thread: Thread, error: Throwable): String {
+    internal fun report(context: Context, thread: Thread, error: Throwable): String {
         val sw = StringWriter()
         error.printStackTrace(PrintWriter(sw))
         val version = runCatching {
@@ -64,6 +115,8 @@ object CrashReport {
             appendLine("Thread: ${thread.name}")
             appendLine("Time: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.ROOT).format(java.util.Date())}")
             appendLine()
+            // Never let the extra section stop the report itself from being written.
+            append(runCatching { uiSection() }.getOrDefault(""))
             append(sw.toString())
         }
     }

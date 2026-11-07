@@ -97,6 +97,7 @@ object ThemeState {
         effects = cur.effects,
         hideNavBar = cur.hideNavBar,
         hideStatusBar = cur.hideStatusBar,
+        swipeTabs = cur.swipeTabs,
     )
 
     /** Switch to profile [i]. Detail and the screen settings never change by switching. */
@@ -216,6 +217,7 @@ object ThemeState {
         effects = cur.effects,
         hideNavBar = cur.hideNavBar,
         hideStatusBar = cur.hideStatusBar,
+        swipeTabs = cur.swipeTabs,
         iconMode = cur.iconMode,
         iconFile = cur.iconFile,
         iconThreshold = cur.iconThreshold,
@@ -277,13 +279,13 @@ object ThemeState {
      * everything on the Look tab. The screen settings on the Profile tab stay as they are.
      */
     fun reset() {
-        update { cur -> defaultLook.copy(maxRefresh = cur.maxRefresh, effects = cur.effects, hideNavBar = cur.hideNavBar, hideStatusBar = cur.hideStatusBar) }
+        update { cur -> defaultLook.copy(maxRefresh = cur.maxRefresh, effects = cur.effects, hideNavBar = cur.hideNavBar, hideStatusBar = cur.hideStatusBar, swipeTabs = cur.swipeTabs) }
     }
 
     /** Every Look profile removed but one, Custom 1, back on the default look. */
     fun resetAll() {
         val cur = _config.value
-        val look = defaultLook.copy(maxRefresh = cur.maxRefresh, effects = cur.effects, hideNavBar = cur.hideNavBar, hideStatusBar = cur.hideStatusBar)
+        val look = defaultLook.copy(maxRefresh = cur.maxRefresh, effects = cur.effects, hideNavBar = cur.hideNavBar, hideStatusBar = cur.hideStatusBar, swipeTabs = cur.swipeTabs)
         _profiles.value = listOf(LookProfile(customName(0), look))
         _activeProfile.value = 0
         _config.value = look

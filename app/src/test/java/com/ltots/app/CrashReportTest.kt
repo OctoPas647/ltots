@@ -26,4 +26,24 @@ class CrashReportTest {
         val all = texts(a.window.decorView)
         assertTrue(all.toString(), all.any { "boom" in it })
     }
+
+    /** Every report says what the UI was doing: its state and the last steps, oldest first. */
+    @Test fun reportIncludesTheUi() {
+        val ctx = ApplicationProvider.getApplicationContext<android.app.Application>()
+        CrashReport.clearUi()
+        CrashReport.note("tab", "LIBRARY")
+        CrashReport.note("overlay", "EQ")
+        CrashReport.step("tab HOME → LIBRARY")
+        CrashReport.handled("test", IllegalArgumentException("odd value"))
+        repeat(30) { CrashReport.step("step $it") }
+        val text = CrashReport.report(ctx, Thread.currentThread(), IllegalStateException("boom"))
+        assertTrue(text, "tab: LIBRARY" in text && "overlay: EQ" in text)
+        // Only the last 20 steps are kept.
+        assertTrue(text, "step 29" in text && "step 10" in text && "step 9\n" !in text)
+        // The stack trace still follows.
+        assertTrue(text, text.indexOf("UI at the time") < text.indexOf("IllegalStateException: boom"))
+        CrashReport.clearUi()
+        val bare = CrashReport.report(ctx, Thread.currentThread(), IllegalStateException("boom"))
+        assertTrue(bare, "UI at the time" !in bare)
+    }
 }

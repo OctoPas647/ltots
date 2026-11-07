@@ -16,7 +16,9 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipe
 import androidx.compose.ui.test.swipeRight
+import androidx.compose.ui.test.swipeUp
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.session.MediaSessionService
@@ -88,10 +90,8 @@ class AppUiTest {
         idle(300)
     }
 
-    private fun tab(label: String) {
-        rule.onAllNodesWithText(label).first().performClick()
-        idle(1200)
-    }
+    /** Opens a tab, or the EQ / Look, which now live inside the Playing and Profile tabs. */
+    private fun tab(label: String) = rule.openPlace(label) { idle(it) }
 
     @Test fun everyTabOpensAndWorks() {
         rule.mainClock.autoAdvance = false
@@ -238,6 +238,78 @@ class AppUiTest {
         assertEquals(0, AudioEngine.pitchCents.value)
         assertEquals(1f, player.playbackParameters.speed)
         shot("09_reset")
+    }
+
+    /**
+     * Tabs follow a sideways swipe (unless switched off in Profile > Look > Pages), the bars at the
+     * bottom go compact while a page scrolls down and come back on a new tab, and links to the EQ
+     * and Look (no longer tabs) still land there. Checked through what the crash report would say.
+     */
+    @Test fun swipeTabsCompactBarsAndLinks() {
+        rule.mainClock.autoAdvance = false
+        idle()
+        fun ui() = com.ltots.app.CrashReport.uiSection()
+        fun swipeSideways(towardsNext: Boolean) {
+            rule.onRoot().performTouchInput {
+                // High on the page, clear of anything that scrolls sideways itself.
+                val y = height * 0.1f
+                val (from, to) = if (towardsNext) width * 0.85f to width * 0.15f else width * 0.15f to width * 0.85f
+                swipe(androidx.compose.ui.geometry.Offset(from, y), androidx.compose.ui.geometry.Offset(to, y), durationMillis = 250)
+            }
+            idle(1500)
+        }
+        try {
+            assertTrue(ui(), "tab: HOME" in ui())
+            swipeSideways(towardsNext = true)
+            assertTrue(ui(), "tab: LIBRARY" in ui())
+            shot("20_swiped_to_library")
+            swipeSideways(towardsNext = false)
+            assertTrue(ui(), "tab: HOME" in ui())
+
+            // Swiping off: the bar still moves between tabs, a swipe doesn't.
+            tab("Look")
+            assertTrue(ui(), "profile tab shows: Look" in ui())
+            rule.onNodeWithText("Swipe between pages").performSemanticsAction(SemanticsActions.OnClick)
+            idle()
+            assertTrue(!com.ltots.app.ui.theme.ThemeState.config.value.swipeTabs)
+            assertTrue(ui(), "swipe between tabs: off (setting)" in ui())
+            swipeSideways(towardsNext = false)
+            assertTrue(ui(), "tab: PROFILE" in ui())
+            rule.onNodeWithText("Swipe between pages").performSemanticsAction(SemanticsActions.OnClick)
+            idle()
+            assertTrue(com.ltots.app.ui.theme.ThemeState.config.value.swipeTabs)
+            shot("21_look_pages_setting")
+
+            // Scrolling down makes the bars compact; another tab brings them back to full size.
+            rule.onRoot().performTouchInput {
+                swipeUp(startY = height * 0.7f, endY = height * 0.25f, durationMillis = 300)
+            }
+            idle(1200)
+            assertTrue(ui(), "bar: compact" in ui())
+            shot("22_bars_compact")
+            tab("Home")
+            idle(800)
+            assertTrue(ui(), "bar: full size" in ui())
+
+            // Links to what used to be tabs: the EQ opens over the Playing tab, back closes it.
+            com.ltots.app.ui.Inbox.openTab.value = "EQ"
+            idle(1200)
+            assertTrue(ui(), "tab: PLAYER" in ui())
+            assertTrue(ui(), "overlay: EQ" in ui())
+            rule.onNodeWithContentDescription("Back").assertExists()
+            shot("23_eq_from_playing")
+            rule.runOnUiThread { rule.activity.onBackPressedDispatcher.onBackPressed() }
+            idle(1200)
+            assertTrue(ui(), "overlay: none" in ui())
+            com.ltots.app.ui.Inbox.openTab.value = "LOOK"
+            idle(1200)
+            assertTrue(ui(), "tab: PROFILE" in ui())
+            assertTrue(ui(), "profile tab shows: Look" in ui())
+            // Every step above is in the report, in order.
+            assertTrue(ui(), "Last steps" in ui() && "open EQ (link)" in ui())
+        } finally {
+            com.ltots.app.ui.theme.ThemeState.update { it.copy(swipeTabs = true) }
+        }
     }
 }
 

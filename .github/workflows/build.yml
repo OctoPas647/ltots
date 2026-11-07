@@ -69,8 +69,10 @@ jobs:
           name: LToTS-${{ steps.apk.outputs.version }}
           path: out/LToTS-${{ steps.apk.outputs.version }}.apk
 
+      # Only main publishes a release: a test build from another branch is kept as this run's
+      # artifact (LToTS-<version>), so it never becomes the "latest release" people install.
       - name: Publish release
-        if: env.HAS_KEY == 'true'
+        if: env.HAS_KEY == 'true' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

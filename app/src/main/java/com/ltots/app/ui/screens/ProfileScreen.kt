@@ -90,7 +90,7 @@ import kotlin.math.pow
  * profiles: switch, add, rename, delete, export and import.
  */
 @Composable
-fun ProfileScreen() {
+fun ProfileScreen(top: @Composable () -> Unit = {}) {
     val pal = LocalPalette.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -130,6 +130,7 @@ fun ProfileScreen() {
     }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = topInset()).padding(horizontal = 14.dp)) {
+        top()
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Profile", style = MaterialTheme.typography.displaySmall, color = pal.text)

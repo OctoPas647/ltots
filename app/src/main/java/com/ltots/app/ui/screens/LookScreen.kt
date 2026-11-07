@@ -82,7 +82,7 @@ private val swatches = listOf(
 )
 
 @Composable
-fun LookScreen(artwork: android.graphics.Bitmap? = null) {
+fun LookScreen(artwork: android.graphics.Bitmap? = null, top: @Composable () -> Unit = {}) {
     // Edit the saved theme (LocalThemeConfig may be showing cover-based colours).
     val cfg by ThemeState.config.collectAsState()
     val pal = LocalPalette.current
@@ -90,6 +90,7 @@ fun LookScreen(artwork: android.graphics.Bitmap? = null) {
     var resetAsk by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = topInset()).padding(horizontal = 14.dp)) {
+        top()
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Look", style = MaterialTheme.typography.displaySmall, color = pal.text)
@@ -185,6 +186,9 @@ fun LookScreen(artwork: android.graphics.Bitmap? = null) {
                 )
             }
         }
+
+        Spacer(Modifier.height(12.dp))
+        PagesSetting(cfg.swipeTabs) { on -> set { it.copy(swipeTabs = on) } }
 
         Spacer(Modifier.height(12.dp))
         GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
@@ -686,5 +690,23 @@ private fun BeatAiSetting() {
             else -> Pill("Remove beat AI", false, { parts.forEach { com.ltots.app.identify.AiModels.remove(it) } })
         }
         models.error?.takeIf { e -> parts.any { e.startsWith(it.title) } }?.let { Text(it, color = pal.textFaint, style = MaterialTheme.typography.bodySmall) }
+    }
+}
+
+/** Pages: swiping left and right between the tabs, or only moving with the bar. */
+@Composable
+private fun PagesSetting(swipe: Boolean, onChange: (Boolean) -> Unit) {
+    val gestureNav = com.ltots.app.ui.rememberGestureNav()
+    GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
+        Column(Modifier.padding(16.dp)) {
+            SectionTitle("Pages")
+            SwitchRow(
+                "Swipe between pages", swipe && !gestureNav, onChange,
+                sub = if (gestureNav) "Off while the phone uses gesture navigation: swiping in from the left or right edge is " +
+                    "Android's back gesture there. Switch to 3-button navigation in the phone's settings to use it."
+                else "Swipe left and right anywhere on a page to move to the next tab. Off: tabs change only from the bar at the bottom.",
+                enabled = !gestureNav,
+            )
+        }
     }
 }
