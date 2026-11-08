@@ -1,0 +1,765 @@
+package com.ltots.app.ui.screens
+
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.RestartAlt
+import androidx.compose.material3.Icon
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.ui.draw.alpha
+import com.ltots.app.ui.components.ProfileMenu
+import com.ltots.app.ui.topInset
+import com.ltots.app.ui.components.ProfilePill
+import com.ltots.app.ui.components.ProfileRow
+import com.ltots.app.ui.components.ProfileAddRow
+import com.ltots.app.ui.components.ProfileIconButton
+import com.ltots.app.ui.components.ProfileRowActions
+import com.ltots.app.ui.components.RenameDialog
+import com.ltots.app.ui.components.DeleteDialog
+import com.ltots.app.ui.theme.DynamicColor
+import com.ltots.app.ui.theme.glowShades
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import com.ltots.app.data.SpectrumStyle
+import com.ltots.app.data.Hsv
+import com.ltots.app.data.BehindLayout
+import com.ltots.app.data.Effects
+import com.ltots.app.data.RingLayout
+import com.ltots.app.data.ThemeConfig
+import com.ltots.app.ui.bottomChrome
+import com.ltots.app.ui.components.LabeledSlider
+import com.ltots.app.ui.components.Pill
+import com.ltots.app.ui.components.SectionTitle
+import com.ltots.app.ui.components.Swatch
+import com.ltots.app.ui.components.SwitchRow
+import com.ltots.app.ui.glass.GlassPanel
+import com.ltots.app.ui.theme.LocalPalette
+import com.ltots.app.ui.theme.LocalThemeConfig
+import com.ltots.app.ui.theme.ThemeState
+import com.ltots.app.ui.theme.toArgbLong
+import com.ltots.app.ui.theme.toColor
+import java.util.Locale
+
+private val swatches = listOf(
+    0xFF8B6CFF, 0xFF5B3DF5, 0xFF3FD5FF, 0xFF00C8A0, 0xFF6CFFB0, 0xFFC6FF3D,
+    0xFFFFD23D, 0xFFFF8A5C, 0xFFFF4D6D, 0xFFFF3DCB, 0xFFE6E6E6, 0xFF2A2A2A,
+    0xFF2A1260, 0xFF0B3D63, 0xFF5B1048, 0xFF07301F, 0xFF4A1230, 0xFF04263F,
+)
+
+@Composable
+fun LookScreen(artwork: android.graphics.Bitmap? = null, top: @Composable () -> Unit = {}) {
+    // Edit the saved theme (LocalThemeConfig may be showing cover-based colours).
+    val cfg by ThemeState.config.collectAsState()
+    val pal = LocalPalette.current
+    fun set(t: (ThemeConfig) -> ThemeConfig) = ThemeState.update(t)
+    var resetAsk by remember { mutableStateOf(false) }
+
+    // Opening the page builds it a piece at a time, so the slide-in stays smooth (it all used to
+    // be built in one go inside the first frame of the animation). Where you were is restored after.
+    val scroll = rememberScrollState()
+    val restoreTo = remember { scroll.value }
+    var stage by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    LaunchedEffect(Unit) {
+        while (stage < 7) {
+            androidx.compose.runtime.withFrameNanos { }
+            androidx.compose.runtime.withFrameNanos { }
+            stage++
+        }
+        if (restoreTo > 0) scroll.scrollTo(restoreTo)
+    }
+
+    CompositionLocalProvider(com.ltots.app.ui.components.LocalSliderThrottle provides 48L) {
+    Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(top = topInset()).padding(horizontal = 14.dp)) {
+        top()
+        Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Look", style = MaterialTheme.typography.displaySmall, color = pal.text)
+                Text("Everything here changes live.", color = pal.textDim, style = MaterialTheme.typography.bodySmall)
+            }
+            LookProfiles(cfg)
+            Spacer(Modifier.width(8.dp))
+            // Reset everything on this page to the default look, like the EQ's reset button.
+            com.ltots.app.ui.glass.GlassCircleButton({ resetAsk = true }, Modifier.size(40.dp)) {
+                Icon(androidx.compose.material.icons.Icons.Rounded.RestartAlt, "Reset the look to default", tint = pal.text, modifier = Modifier.size(22.dp))
+            }
+        }
+        if (resetAsk) ResetLookDialog(onDismiss = { resetAsk = false })
+        Spacer(Modifier.height(14.dp))
+
+        // Theme presets
+        GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
+            Column(Modifier.padding(vertical = 16.dp)) {
+                SectionTitle("Themes", Modifier.padding(horizontal = 16.dp))
+                Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    ThemeState.presets.forEach { p ->
+                        val t = p.config
+                        val on = ThemeState.isActive(p, cfg)
+                        Column(Modifier.clip(RoundedCornerShape(16.dp)).clickable { ThemeState.applyPreset(p) }.padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Box(
+                                Modifier.size(64.dp).clip(RoundedCornerShape(16.dp)).background(
+                                    if (p.dynamic == true) {
+                                        // Black with a ring of cover-like colours.
+                                        Brush.sweepGradient(listOf(Color(0xFFFF5C7A), Color(0xFFFFC14D), Color(0xFF6CFFB0), Color(0xFF3FD5FF), Color(0xFFB07CFF), Color(0xFFFF5C7A)))
+                                    } else glowShades(t.glow).let { g -> Brush.linearGradient(listOf(g[0], t.accent.toColor(), g[2])) }
+                                ).border(if (on) 2.dp else 1.dp, if (on) pal.text else pal.text.copy(alpha = 0.15f), RoundedCornerShape(16.dp)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (p.dynamic == true) Box(Modifier.size(44.dp).clip(RoundedCornerShape(11.dp)).background(Color.Black))
+                            }
+                            Text(
+                                p.name, color = if (on) pal.text else pal.textDim, style = MaterialTheme.typography.bodySmall,
+                                fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, modifier = Modifier.padding(top = 4.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+
+        if (stage > 0) {
+        Spacer(Modifier.height(12.dp))
+        ColorCard(cfg, ::set)
+
+        }
+        if (stage > 1) {
+        Spacer(Modifier.height(12.dp))
+        GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
+            Column(Modifier.padding(16.dp)) {
+                SectionTitle("Glass")
+                // Blur and Refraction bend what's behind the glass: the page scrolling under the bars
+                // at the bottom (every theme), and the moving colours behind the panels.
+                // Smoothness turns these down on phones that can't keep up (grayed out then).
+                val level = com.ltots.app.ui.rememberEffects()
+                LabeledSlider("Blur", cfg.blurDp, { v -> set { it.copy(blurDp = v) } }, 0f..60f, "%.0f dp".format(Locale.ROOT, cfg.blurDp),
+                    enabled = level == Effects.FULL)
+                LabeledSlider("Refraction", cfg.refraction, { v -> set { it.copy(refraction = v) } }, 0f..1f, pct(cfg.refraction),
+                    enabled = level != Effects.LIGHT)
+                Text(
+                    if (level == Effects.LIGHT) "Smoothness is on Light (Profile tab): the glass is plain frosted, without blur or bending, so these two are off for now."
+                    else if (level == Effects.BALANCED) "Smoothness is on Balanced (Profile tab): the glass bends without blurring, so Blur is off for now." +
+                        (if (cfg.pureBlack) " On the AMOLED themes the bars sit on pure black too." else "")
+                    else if (cfg.pureBlack) "Blur and Refraction show on the bars at the bottom, bending the page as it scrolls under them. The panels sit on pure black, which looks the same bent or not."
+                    else "Blur and Refraction bend what's behind the glass: the animated colours under the panels, and the page scrolling under the bars at the bottom.",
+                    color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 8.dp),
+                )
+                LabeledSlider("Frost / tint", cfg.glassTint, { v -> set { it.copy(glassTint = v) } }, 0f..0.7f, pct(cfg.glassTint / 0.7f))
+                LabeledSlider("Rim light", cfg.rimLight, { v -> set { it.copy(rimLight = v) } }, 0f..1f, pct(cfg.rimLight))
+                SwitchRow(
+                    "Glass Library top", cfg.libraryHeaderGlass, { on -> set { it.copy(libraryHeaderGlass = on) } },
+                    sub = "The top of the Library page (title, search, buttons) floats on one glass panel, like the bars at the bottom: the songs scroll on under it, blurred. Off: it sits straight on the background above the list.",
+                )
+                LabeledSlider("Corner roundness", cfg.cornerDp, { v -> set { it.copy(cornerDp = v) } }, 4f..44f, "%.0f dp".format(Locale.ROOT, cfg.cornerDp))
+                LabeledSlider("Cover opacity", cfg.coverOpacity, { v -> set { it.copy(coverOpacity = v) } }, 0.1f..1f, pct(cfg.coverOpacity))
+                // Only where the bars pass behind the cover: the cover can stay solid and still
+                // let the bars show through.
+                val behind = !cfg.iconMode && !cfg.spectrumAroundCover
+                val withBars = cfg.coverBarsOpacity ?: cfg.coverOpacity
+                LabeledSlider(
+                    "Cover opacity with bars", withBars, { v -> set { it.copy(coverBarsOpacity = v) } }, 0f..1f,
+                    pct(withBars) + if (cfg.coverBarsOpacity == null) " (same)" else "", enabled = behind,
+                    // Back to "the same as Cover opacity".
+                    onReset = { set { it.copy(coverBarsOpacity = null) } }, isDefault = cfg.coverBarsOpacity == null,
+                )
+                Text(
+                    if (behind) "Only the parts of the cover in front of the bars take this opacity; between the bars and everywhere else the cover stays at " +
+                        "Cover opacity. E.g. Cover opacity 100% and this 40%: a solid cover the bars show through. Reset makes it follow Cover opacity."
+                    else "Works when the visualizer is behind the cover (Visualizer > Behind the cover).",
+                    color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 4.dp),
+                )
+            }
+        }
+
+        }
+        if (stage > 2) {
+        Spacer(Modifier.height(12.dp))
+        PagesSetting(cfg.swipeTabs) { on -> set { it.copy(swipeTabs = on) } }
+
+        }
+        if (stage > 3) {
+        Spacer(Modifier.height(12.dp))
+        GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
+            Column(Modifier.padding(16.dp)) {
+                SectionTitle("Library page")
+                SwitchRow(
+                    "Clock & icons on Library", cfg.libraryStatusBar, { on -> set { it.copy(libraryStatusBar = on) } },
+                    sub = "Off: hidden on the Library, and its top menu moves up to the very top of the screen, logo in the top-left corner. " +
+                        "On: the Library shows them and the menu sits right below, even with Hide status bar on in App settings.",
+                )
+                Spacer(Modifier.height(6.dp))
+                Text("Scroll slider", color = pal.text, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "A liquid-glass slider on the right edge of the Library's lists. Hold and drag it to jump; a bubble shows the letter, genre or colour you're at.",
+                    color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 6.dp),
+                )
+                FlowPills {
+                    com.ltots.app.data.ScrollbarShow.entries.forEach { m -> Pill(m.label, cfg.scrollbarShow == m, { set { it.copy(scrollbarShow = m) } }) }
+                }
+                SwitchRow(
+                    "Slider runs behind the bars", cfg.scrollbarFullHeight, { on -> set { it.copy(scrollbarFullHeight = on) } },
+                    sub = "On: it reaches down behind the mini player and nav bar. Off: it ends just above them.",
+                    enabled = cfg.scrollbarShow != com.ltots.app.data.ScrollbarShow.OFF,
+                )
+            }
+        }
+
+        }
+        if (stage > 4) {
+        Spacer(Modifier.height(12.dp))
+        GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
+            Column(Modifier.padding(16.dp)) {
+                SectionTitle("Background")
+                if (cfg.pureBlack) {
+                    Text(
+                        "The AMOLED themes keep the background pure black, so black pixels stay switched off and save battery. " +
+                            "These are grayed out: pick another theme above to use colours, motion and album-art glow.",
+                        color = pal.textDim, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 6.dp),
+                    )
+                }
+                // Grayed out on the AMOLED themes (nothing to move or tint on pure black).
+                val bg = !cfg.pureBlack
+                SwitchRow("Dark mode", cfg.darkMode || !bg, { on -> set { it.copy(darkMode = on) } }, enabled = bg)
+                val saver by com.ltots.app.ui.rememberBatterySaver()
+                val effects = com.ltots.app.ui.rememberEffects()
+                SwitchRow(
+                    "Animations", cfg.animateBackground && bg, { on -> set { it.copy(animateBackground = on) } }, enabled = bg,
+                    sub = when {
+                        !bg -> "Off on the AMOLED themes: nothing moves on pure black."
+                        cfg.animateBackground && saver -> "Paused while the phone's Battery Saver is on."
+                        cfg.animateBackground && effects == com.ltots.app.data.Effects.LIGHT -> "The colours behind the glass drift around. Smoothness: Light moves them at up to 30 fps."
+                        else -> "The colours behind the glass drift around, and the album-art glow with them."
+                    },
+                )
+                LabeledSlider(
+                    "Motion speed", cfg.animationSpeed, { v -> set { it.copy(animationSpeed = v) } }, 0.1f..3f,
+                    "%.1f×".format(Locale.ROOT, cfg.animationSpeed), enabled = bg && cfg.animateBackground,
+                )
+                SwitchRow(
+                    "Album art glow", cfg.artworkBackground && bg, { on -> set { it.copy(artworkBackground = on) } }, enabled = bg,
+                    sub = "Melts the current song's cover into the background.",
+                )
+            }
+        }
+
+        }
+        if (stage > 5) {
+        Spacer(Modifier.height(12.dp))
+        GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
+            Column(Modifier.padding(16.dp)) {
+                SectionTitle("Visualizer")
+                Text("On the Playing tab", color = LocalPalette.current.textDim, style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(6.dp))
+                FlowPills {
+                    Pill("Around the cover", !cfg.iconMode && cfg.spectrumAroundCover, { set { it.copy(iconMode = false, spectrumAroundCover = true) } })
+                    Pill("Behind the cover", !cfg.iconMode && !cfg.spectrumAroundCover, { set { it.copy(iconMode = false, spectrumAroundCover = false) } })
+                    Pill("Icon", cfg.iconMode, { set { it.copy(iconMode = true) } })
+                }
+                Spacer(Modifier.height(8.dp))
+                // Round the cover and along an icon's outline the spectrum runs the same ways.
+                val ring = cfg.spectrumAroundCover || cfg.iconMode
+                FlowPills {
+                    if (ring) {
+                        RingLayout.entries.forEach { l -> Pill(l.label, cfg.ringLayout == l, { set { it.copy(ringLayout = l) } }) }
+                    } else {
+                        BehindLayout.entries.forEach { l -> Pill(l.label, cfg.behindLayout == l, { set { it.copy(behindLayout = l) } }) }
+                    }
+                }
+                Text(
+                    if (cfg.iconMode) when (cfg.ringLayout) {
+                        RingLayout.LOOP -> "Once along the icon's outlines, longest first: bass at the top, round to the treble."
+                        RingLayout.MIRRORED -> "The same both ways round the outlines: treble at the top, bass halfway round."
+                        RingLayout.MIRRORED_FLIPPED -> "The same both ways round the outlines: bass at the top, treble halfway round."
+                    } else if (cfg.spectrumAroundCover) when (cfg.ringLayout) {
+                        RingLayout.LOOP -> "One continuous ring round the smaller cover: bass at the top, clockwise to the treble."
+                        RingLayout.MIRRORED -> "The same on both sides: bass at the bottom, treble at the top."
+                        RingLayout.MIRRORED_FLIPPED -> "The same on both sides, upside down: bass at the top, treble at the bottom."
+                    } else when (cfg.behindLayout) {
+                        BehindLayout.BELOW -> "Rises from below the full-size cover, bass on the left."
+                        BehindLayout.ABOVE -> "Hangs down from above the full-size cover, bass on the left."
+                        BehindLayout.ABOVE_FLIPPED -> "Hangs down from above the full-size cover, bass on the right."
+                        BehindLayout.BOTH_MIRRORED -> "Rises from below and hangs from above at once. The top is a mirror image of the bottom: bass on the left on both."
+                        BehindLayout.BOTH -> "Rises from below and hangs from above at once, not mirrored: the top is the bottom turned round, bass on the right."
+                    },
+                    color = LocalPalette.current.textFaint, style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 6.dp, bottom = 10.dp),
+                )
+                if (cfg.iconMode) IconSettings(cfg, artwork, ::set)
+                SwitchRow(
+                    "Move with the beat", cfg.coverBeat, { on -> set { it.copy(coverBeat = on) } },
+                    enabled = !cfg.iconMode,
+                    sub = when {
+                        cfg.iconMode -> "Works with the cover: pick Around the cover or Behind the cover above."
+                        cfg.visualizerFps == 0 -> "Needs the visualizer (Refresh rate below isn't Off): it listens through it."
+                        else -> "The cover pumps on every beat, hardest on drops and big moments, like remix videos. " +
+                            "Each song's beats are worked out before it plays (the next songs in the queue as soon as one starts, the whole library while charging), " +
+                            "so it lands exactly on the beat — also while the phone's audio chip plays the song by itself."
+                    },
+                )
+                if (cfg.coverBeat && !cfg.iconMode) {
+                    Text("Move with", color = LocalPalette.current.text, modifier = Modifier.padding(top = 6.dp, bottom = 6.dp))
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        com.ltots.app.data.BeatSource.entries.forEach { s ->
+                            Pill(s.label, cfg.beatSource == s, { set { it.copy(beatSource = s) } })
+                        }
+                    }
+                    Text(
+                        when (cfg.beatSource) {
+                            com.ltots.app.data.BeatSource.SONG -> "The whole song: whichever hits hardest — kicks, snares or hi-hats — leaning on the beat in the lows."
+                            com.ltots.app.data.BeatSource.LOWS -> "Only the lows (below 140 Hz): kick drums, 808s and bass drops."
+                            com.ltots.app.data.BeatSource.MIDS -> "Only the mids (250 Hz–4 kHz): snares, claps, vocals and chords."
+                            com.ltots.app.data.BeatSource.HIGHS -> "Only the highs (above 4 kHz): hi-hats, cymbals and shakers — a quick, busy movement."
+                        },
+                        color = LocalPalette.current.textFaint, style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 6.dp, bottom = 6.dp),
+                    )
+                    LabeledSlider("Beat strength", cfg.beatStrength, { v -> set { it.copy(beatStrength = v) } }, 0.1f..1f, pct(cfg.beatStrength))
+                    BeatAiSetting()
+                }
+                SwitchRow(
+                    "Gradient flow", cfg.gradientFlow, { on -> set { it.copy(gradientFlow = on) } },
+                    enabled = !cfg.iconMode,
+                    sub = when {
+                        cfg.iconMode -> "Works with the cover: pick Around the cover or Behind the cover above."
+                        cfg.pureBlack && !cfg.dynamicColors -> "Lights the screen round the cover in the colours of its edges, like a TV's backlight, and melts into your own colour further out."
+                        else -> "Lights the screen round the cover in the colours of its edges, like a TV's backlight, fading out into the background."
+                    },
+                )
+                LabeledSlider(
+                    "Light reaches down", cfg.glowReachDown, { v -> set { it.copy(glowReachDown = v) } }, 1f..4f,
+                    "%.1f×".format(Locale.ROOT, cfg.glowReachDown), enabled = cfg.gradientFlow && !cfg.iconMode,
+                    onReset = { set { it.copy(glowReachDown = 2f) } }, isDefault = kotlin.math.abs(cfg.glowReachDown - 2f) < 0.01f,
+                )
+                Text(
+                    "How far the Gradient flow light reaches below the cover, compared with above and beside it (1× = the same all round).",
+                    color = LocalPalette.current.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 6.dp),
+                )
+                SwitchRow(
+                    "Top fade", cfg.playingTopFade, { on -> set { it.copy(playingTopFade = on) } },
+                    sub = "On the Playing tab, the album-art background and the Gradient flow light fade into black towards the top of the screen. " +
+                        "It's fixed to the screen, so it stays still while the cover moves with the beat.",
+                )
+                if (cfg.playingTopFade) {
+                    LabeledSlider(
+                        "Fade starts", cfg.topFadeStart, { v -> set { it.copy(topFadeStart = v) } }, 0f..0.5f, pct(cfg.topFadeStart) + " down",
+                        onReset = { set { it.copy(topFadeStart = 0f) } }, isDefault = cfg.topFadeStart < 0.005f,
+                    )
+                    LabeledSlider(
+                        "Fade length", cfg.topFadeLength, { v -> set { it.copy(topFadeLength = v) } }, 0.05f..0.8f, pct(cfg.topFadeLength) + " of the screen",
+                        onReset = { set { it.copy(topFadeLength = 0.35f) } }, isDefault = kotlin.math.abs(cfg.topFadeLength - 0.35f) < 0.005f,
+                    )
+                    LabeledSlider(
+                        "Darkness", cfg.topFadeDarkness, { v -> set { it.copy(topFadeDarkness = v) } }, 0f..1f,
+                        if (cfg.topFadeDarkness > 0.995f) "Black" else pct(cfg.topFadeDarkness),
+                        onReset = { set { it.copy(topFadeDarkness = 1f) } }, isDefault = cfg.topFadeDarkness > 0.995f,
+                    )
+                    Text(
+                        "Fade starts: how far down from the top it stays fully dark. Fade length: how soft the blend into the colours is. Darkness: black, or only dimmed.",
+                        color = LocalPalette.current.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 6.dp),
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                Text("Style", color = LocalPalette.current.textDim, style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SpectrumStyle.entries.forEach { s -> Pill(s.label, cfg.spectrumStyle == s, { set { it.copy(spectrumStyle = s) } }) }
+                }
+                Spacer(Modifier.height(8.dp))
+                LabeledSlider("Strength", cfg.spectrumOpacity, { v -> set { it.copy(spectrumOpacity = v) } }, 0.1f..1f, pct(cfg.spectrumOpacity))
+                SwitchRow("Show sound before EQ", cfg.showPreEqGhost, { on -> set { it.copy(showPreEqGhost = on) } },
+                    sub = "A faint outline of the original sound, so you can see exactly what the EQ changes.")
+                SwitchRow(
+                    "Freeze when music stops", cfg.freezeVisualizer, { on -> set { it.copy(freezeVisualizer = on) } },
+                    sub = "When a song is paused or ends, the visualizer stays exactly as it was instead of falling away. " +
+                        "Nothing runs while it's frozen, so it costs no battery.",
+                )
+                Spacer(Modifier.height(8.dp))
+                Text("Refresh rate", color = LocalPalette.current.textDim, style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(30 to "30 fps", 60 to "60 fps", 120 to "120 fps", 0 to "Off").forEach { (f, l) ->
+                        Pill(l, cfg.visualizerFps == f, { set { it.copy(visualizerFps = f) } })
+                    }
+                }
+                Text(
+                    "120 fps matches a 120 Hz screen. Lower uses a little less battery; Battery Saver caps it at 30. " +
+                        "The visualizer stops completely with the screen off and sleeps while nothing is playing.",
+                    color = LocalPalette.current.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp),
+                )
+                Spacer(Modifier.height(10.dp))
+                Text("Detail", color = LocalPalette.current.textDim, style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(48, 96, 160).forEach { n ->
+                        Pill("$n bars", cfg.analyzerBands == n, { set { it.copy(analyzerBands = n) } })
+                    }
+                }
+            }
+        }
+
+        }
+        if (stage > 6) {
+        Spacer(Modifier.height(12.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+            Pill("Reset everything to default", false, { resetAsk = true })
+        }
+        }
+        Spacer(Modifier.height(bottomChrome()))
+    }
+    }
+}
+
+private const val MIN_ACCENT_BRIGHTNESS = 0.5f
+
+private fun pct(v: Float) = "%.0f%%".format(Locale.ROOT, v * 100)
+
+/**
+ * Smoothness: how much glass and motion the app draws. Automatic measures this phone while you
+ * use the app and steps down by itself if frames keep running late.
+ */
+@Composable
+internal fun SmoothnessSetting(mode: com.ltots.app.data.EffectsMode, onPick: (com.ltots.app.data.EffectsMode) -> Unit) {
+    val pal = LocalPalette.current
+    val auto by com.ltots.app.ui.Smoothness.auto.collectAsState()
+    Spacer(Modifier.height(6.dp))
+    Text("Smoothness", color = pal.textDim, style = MaterialTheme.typography.bodyMedium)
+    Spacer(Modifier.height(6.dp))
+    FlowPills {
+        com.ltots.app.data.EffectsMode.entries.forEach { m -> Pill(m.label, mode == m, { onPick(m) }) }
+    }
+    val now = com.ltots.app.ui.Smoothness.effective(mode, auto)
+    Text(
+        (if (mode == com.ltots.app.data.EffectsMode.AUTO) "Automatic: now ${auto.label} on this phone. It watches how fast the screen keeps up and turns effects down by itself if the app stutters. " else "") +
+            when (now) {
+                Effects.FULL -> "Full: real blur everywhere, and the bars at the bottom bend the page scrolling under them."
+                Effects.BALANCED -> "Balanced: the bars bend the background instead of the page, panels bend without blur, motion and visualizer at up to 60 fps."
+                Effects.LIGHT -> "Light: plain frosted panels with no blur or bending, animations and visualizer at up to 30 fps. The smoothest on any phone."
+            },
+        color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp),
+    )
+    if (mode == com.ltots.app.data.EffectsMode.AUTO && auto != Effects.FULL) {
+        Spacer(Modifier.height(6.dp))
+        Pill("Measure again from Full", false, { com.ltots.app.ui.Smoothness.recheck() })
+    }
+    Spacer(Modifier.height(8.dp))
+}
+
+@Composable
+private fun ColorCard(cfg: ThemeConfig, set: ((ThemeConfig) -> ThemeConfig) -> Unit) {
+    val pal = LocalPalette.current
+    // The glow colours the moving background, which the AMOLED themes don't have (pure black).
+    val glowLockedWhy = if (cfg.pureBlack) "Glow isn't used on the AMOLED themes: the background stays pure black. Pick another theme to use it." else null
+    var pickedGlow by rememberSaveable { mutableStateOf(false) }
+    val glow = pickedGlow && glowLockedWhy == null
+
+    // Each colour keeps its own hue, saturation and brightness. A slider changes only its own
+    // value: hue never touches saturation or brightness, and so on, whatever the colour.
+    val argb = if (glow) cfg.glow else cfg.accent
+    val hsv = Hsv.resolve(argb, if (glow) cfg.glowHsv else cfg.accentHsv)
+    // Without outlines the accent can't go below half brightness: sliders and buttons would vanish.
+    val minBrightness = if (!glow && !cfg.sliderOutlines) MIN_ACCENT_BRIGHTNESS else 0f
+    fun setHsv(n: Hsv) {
+        val h = if (n.v < minBrightness) n.copy(v = minBrightness) else n
+        val v = h.toArgb()
+        set { if (glow) it.copy(glow = v, glowHsv = h) else it.copy(accent = v, accentHsv = h) }
+    }
+    LaunchedEffect(cfg.sliderOutlines, cfg.accent) {
+        val a = Hsv.resolve(cfg.accent, cfg.accentHsv)
+        if (!cfg.sliderOutlines && a.v < MIN_ACCENT_BRIGHTNESS) {
+            val h = a.copy(v = MIN_ACCENT_BRIGHTNESS)
+            set { it.copy(accent = h.toArgb(), accentHsv = h) }
+        }
+    }
+
+    GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
+        Column(Modifier.padding(16.dp)) {
+            SectionTitle("Colours")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                ColourChip("Accent", cfg.accent.toColor(), selected = !glow, enabled = true) { pickedGlow = false }
+                ColourChip("Glow", cfg.glow.toColor(), selected = glow, enabled = glowLockedWhy == null) { pickedGlow = true }
+            }
+            Text(
+                glowLockedWhy?.takeIf { pickedGlow }
+                    ?: if (glow) "Glow: the colour the moving background is made of."
+                    else if (cfg.dynamicColors) "Accent: buttons, sliders and highlights. On AMOLED Cover the song's cover sets it while music plays; this one shows when nothing is."
+                    else "Accent: buttons, sliders and highlights.",
+                color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(start = 4.dp, top = 6.dp),
+            )
+            Spacer(Modifier.height(12.dp))
+            FlowPills {
+                swatches.forEach { sw -> Swatch(sw.toColor(), (argb and 0xFFFFFFFFL) == sw, { setHsv(Hsv.of(sw)) }) }
+            }
+            Spacer(Modifier.height(10.dp))
+            GradientSlider(
+                "Hue", "%.0f°".format(Locale.ROOT, hsv.h), hsv.h, 0f..360f,
+                Brush.horizontalGradient((0..6).map { Color.hsv(it * 60f % 360f, 1f, 1f) }),
+            ) { h -> setHsv(hsv.copy(h = h)) }
+            GradientSlider(
+                "Saturation", pct(hsv.s), hsv.s, 0f..1f,
+                Brush.horizontalGradient(listOf(Color.hsv(hsv.h, 0f, maxOf(hsv.v, 0.35f)), Color.hsv(hsv.h, 1f, maxOf(hsv.v, 0.35f)))),
+            ) { v -> setHsv(hsv.copy(s = v)) }
+            GradientSlider(
+                "Brightness", pct(hsv.v), hsv.v, minBrightness..1f,
+                Brush.horizontalGradient(listOf(Color.Black, Color.hsv(hsv.h, hsv.s, 1f))),
+            ) { v -> setHsv(hsv.copy(v = v)) }
+            SwitchRow(
+                "Outlines on sliders", cfg.sliderOutlines, { on -> set { it.copy(sliderOutlines = on) } },
+                sub = "On: every slider has an outline, and Brightness can go all the way down to black. Off: no outlines, and Brightness stops at 50 % so nothing disappears.",
+            )
+        }
+    }
+}
+
+/**
+ * A slider drawn as a colour strip with a ring on it. The ring follows the value exactly (no
+ * rounding through a colour), so it glides smoothly at any brightness.
+ */
+@Composable
+private fun GradientSlider(
+    label: String,
+    valueText: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    brush: Brush,
+    onChange: (Float) -> Unit,
+) {
+    val pal = LocalPalette.current
+    val throttled = com.ltots.app.ui.components.rememberThrottled(com.ltots.app.ui.components.LocalSliderThrottle.current, onChange)
+    @Suppress("NAME_SHADOWING") val value = throttled.drag ?: value
+    val outlined = LocalThemeConfig.current.sliderOutlines
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(label, color = pal.textDim, style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.weight(1f))
+            Text(valueText, color = pal.text, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+        }
+        Box(
+            Modifier.fillMaxWidth().padding(vertical = 8.dp).height(26.dp)
+                .then(if (outlined) Modifier.border(1.5.dp, pal.text.copy(alpha = 0.8f), RoundedCornerShape(13.dp)) else Modifier)
+        ) {
+            Canvas(Modifier.fillMaxSize().clip(RoundedCornerShape(13.dp))) {
+                drawRect(brush)
+                val r = size.height / 2
+                val t = ((value - range.start) / (range.endInclusive - range.start)).coerceIn(0f, 1f)
+                val x = r + (size.width - 2 * r) * t
+                drawCircle(Color.Black.copy(alpha = 0.35f), r - 1f, androidx.compose.ui.geometry.Offset(x, r),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 7f))
+                drawCircle(Color.White, r - 2f, androidx.compose.ui.geometry.Offset(x, r),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 4f))
+            }
+            androidx.compose.material3.Slider(
+                value = value.coerceIn(range.start, range.endInclusive), onValueChange = { throttled.change(it) }, onValueChangeFinished = { throttled.finish() }, valueRange = range,
+                modifier = Modifier.fillMaxSize(),
+                colors = androidx.compose.material3.SliderDefaults.colors(
+                    thumbColor = Color.Transparent, activeTrackColor = Color.Transparent, inactiveTrackColor = Color.Transparent,
+                    activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent,
+                ),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ColourChip(name: String, color: Color, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val pal = LocalPalette.current
+    Row(
+        Modifier.alpha(if (enabled) 1f else 0.38f)
+            .clip(RoundedCornerShape(50))
+            .background(if (selected) pal.text.copy(alpha = 0.16f) else Color.Transparent)
+            .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(14.dp).clip(CircleShape).background(if (enabled) color else pal.textFaint))
+        Spacer(Modifier.width(6.dp))
+        Text(name, color = pal.text, style = MaterialTheme.typography.bodySmall, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
+    }
+}
+
+/**
+ * Reset, top right: everything on the Look tab back to the default look (AMOLED, hue 180°,
+ * saturation and brightness 100%), for the profile in use or for all five.
+ */
+@Composable
+private fun ResetLookDialog(onDismiss: () -> Unit) {
+    val active by ThemeState.activeProfile.collectAsState()
+    val profiles by ThemeState.profiles.collectAsState()
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Reset the look?") },
+        text = {
+            Text(
+                "Everything on this page goes back to the default: the AMOLED theme, colours, glass, " +
+                    "background, visualizer and icon settings. Can't be undone." +
+                    if (profiles.size > 1) " Reset all removes your other look profiles too." else ""
+            )
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = { ThemeState.reset(); onDismiss() }) { Text("Reset ${profiles.getOrNull(active)?.name ?: "this look"}") }
+        },
+        dismissButton = {
+            Row {
+                if (profiles.size > 1) androidx.compose.material3.TextButton(onClick = { ThemeState.resetAll(); onDismiss() }) { Text("Reset all") }
+                androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        },
+    )
+}
+
+/**
+ * Look profiles, top right: up to 10 named looks. Each keeps every setting on this page; the one
+ * in use saves each change as you make it, and picking another switches the whole look.
+ */
+@Composable
+private fun LookProfiles(cfg: ThemeConfig) {
+    val pal = LocalPalette.current
+    val active by ThemeState.activeProfile.collectAsState()
+    val profiles by ThemeState.profiles.collectAsState()
+    var open by remember { mutableStateOf(false) }
+    var renaming by remember { mutableStateOf<Int?>(null) }
+    var deleting by remember { mutableStateOf<Int?>(null) }
+    Box {
+        ProfilePill(profiles.getOrNull(active)?.name ?: "Look", { open = true })
+        ProfileMenu(
+            open, { open = false }, "Look profiles",
+            "Each keeps everything on this page except the visualizer's Detail, which stays the same in all. Changes save into the one in use.",
+        ) {
+            profiles.forEachIndexed { i, p ->
+                val inUse = i == active
+                ProfileRow(
+                    name = p.name,
+                    status = if (inUse) "In use · " + ThemeState.themeName(cfg) else ThemeState.themeName(p.look) + " · tap to switch",
+                    active = inUse,
+                    onClick = { ThemeState.selectProfile(i); open = false },
+                    leading = { LookDot(if (inUse) cfg else p.look) },
+                    trailing = {
+                        ProfileRowActions {
+                            ProfileIconButton(Icons.Rounded.Edit, "Rename ${p.name}", { renaming = i })
+                            if (profiles.size > 1) ProfileIconButton(Icons.Rounded.Delete, "Delete ${p.name}", { deleting = i })
+                            if (inUse) Icon(Icons.Rounded.Check, null, tint = pal.accent, modifier = Modifier.padding(start = 4.dp))
+                        }
+                    },
+                )
+            }
+            if (profiles.size < ThemeState.MAX_PROFILES) {
+                ProfileAddRow("New look profile") { ThemeState.addProfile(); open = false }
+            }
+        }
+    }
+    renaming?.let { i ->
+        RenameDialog("Rename look profile", profiles.getOrNull(i)?.name ?: "", onDismiss = { renaming = null }) { ThemeState.renameProfile(i, it) }
+    }
+    deleting?.let { i ->
+        val name = profiles.getOrNull(i)?.name ?: ""
+        DeleteDialog("Delete \"$name\"?", "This look profile and its settings are removed. Can't be undone.", onDismiss = { deleting = null }) {
+            ThemeState.deleteProfile(i)
+        }
+    }
+}
+
+/** A small round preview of a look: its background glow (black on AMOLED) and its accent. */
+@Composable
+internal fun LookDot(t: ThemeConfig) {
+    val pal = LocalPalette.current
+    val back = if (t.pureBlack) Color.Black else t.glow.toColor()
+    Box(
+        Modifier.size(24.dp).clip(CircleShape)
+            .background(Brush.linearGradient(listOf(back, back, t.accent.toColor())))
+            .border(1.dp, pal.text.copy(alpha = 0.2f), CircleShape)
+    )
+}
+
+/**
+ * The beat AI (Beat This!): finds beats more reliably than the classic tracker — through quiet
+ * parts, breakdowns and tricky rhythms. Runs on the phone, before songs play.
+ */
+@Composable
+private fun BeatAiSetting() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val pal = LocalPalette.current
+    val models by com.ltots.app.identify.AiModels.status.collectAsState()
+    val parts = listOf(com.ltots.app.identify.AiModels.Model.BEAT_NET, com.ltots.app.identify.AiModels.Model.BEAT_MEL)
+    val installed = parts.all { it in models.installed }
+    val downloading = models.downloading in parts
+    val mb = parts.sumOf { it.bytes } / 1_000_000
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Beat AI", color = pal.text)
+        Text(
+            if (installed) "On: an on-device AI (Beat This!) finds the beats of each song before it plays — steady through breakdowns, quiet intros and tricky rhythms."
+            else "Without it, a classic beat tracker finds the beats (fast, good on steady music). The beat AI (Beat This!, $mb MB, works offline) " +
+                "keeps the beat through breakdowns, quiet parts and tricky rhythms. It runs before songs play: the next songs as soon as one starts, the rest while charging.",
+            color = pal.textFaint, style = MaterialTheme.typography.bodySmall,
+        )
+        when {
+            downloading -> androidx.compose.material3.LinearProgressIndicator(progress = { models.progress }, modifier = Modifier.fillMaxWidth(), color = pal.accent)
+            !installed -> Pill("Download beat AI ($mb MB)", true, {
+                val app = context.applicationContext
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                    val ok = runCatching { for (m in parts) com.ltots.app.identify.AiModels.download(m) }.isSuccess
+                    if (ok) {
+                        // The queue is the player's: read it on the main thread.
+                        val next = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            com.ltots.app.audio.AudioEngine.upcomingUris(3)
+                        }
+                        com.ltots.app.audio.BeatIndex.request(app, next)
+                    }
+                }
+            })
+            else -> Pill("Remove beat AI", false, { parts.forEach { com.ltots.app.identify.AiModels.remove(it) } })
+        }
+        models.error?.takeIf { e -> parts.any { e.startsWith(it.title) } }?.let { Text(it, color = pal.textFaint, style = MaterialTheme.typography.bodySmall) }
+    }
+}
+
+/** Pages: swiping left and right between the tabs, or only moving with the bar. */
+@Composable
+private fun PagesSetting(swipe: Boolean, onChange: (Boolean) -> Unit) {
+    val gestureNav = com.ltots.app.ui.rememberGestureNav()
+    GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
+        Column(Modifier.padding(16.dp)) {
+            SectionTitle("Pages")
+            SwitchRow(
+                "Swipe between pages", swipe && !gestureNav, onChange,
+                sub = if (gestureNav) "Off while the phone uses gesture navigation: swiping in from the left or right edge is " +
+                    "Android's back gesture there. Switch to 3-button navigation in the phone's settings to use it."
+                else "Swipe left and right anywhere on a page to move to the next tab. Off: tabs change only from the bar at the bottom.",
+                enabled = !gestureNav,
+            )
+        }
+    }
+}

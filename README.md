@@ -1,0 +1,442 @@
+# LToTS
+
+A music player for Android built around sound quality and control: a fully parametric EQ with a
+live spectrum, per-song settings, independent pitch & speed, and a liquid-glass interface you can
+restyle completely.
+
+Built for a Xiaomi 17 Ultra with Sony WF-1000XM6 earbuds and Sennheiser HD 599 headphones.
+
+## Install
+
+Download **LToTS.apk** from the [latest release](https://github.com/OctoPas647/ltots/releases/latest)
+on your phone and open it. Every push to `main` builds a new release automatically; installing a
+newer APK updates the app and keeps your settings.
+
+## What's in phase 1
+
+- **Home** (first tab, where the app opens) – recommendations, a mix of YouTube Music's and
+  Spotify's home screens: a greeting and a grid of things to jump back into (from your phone, they
+  play at once), YouTube Music's mood chips (Energize, Relax, Workout…) and **Quick picks** (pages
+  of four songs side by side), then shelves — **Because you listened to …**, **AI picks** for the
+  vibe of what you've been playing, your own **YouTube Music** shelves when signed in, **Your
+  mixes** and **Listen again**. Tap any new song to **hear 30 seconds of it** (the hook, from the
+  free iTunes preview or streamed from YouTube Music) before downloading it; the preview bar has a
+  Download button. Long-press for Not interested / Fewer songs by this artist.
+  Songs from your phone start at once and carry on with the songs on the phone **most like them**
+  (how they sound to the on-device music model, then genre and artist). Further shelves as on
+  YouTube Music: **Supermix, Discover mix, New release mix, Replay mix**, **Similar to / More from**
+  the artists you play, **Forgotten favourites**, **From your library**, **Recently added**, themes
+  for the genres you play at this time of day, **Long listening**, **Covers & remixes** and **Live
+  performances**.
+  How the picks are made: the in-app listening history (finished songs count more than skipped
+  ones, recent plays more than old ones), play counts, downloads and — signed in — your YouTube
+  Music history choose a few seed songs (at most two per artist); YouTube Music's own radio for
+  each seed gives candidates; a song several seeds point to, or by an artist you love, ranks
+  higher; songs you already have, hidden artists and turned-down songs are left out; and no
+  artist may crowd the top. The **AI** part: the on-device music model that finds moods has heard
+  your songs, and what you've been playing lately is matched to its descriptions ("Night drive",
+  "Lo-fi corner"…) to find new songs with that sound.
+- **History** – every song played, grouped Today / Yesterday / This week…, like YouTube Music.
+  The Playing tab shows it whenever nothing is playing; the history button at the top right of
+  the Library (next to Shuffle) and on the Playing tab opens it any time. Tap a song to play it
+  (followed by what you played before it), long-press to remove it; Clear empties it.
+- **Songs / All** (top of the Library) – **Songs** shows only music; **All** shows every audio
+  file on the phone, each labelled (voice recording, call recording, voice note, ringtone, short
+  sound…). Files are sorted by where they live (Recordings, WhatsApp Voice Notes, Ringtones…),
+  their name and tags; anything still unclear (a stray "audio.mp3" in Downloads) is listened to
+  by the on-device AI (CLAP: music vs. talking vs. noise), or by a simpler sound check until that
+  model is downloaded.
+- **Sign-ins** (Profile > Accounts) – a full-screen sign-in page (no more pop-up hidden behind
+  the status bar and keyboard) that closes by itself once you're signed in, and only counts a
+  real sign-in (a visit alone used to count). **YouTube Music**: signing in makes Home learn from
+  your YouTube Music history and show your own shelves; search and downloads stay signed out.
+
+- **Easy-first EQ** – 33 presets in four groups (Basics, Genres, Voice & places, Precise) with a
+  one-line description of each, the active preset highlighted, **Quick tone** sliders (Bass / Mids /
+  Treble) that work on top of any shape, Undo and Flatten; save your own presets ("Mine").
+  Top right: **EQ profiles** (up to 10, named; save, load, rename, delete), **Undo** (the last change) and **Reset** (every gain back
+  to 0 dB). **Reset to 10 bands** in Fine-tune brings back the standard 31 Hz–16 kHz layout,
+  keeping your curve's shape; the **Preamp** has its own reset button (back to 0 dB, one undo step).
+  Everything below stays one tap away under **Fine-tune**.
+- **Parametric EQ** – any number of bands (1–64); every band has an exact frequency, gain, width (Q)
+  and type (peak, low/high shelf, low/high cut). Drag the dots on the curve or type exact values.
+- **Smooth curve** – knobs whose bells overlap (the 10 graphic bands, or any knobs close together)
+  blend into one smooth line that goes exactly through every knob and glides to the next: no dip
+  between two raised knobs, no peak above them. The sound follows that line too (the filters are
+  fitted to it, within a few tenths of a dB), and the graph, headroom and Battery EQ use the same
+  filters, so what you see is what you hear. A narrow knob (high Q) or one far from the others
+  keeps its own bell.
+- **Visualizer around the cover** – on the Playing tab the live spectrum rings a slightly smaller
+  cover, in the Bars, Curve or Mirror style: **One loop** (bass at the top, once round clockwise to
+  the treble), **Mirrored** (both sides alike, bass at the bottom) or **Mirrored, flipped** (bass at
+  the top). Or behind the full-size cover: **From below** (the original), **From above** (hanging
+  down), **From above, flipped** (bass on the right), or both at once: **Top & bottom, mirrored**
+  (the top is a mirror image of the bottom) or **Top & bottom, not mirrored** (the top is the bottom
+  turned round, bass on the right); both top & bottom layouts span the whole width of the screen.
+  Look > Visualizer > "On the Playing tab".
+- **Freeze when music stops** (Look > Visualizer) – when a song is paused or ends, the visualizer
+  stays exactly as it was instead of falling away, also after switching tabs; nothing runs while
+  it's frozen.
+- **Move with the beat** (Look > Visualizer) – the cover pumps on the hits, hardest on drops and
+  big moments, like remix videos; steady sound leaves it still. **Move with** picks what it
+  follows: the whole **Song** (default: whichever hits hardest, leaning on the lows), or only the
+  **Lows** (kicks, 808s), **Mids** (snares, vocals) or **Highs** (hi-hats, cymbals). It moves in
+  step with the visualizer: a pulse starts in the frame the bars jump and falls as fast as they
+  do. **Beat strength** goes up to +30 % size (+15 % by default). It listens through the
+  visualizer, so it rests while the audio chip plays the song by itself (Power-saving playback).
+- **Home-screen icon colour** (Profile > App settings) – the launcher icon takes the app's colour
+  (from the song's cover) in 20 shades; it changes after you leave LToTS. Grey covers keep the original
+  icon; turning the setting off brings it back.
+- **Cover opacity with bars** (Look > Glass) – with the visualizer behind the cover, only the parts
+  of the cover in front of the bars (or the curve's line and its fading fill) take this opacity,
+  as strongly as the visualizer is drawn there; between the bars and everywhere else the cover
+  stays exactly at Cover opacity (e.g. a solid cover the bars show through). Its reset makes it
+  follow Cover opacity again.
+- **Glass Library top** (Look > Glass, on by default) – the whole top of the Library page (title,
+  search, the Songs / Albums / Artists / Mixes buttons and the sort buttons) sits on one liquid-glass
+  panel that floats over the page like the bars at the bottom: the songs scroll on under it and
+  its glass blurs and bends them as they pass; off puts them straight on the background above the
+  list. Kept per Look profile and when
+  switching themes.
+- **Gradient flow** (Look > Visualizer) – like a TV's backlight: the screen round the cover glows in
+  the colours of the cover's edges (each spot along an edge takes the average of the cover's
+  outermost 10 pixels there). On AMOLED it melts into your own colour further out; on the other
+  themes it fades into the background.
+- **Icon mode** – pick a black-and-white picture (PNG works best; JPG and others too) and it takes
+  the cover's place. The picture itself is never drawn: the live spectrum grows out of the outline
+  of its dark parts, so the shape shows only through the bars. It follows every visualizer setting
+  (style, layout along the outline, strength, "before EQ" outline, frame rate, detail, Battery
+  Saver, Smoothness, accent colour). Bars go **outward** over the background, **inward** into the
+  dark parts, or **both ways**; they stop short where the white space narrows (gaps between coils,
+  curls) so they never meet or cover a dark part, and keep a safe margin from the screen's edge.
+  The dark parts can be left **Dark** (empty), **Glass** (the app's glass in the play button's
+  colour, following Blur / Frost / Rim light) or **Accent** (solid, like the play button). The
+  **song's cover** can be **Off**, **Inside the icon** (in its dark parts) or **Full size**: the
+  whole cover, as big as the normal one, stays behind the visualizer with adjustable **Cover
+  dimming**. While nothing plays: **Show nothing**, **Keep the icon** or **Show the cover**. A **Black / white threshold** (with Undo and Reset), **Invert**
+  and **Minimum hole size** (tiny enclosed white spots such as an eye's highlight are ignored)
+  shape how the picture is traced, with a live preview. Saved in each Look profile.
+  Look > Visualizer > "On the Playing tab" > Icon.
+- **Live view** – the spectrum after the EQ, a faint outline of the sound before it, and a scrolling
+  waveform. The waveform is **pre-made for every song** (decoded once, like an index: one point per
+  10 ms) and drawn from the player's position, so it's exactly in sync and costs nothing to show —
+  it even keeps moving in power-saving playback.
+- **Lyrics** – found automatically for every song on the phone (LRCLIB, a free database of
+  time-synced lyrics; matched by title, artist and length, with "Artist - Title" file names and
+  "(Official Video)"-style clutter handled) and shown under the player like Spotify: the sung line
+  is highlighted and followed, tap any line to jump there. When a song only has plain (untimed) lyrics anywhere, the
+  lines get estimated times from the song's length (longer lines longer, a pause at each verse
+  break), so they still follow along and can be tapped; the card says the timing is estimated.
+  **Lyrics AI** (Profile > App settings > lyrics AI): an on-device speech recognizer (Vosk, fully
+  offline; English model, 40 MB, downloaded once) listens to such a song, told to expect only the
+  words of its lyrics, and the words it hears are lined up with the lyrics in order (misheard,
+  missed and extra words allowed), so every line gets its real time. Lines it couldn't hear are
+  placed between their neighbours; if too little matched (another language, no vocals) the
+  estimate stays. Runs for the playing song and, while charging, for the whole library; the result
+  is saved like synced lyrics ("timed by on-device AI"). "Time with AI" on the lyrics card runs it
+  by hand. Saved once, then they work offline.
+  **✦ AI lyrics** (recognise the song from its sound): when the file is the whole song, the
+  lyrics keep their own timeline (stretched to the file) instead of following Shazam's copy of
+  the record, which can start a little earlier or later — that's what made AI lyrics run slightly
+  late. With the speech model there, the AI also listens for the words and moves all lines by how
+  much they're consistently off. Pressed ✦ AI by mistake? **↺ Revert** brings back the lyrics found
+  the normal way (only shown when there were some).
+- **Matching lyrics carefully** – a database entry only counts when the title is the same song
+  (not a longer title, a remix or a live version), the artist matches, the length is within 3
+  seconds, and the words make sense (no garbled text, no lyrics that outlast the song). When no
+  database has it, the AI recognises the playing song from its sound (Shazam on six moments of the
+  file, then the words Whisper hears) and finds its lyrics; those are marked as maybe not fully
+  accurate. Lyrics saved by older versions are checked again the next time the song plays; an
+  imported .lrc is never touched. The highlighted line follows the player's own clock, and with
+  the speech model installed the AI checks each song once for late, early or drifting lines.
+- **Library preparation** – waveforms for the whole library are made while the phone charges,
+  lyrics are fetched whenever you're online; the playing song is always done on the spot. Status
+  and "Prepare now" on the Sound page.
+- **Per-song EQ** – give any song its own EQ; it loads automatically whenever that song plays.
+- **Pitch & speed** – independent (or linked "tape" mode), remembered per song, powered by the
+  Rubber Band R3 engine (studio-grade). Pitch changes are heard live while dragging; speed is
+  applied on release. At original pitch and speed the engine is bypassed bit-exactly. Optional
+  battery-saving engine (Rubber Band R2) in Profile > App settings.
+- **Clean signal path** – 64-bit EQ processing, automatic headroom so boosts never clip, a soft
+  limiter just below 0 dBFS, 32-bit float output.
+- **Output awareness** – shows where audio is going, warns when earbuds fall back to LE Audio (LC3)
+  instead of LDAC, and offers **bit-perfect USB output** (Android 14+) for USB DACs. Tap the output
+  chip at the top of the Playing tab for the **Sound** page (output device and signal path).
+- **Liquid glass UI** – real refraction and blur; the bars at the bottom bend and blur the page as
+  it scrolls under them (every theme, AMOLED included). Accent, background glow, blur, refraction,
+  tint, rim light, corner roundness, background motion, album-art glow and the visualizer are all
+  adjustable, and every change shows at once. Colours are set with independent Hue, Saturation
+  and Brightness strips: each one changes only itself, at any brightness.
+- **Smooth** – runs at the screen's highest refresh rate (120 Hz; "Highest refresh rate" in Profile,
+  the way Metrolist does it), nothing caps the frame rate, the moving background animates every
+  frame, and release builds are optimised with R8 (Compose needs it to run smoothly).
+- **Smoothness** (Profile > App settings) – the same glass costs some phones far more than others. On
+  **Automatic** the app watches how long its frames take; if it keeps stuttering it steps down by
+  itself and remembers that for the phone:
+  - **Full** – real blur everywhere, the bars at the bottom bend the page scrolling under them;
+  - **Balanced** – the bars bend the background instead of the page, panels bend without blur,
+    animations and visualizer at up to 60 fps;
+  - **Light** – plain frosted panels (no blur or bending), animations and visualizer at up to
+    30 fps.
+  You can also pick a level yourself, or "Measure again from Full".
+- **Look profiles** – up to 10, named, in the top right of the Look tab (rename, delete, and a "+"
+  until there are 10), each keeping every Look setting (visualizer refresh rate and icon mode
+  included) and showing which theme it uses; the one in use saves each change. The visualizer's
+  **Detail** and the screen settings are the same in every profile, so switching never changes
+  them. A new profile starts as a copy of the one in use. Picking a theme changes only its colours, glass and background —
+  your visualizer, corners, refresh rate, bar settings and Album art glow stay (the glow is off
+  until you turn it on) — and your own AMOLED colour comes back when you return to AMOLED or
+  AMOLED Cover from another theme. **Reset** (top right, or at the bottom of the page) puts
+  everything on the Look tab back to the default, for the profile in use or all of them.
+- **Back** – Android's back leaves sub-pages, then goes to Home; on Home, back twice closes the app.
+  Sub-pages also follow your finger when you swipe in from the left edge, like on iOS.
+- **Shuffle** – starts at the song playing, and Previous retraces exactly what was played.
+- **Fade into the next song** (Profile > App settings, 1–12 s) – the two songs overlap. Power-saving
+  playback pauses while it's on; with Bit-perfect USB songs don't fade.
+- **Outlines on sliders** (Look > Colours) – on, every slider has an outline and Brightness can go to
+  black; off, Brightness stops at 50 %.
+- **Profile tab** – the last tab:
+  - **Users** – up to 3 people on one phone, each with their own looks, EQs, settings and every
+    song's own EQ, pitch and speed. Tap someone to switch; add, rename, delete, export and import.
+  - **Look profiles** and **EQ profiles** – every profile with what it holds (theme, colours, glass,
+    visualizer…; the EQ's curve, bands and level), to use, rename, export, delete, add or import.
+  - **App settings** – the screen (highest refresh rate, Smoothness, hiding the system bars) and
+    quality & battery (power-saving playback, Battery EQ, bit-perfect USB, pitch options).
+  - **Export / import** – a look profile, an EQ profile or a whole user is a small file to keep,
+    send or import on another phone (a look with an icon picture carries the picture). Any Import
+    button takes any of them.
+- **AMOLED themes** – **AMOLED** (default on new installs): pure black with a cyan accent (hue 180°);
+  **AMOLED Cover**: the same pure black, with buttons, sliders and everything you can touch coloured
+  from the current song's cover.
+- **Full screen** – the navigation bar is hidden inside the app (swipe up from the bottom edge to
+  bring it back); the status bar can be hidden too. The status bar is transparent: pages scroll on underneath it
+  instead of stopping at a black band.
+- **Dynamic colours** – the accent and background glow follow the average colour of the
+  current song's cover, switching with the song (switch in Look).
+- **Downloads ("Get" tab)** – search YouTube Music or paste/share a link to a song, album,
+  playlist or artist:
+  - YouTube's best audio (Opus) kept exactly as sent — no re-encoding;
+  - official album metadata (title, artists, album, album artist, track number, year) and the
+    full-size cover embedded in every file;
+  - music videos swapped for the official audio release when one exists;
+  - up to 10 downloads at once (Profile > App settings); paste links one after the other, the
+    box empties at once, and several links pasted together each count; video links wait in line;
+  - queue with several downloads at once, background downloading with a notification,
+    retry/cancel, history, and playlists you can keep in sync;
+  - files saved to `Music/LToTS/Artist/Album/`, visible to any app;
+  - **quick to start**: the stream information, the album / year / cover lookup and the check
+    for a free lossless copy run at the same time (the lossless check gets 3 seconds at most),
+    the next songs in the queue get their stream information read while the current ones
+    download, and yt-dlp keeps a cache of YouTube's player code and solved signatures (it used to
+    work them out again for every song);
+  - built on yt-dlp (bundled, updatable in-app with "Update engine"); "Test engine" checks the
+    whole download engine on the phone, and tapping a failed download shows (and copies) exactly
+    what went wrong.
+- **Song finder ("Get" tab)** – Shazam for TikToks and Shorts. Paste a video link from any
+  platform (TikTok, YouTube Shorts, YouTube, Instagram, Facebook, …) into the same search/paste
+  box you use for YouTube Music links, or share the video to LToTS, pick a saved video
+  (**From a video**), or tap **Listen** to use the microphone. YouTube Music links still download
+  or open as before. LToTS then:
+  - reads the video's own music tag (TikTok's music label) when it has a real song;
+  - with the **music separator** AI (UVR MDX-Net, 67 MB, on the phone), pulls the song out from
+    talking, voice-overs and noise;
+  - fingerprints the best moments — of the clip and of the separated music — and matches them
+    with Shazam (only the fingerprint is sent, never the audio);
+  - if nothing matches, tries again at the speeds TikTok edits use (sped up / slowed, 0.73–1.47×);
+  - if the separator ran and still nothing matched, everything again on the **raw sound**, without
+    the AI (it can take out the very part the fingerprint needs);
+  - **melody matching** for songs played on an instrument (piano / guitar covers, someone playing
+    the tune) or hummed — which sound nothing like the record: the clip's tune (pitch, ten times a
+    second; with an instrument playing the tune, the separator's part that holds it) is compared,
+    in every key and a little faster or slower, with the tunes of this week's most played songs
+    (Apple's free charts, worldwide and in your country, heard once a week on Wi-Fi from their free
+    previews), the songs on your phone (heard while charging) and the songs the video's caption
+    names. Only a tune that clearly stands out from the rest counts;
+  - if that fails too, the **lyrics listener** AI (Whisper small, 190 MB, on the phone) writes
+    down the sung words and searches YouTube Music by lyrics;
+  - finds every candidate on YouTube Music and shows the **best matches, most likely first**,
+    with how sure it is and why — the version the video plays (e.g. sped up) and the original
+    right after it. Tap a match for **Download**, **Download & play**, **Preview**, **Open album**
+    or **Artist**.
+  The two AI models are downloaded once from the Get tab ("Song finder AI"). Shazam's service is
+  unofficial here and may change; the music tag and the lyrics listener still work without it.
+- Local library with songs, albums, artists and search.
+- **Mixes** (Library > Mixes) – playlists the app builds by itself from the songs on the phone:
+  - **Games & soundtracks** – every song from one game, film or series together, also across
+    several albums ("Halo 3 (Original Soundtrack) Vol. 1" and "Halo 3 OST, Disc 2") and single
+    songs like "Snake Eater (From \"Metal Gear Solid 3\")"; a song counts when its genre (Soundtrack,
+    Video Game…), album (OST, Soundtrack…) or title says so; in album and track order;
+  - **Through the years** – the 80s, the 90s, the 2000s… from each song's release year;
+  - **Genres** – one per genre family (Rock, Hip-hop, R&B & soul…), or per genre when it fits none.
+  A mix needs at least 3 songs; open one to play it. They follow the search box.
+- **Song order** (Profile > App settings > library) – **A–Z**, **Genre** (songs of one genre play
+  one after the other, related genres side by side: metal next to rock, soul next to R&B; old
+  numbered ID3 genres are read too; songs without a genre tag last), **Colour** (by the main colour
+  of each cover, round the rainbow from red to pink, then black, grey and white; each cover is
+  looked at once and remembered) or **Random**. Playing a song from the list plays the rest in that
+  order. Above the songs, the **Colour** and **Genre** buttons sort by that just for now: it stays
+  until the app restarts (or the lit button is tapped again) and never changes the setting, nor
+  does changing the setting undo it.
+- **Battery-friendly**
+  - **Power-saving playback** (on by default, in Profile > App settings): when the EQ is off or flat and pitch and
+    speed are original, the phone's audio chip decodes and plays the file by itself (audio
+    offload) and the main processor sleeps between big chunks of audio. Changing the EQ or pitch
+    switches back to LToTS' own sound path instantly. It shows whether it's active (the chip
+    has to support the file's format).
+  - **Battery EQ** (experimental, in Profile > App settings): the EQ is played by the phone's own built-in EQ,
+    fitted to its few fixed bands, so on phones whose EQ can run on the audio chip the chip keeps
+    playing by itself even with an EQ on. The EQ tab draws the simplified curve dashed; the switch says
+    live whether it's working on your phone.
+  - **Screen off** (Profile > App settings · screen off): what the EQ does with the screen off —
+    *Same*, *5-band* (the phone's own EQ plays a fitted version so the chip plays by itself; the
+    default) or *Off* — and pitch & speed — *Same*, *Lighter* (the R2 engine; the default) or *Off*.
+    The switch happens between songs (or at once while paused), never mid-song, and opening LToTS
+    brings full quality straight back.
+  - **Pre-render** (on by default): with the screen off, the next song that still needs LToTS's
+    processing is worked out ahead — its exact EQ and pitch, the same engine as live — in a few
+    seconds, into a 256 kb/s Opus or 320 kb/s AAC file (whichever the phone's audio chip takes), and
+    the chip plays that by itself. Up to 300 MB of cache; any EQ or pitch edit puts songs back on
+    their own files. Songs with a changed speed stay live.
+  - **Native DSP** (cpp/ltots/ltots_dsp.cpp): the EQ's filter cascade (left and right together
+    in one NEON register), the live spectrum's FFT, the double-precision FFT used by the song
+    finder, beats and moods, and a windowed-sinc resampler all run as native code instead of
+    Kotlin. Rubber Band is built with -ffast-math so its loops vectorise.
+  - **Tape mode** (pitch moves with speed) is plain resampling now, not a pitch shifter: about
+    10× less work and a truer tape sound. **Lightest speed engine** (switch, and a screen-off
+    option): speed changes at original pitch with Media3's Sonic instead of Rubber Band.
+  - **Speed on the audio chip**: on phones whose chip changes speed itself
+    (offloadVariableRateSupported), a speed change at original pitch keeps the chip playing by
+    itself; pre-rendered songs then only bake in the pitch.
+  - **5-band + bass boost**: the 5-band mode also uses the phone's bass boost for the deepest bass
+    when it clearly brings the curve closer; if it turns out to stop the chip playing by itself,
+    it's left out from then on.
+  - pre-render works whenever LToTS isn't on screen (screen off or another app), and the audio
+    buffer is 8 s then (0.5 s while LToTS is open), so the processor (when it has to work) wakes
+    about 16× less often; beats for Move with the beat are only worked out while
+    that's on and the screen is on; the home-screen icon colour waits for the screen;
+  - **Screen-off power governor** (automatic, straight from the screen-off broadcast): the native
+    processors switch to 8× bigger blocks (Rubber Band, the tape resampler); the live spectrum and
+    beat analysis are suspended inside the native code itself (no FFT runs for them, a half-done
+    beat map is dropped rather than saved, and beats keep going while charging for library prep);
+    and the audio thread moves to the phone's efficiency cores (plus Android 15's power-efficiency
+    hint), as do pre-render and indexing for good. The only wake lock is ExoPlayer's own, which is
+    let go when paused and while the chip plays by itself, and a stream stuck buffering for a
+    minute with the screen off stops holding the phone awake;
+  - **Sleep timer**: the moon on the Playing tab, or in the notification / lock screen (starts the
+    usual length, tap again to stop). Fade-out, finish the song, and the lengths are in Profile.
+    One alarm and nothing ticking; "Precise timing" lets it stop on the dot while the processor
+    sleeps;
+  - **Battery card** (Profile, switchable): how the last listening session played — the share played
+    by the chip by itself, pre-rendered or processed, time with the screen off, and the phone's
+    mAh per hour of listening;
+  - the player only wakes when the audio output actually needs more sound, instead of every
+    10 ms;
+  - after 10 minutes paused, the decoder and audio output are released (play resumes exactly
+    where it stopped);
+  - the live spectrum's audio copy is only made while a spectrum is on screen;
+  - the live spectrum and wave run at 120 fps by default (30/60/120/off in Look); everything to
+    do with them is shut down completely when the screen turns off or the app goes to the
+    background, and sleeps while nothing plays or while the audio chip plays directly;
+  - they only analyse what's drawn (no wave on Now Playing, no separate "before EQ" analysis
+    while the EQ is flat), measure only new audio for the wave each frame, and sit above the
+    glass rather than inside it, so the glass isn't re-rendered for every frame;
+  - the moving background only animates while the app is on screen (and not with Battery
+    Saver); "Animations" off stops it. On the AMOLED themes it's grayed out (nothing moves on
+    pure black), and the switch says when Battery Saver is pausing it.
+
+## Roadmap
+
+- **Phase 2** – YouTube Music streaming (play without downloading) and syncing your own library.
+- **Phase 3** – Search by lyrics: the saved lyrics plus an on-device AI model for half-remembered
+  lines (runs only while searching).
+
+## Getting the best sound
+
+- **WF-1000XM6 (Bluetooth):** in Developer options set the Bluetooth codec to **LDAC** and the LDAC
+  playback quality to **Best quality (990 kbps)**. If LToTS shows **LC3**, the earbuds are using LE
+  Audio — turn LE Audio off for them to get LDAC.
+- **HD 599 (wired):** plug in through a USB-C DAC/dongle and turn on **Bit-perfect USB output** in
+  Profile > App settings.
+
+## Build setup (for the GitHub Actions release)
+
+Releases are signed with a private key stored as repository secrets
+(*Settings → Secrets and variables → Actions → New repository secret*):
+
+| Secret | Value |
+| --- | --- |
+| `LTOTS_KEYSTORE_BASE64` | the keystore file, base64-encoded |
+| `LTOTS_KEYSTORE_PASSWORD` | keystore password |
+| `LTOTS_KEY_ALIAS` | `ltots` |
+| `LTOTS_KEY_PASSWORD` | key password |
+
+Without them the workflow still builds and tests the app but doesn't publish a release.
+
+## Licence note
+
+LToTS includes the [Rubber Band Library](https://breakfastquay.com/rubberband/) (GPL v2 or later)
+in `app/src/main/cpp/rubberband`. Anyone distributing the app therefore has to do so under
+GPL-compatible terms.
+
+The song finder uses [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (MIT, fetched at
+build time), [ONNX Runtime](https://onnxruntime.ai) (MIT), a port of the Shazam signature code
+from [shazamio-core](https://github.com/shazamio/shazamio-core) (MIT), and downloads the UVR
+MDX-Net "Inst HQ 3" and Whisper models on first use. Matching uses Shazam's unofficial endpoint.
+
+## Tests
+
+`./gradlew :app:testDebugUnitTest` runs, on the desktop JVM:
+- the real audio chain driven like Media3's audio output (pitch accuracy, live pitch dragging,
+  speed changes, per-song switching at song boundaries, EQ crossfades, limiter, bit-perfect);
+- the real ExoPlayer + Media3 audio output + Rubber Band playing through a real-time output,
+  while speed and pitch change (position must keep moving at the right rate, no gaps);
+- the YouTube Music parser against captured real responses;
+- the app's screens under Robolectric, with screenshots saved to `app/build/ui-shots/` (including
+  icon mode, `22_icon_*`);
+- icon mode's tracing: threshold and invert, transparency, speck removal, minimum hole size,
+  outlines and normals, bar reach in narrow gaps and curls, and the spectrum's order along the
+  outline — on drawn fixtures and on a reference snake picture that lives only in the tests
+  (`app/src/test/resources/icons/`), not in the app;
+- the Smoothness stutter detector (when it steps down, and when it must not);
+- the smooth EQ curve (through every knob, no dips or overshoot, lone bells untouched, speed);
+- look and EQ profiles (names, 10 at most, rename/delete, older saves) and users (each with their
+  own everything, switching, deleting, export and import);
+- the song finder: the Shazam fingerprint against a reference made by shazamio-core, the FFT and
+  resampler, ranking (clues adding up, sped-up edits, other versions, artist spellings), picking
+  the moments to listen to, link detection and TikTok's music tag.
+
+With `-Dltots.live=true -Dltots.models=<dir> -Dltots.clips=<dir>` the song finder runs for real:
+the separation model (checked against the Python reference), Shazam, and the whole pipeline on a
+sped-up clip and on a clip with someone talking over the music.
+
+With `-Dltots.live=true` two extra tests talk to the real YouTube Music / YouTube (search and the
+complete download pipeline with the bundled yt-dlp).
+
+## Code map
+
+```
+app/src/main/java/com/ltots/app/
+  audio/     EQ maths, the real-time EQ processor, analyzer/FFT, output & bit-perfect handling
+  data/      local library, per-song profiles, presets, theme & settings storage (per user), users,
+             EQ profiles, picked icons
+  profiles/  switching user, exporting and importing looks, EQs and users
+  ytm/       YouTube Music client: search, albums, playlists, artists, song details, links;
+             YtmAccount (signed-in home & history for recommendations)
+  recs/      Home tab: Recommender (taste, seeds, radios, AI vibes, shelves), SongPreview
+  download/  yt-dlp engine, download queue, tagging/cover, background service
+  identify/  song finder: clip audio (link/file/mic), music separator (ONNX), Shazam signature +
+             client, Whisper lyrics listener (JNI), ranking, the finder's state, AI model downloads
+  playback/  background playback service + connection
+  ui/        glass system, Smoothness (frame-time watcher), screens (Home, Library, Playing/History,
+             EQ, Get, Look, Profile, Sound), components
+  ui/components/
+    LiveVisual.kt       the analyzer loop (frame rate, Battery Saver, Smoothness, screen-off)
+    SpectrumOutline.kt  points + outward normals + reach that a spectrum grows from (shared)
+    CoverSpectrum.kt    CoverRing: the spectrum round the cover
+    IconMask.kt         icon mode: picture → black/white mask → smooth outlines → distance fields
+    IconRing.kt         icon mode: the outlines placed on screen, bar reach/width, band order
+    IconSpectrum.kt     icon mode: loading/caching, drawing, fills, idle states
+  ui/screens/LookIconSettings.kt  the icon controls in Look
+app/src/main/cpp/  Rubber Band (pitch/speed engine), whisper.cpp JNI bridge + CMake build
+app/src/test/  audio-chain tests, YouTube Music parser tests, colour tests, icon-mode tests, UI tests
+```
