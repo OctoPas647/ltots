@@ -83,7 +83,6 @@ fun HistoryPage(player: PlayerUi, onPlayed: () -> Unit, onBack: (() -> Unit)?, o
     fun trackOf(l: Listen): Track? = byId[l.trackId]?.takeIf { it.profileKey == l.key } ?: byKey[l.key]
     val groups = remember(items) { ListenHistory.groups(items) }
     var confirmClear by remember { mutableStateOf(false) }
-    androidx.activity.compose.BackHandler(enabled = onBack != null) { onBack?.invoke() }
 
     LazyColumn(
         Modifier.fillMaxSize().padding(horizontal = 16.dp),

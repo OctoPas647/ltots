@@ -284,11 +284,61 @@ object Recommender {
                 .take(SHELF_SIZE).map { RecSong(it, 0.0, "Like “${seed.title}”") }
             if (songs.size >= 4) shelves += Shelf("because:${seed.key}", "Because you listened to", "${seed.title} · ${seed.artist}".trim(' ', '·'), Shelf.Kind.BECAUSE, songs)
         }
+        fun shelf(id: String, small: String, big: String, songs: List<YtSong>, reason: String) {
+            val list = songs.distinctBy { it.videoId }.take(SHELF_SIZE).map { RecSong(it, 0.0, reason) }
+            if (list.size >= 3) shelves += Shelf(id, small, big, Shelf.Kind.BECAUSE, list)
+        }
+        suspend fun songsFor(q: String): List<YtSong> = gate.withPermit { runCatching { searchSongs(q) }.getOrDefault(emptyList()) }.filterNot(::skip)
+        // Videos too (long mixes, live performances), not only songs.
+        suspend fun anythingFor(q: String): List<YtSong> = gate.withPermit {
+            runCatching { InnerTube.search(q).sections.flatMap { it.items }.filterIsInstance<YtSong>() }.getOrDefault(emptyList())
+        }.filterNot(::skip)
+        fun isBy(s: YtSong, artist: String) = s.artists.any { SongMatch.artistMatch(artist, it.name) >= 0.8 }
+
+        // The artists played most, by their own names.
+        val topArtists = all.filter { it.artist.isNotBlank() && it.weight > 0 }.groupBy { norm(it.artist) }.entries
+            .sortedByDescending { artistLove[it.key] ?: 0.0 }.take(4).map { SongMatch.mainArtist(it.value.first().artist) }
+
+        // Mixed for you: as on YouTube Music (Replay mix is on the Home page, from the phone).
+        shelf("mix:super", "Mixed for you", "Supermix", ranked.drop(QUICK_PICKS).map { it.song }, "Supermix")
+        shelf("mix:discover", "Mixed for you", "Discover mix",
+            cands.values.filter { (artistLove[norm(it.song.artists.firstOrNull()?.name ?: "")] ?: 0.0) < 0.15 }.sortedByDescending { it.score }.map { it.song }, "New to you")
+        val year = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
+        val newReleases = topArtists.map { a -> async { songsFor("$a new release $year").filter { isBy(it, a) }.take(4) } }.awaitAll().flatten()
+        shelf("mix:new", "Mixed for you", "New release mix", newReleases, "New from artists you play")
+
+        // Similar to / more from the artists played most.
+        val fromRadios = topArtists.take(3).map { a ->
+            async {
+                val related = radios.filter { (s, _) -> SongMatch.artistMatch(a, s.artist) >= 0.8 }.flatMap { it.second }.filterNot(::skip).filterNot { isBy(it, a) }
+                a to related.ifEmpty { songsFor("$a similar artists").filterNot { isBy(it, a) } }
+            }
+        }.awaitAll()
+        for ((a, songs) in fromRadios) shelf("similar:$a", "Similar to", a, songs, "Like $a")
+        val moreFrom = topArtists.take(2).map { a -> async { a to songsFor(a).filter { isBy(it, a) } } }.awaitAll()
+        for ((a, songs) in moreFrom) shelf("more:$a", "More from", a, songs, a)
+
         for ((v, songs) in vibeSongs) {
             val list = songs.distinctBy { Suggestions.key(it.title, it.artists.firstOrNull()?.name) }.take(SHELF_SIZE).map { RecSong(it, 0.0, "AI: ${v.label}") }
             if (list.size >= 4) shelves += Shelf("vibe:${v.label}", "AI picks · ${v.label}", "Your listening lately sounds like this", Shelf.Kind.AI_VIBE, list)
         }
-        for (h in home.filter { it.title?.contains("quick picks", true) != true }.take(4)) {
+        // Themes tied to what's played: the genres you listen to, for this time of day.
+        val families = library.mapNotNull { com.ltots.app.data.SongSorter.familyName(it.genre) }.groupingBy { it }.eachCount()
+            .entries.sortedByDescending { it.value }.take(2).map { it.key }
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        val moment = when (hour) { in 5..11 -> "Morning"; in 12..17 -> "Afternoon"; in 18..21 -> "Evening"; else -> "Late night" }
+        val themes = families.map { g -> async { g to songsFor("$moment $g songs") } }.awaitAll()
+        for ((g, songs) in themes) shelf("theme:$g", "For this moment", "$moment $g", songs, "$moment $g")
+
+        val mixWord = families.firstOrNull() ?: vibes.firstOrNull()?.label ?: topArtists.firstOrNull() ?: "music"
+        val long = async { anythingFor("$mixWord mix 1 hour").filter { (it.durationSec ?: 0) >= 900 } }.await()
+        shelf("long", "Long listening", "$mixWord, for hours", long, "Long listening")
+        val versions = seeds.take(3).map { s -> async { anythingFor("${s.title} ${s.artist} cover remix").filter { Regex("(?i)cover|remix").containsMatchIn(it.title) } } }.awaitAll().flatten()
+        shelf("covers", "Fresh takes", "Covers & remixes", versions, "Cover or remix")
+        val live = topArtists.take(3).map { a -> async { anythingFor("$a live performance").filter { isBy(it, a) && Regex("(?i)\\blive\\b").containsMatchIn(it.title) }.take(5) } }.awaitAll().flatten()
+        shelf("live", "On stage", "Live performances", live, "Live")
+
+        for (h in home.filter { it.title?.contains("quick picks", true) != true }.take(12)) {
             val songs = h.items.filterIsInstance<YtSong>().filterNot(::skip).take(SHELF_SIZE).map { RecSong(it, 0.0, "From your YouTube Music") }
             val others = h.items.filter { it is YtAlbum || it is YtPlaylist }.take(SHELF_SIZE)
             if (songs.size + others.size >= 3) shelves += Shelf("yt:${h.title}", h.title ?: "From YouTube Music", "From your YouTube Music", Shelf.Kind.YOUTUBE, songs, others)

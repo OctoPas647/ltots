@@ -139,8 +139,7 @@ fun EqScreen(player: PlayerUi, onBack: (() -> Unit)? = null) {
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = topInset()).padding(horizontal = 14.dp)) {
         // Header
-        // Opened from the Playing tab: a way back, and the phone's back gesture closes it too.
-        if (onBack != null) androidx.activity.compose.BackHandler(onBack = onBack)
+        // Opened from the Playing tab: a way back (the phone's back and edge swipe: SwipeBackPage).
         Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             if (onBack != null) {
                 GlassCircleButton(onBack, Modifier.size(40.dp)) {

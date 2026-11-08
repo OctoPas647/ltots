@@ -124,7 +124,7 @@ class LrcLib(private val base: String = "https://lrclib.net/api") {
         }
 
         fun consider(c: Candidate?, artist: String?, title: String) {
-            if (c == null) return
+            if (c == null || !LyricsQuality.ok(q, c)) return
             val score = SongMatch.score(q, artist, title, c)
             if (score <= 0.0) return
             val currentIsSynced = best?.first?.synced != null
@@ -151,7 +151,7 @@ class LrcLib(private val base: String = "https://lrclib.net/api") {
 
         for ((artist, title) in tries.take(3)) {
             val results = attempt { search(artist, title) } ?: emptyList()
-            val searchBest = SongMatch.best(q, artist, title, results)
+            val searchBest = SongMatch.best(q, artist, title, results.filter { LyricsQuality.ok(q, it) })
             consider(searchBest, artist, title)
             if (searchBest?.synced != null) return best
         }

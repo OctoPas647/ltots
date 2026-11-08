@@ -147,7 +147,6 @@ fun HomeScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenGet: () -> Unit
         radioSongs = null
         radio?.let { r -> radioSongs = runCatching { com.ltots.app.recs.Discover.radioSongs(r) }.getOrDefault(emptyList()) }
     }
-    androidx.activity.compose.BackHandler(enabled = radio != null) { radio = null }
     LaunchedEffect(feed) { feed?.shelves?.firstOrNull()?.songs?.let { SongPreview.warmUp(it.map { r -> r.song }) } }
     LaunchedEffect(preview.error) { preview.error?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show(); SongPreview.clearError() } }
 
@@ -165,6 +164,7 @@ fun HomeScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenGet: () -> Unit
 
     var mood by rememberSaveable { mutableStateOf<String?>(null) }
     var moodSongs by remember { mutableStateOf<List<RecSong>?>(null) }
+    androidx.activity.compose.BackHandler(enabled = mood != null) { mood = null }
     LaunchedEffect(mood) {
         moodSongs = null
         mood?.let { m -> moodSongs = runCatching { Recommender.mood(context, m) }.getOrDefault(emptyList()) }
@@ -175,6 +175,16 @@ fun HomeScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenGet: () -> Unit
         SongPreview.stop()
         player.play(tracks, index)
         onOpenPlayer()
+    }
+    // A song started from Home carries on with the songs on the phone most like it.
+    val playable = remember(library, settings.hiddenArtists) {
+        val hidden = settings.hiddenArtists.map { com.ltots.app.lyrics.SongMatch.norm(it) }.toSet()
+        com.ltots.app.data.SongKinds.songs(library).filter { com.ltots.app.lyrics.SongMatch.norm(it.artist) !in hidden }
+    }
+    fun playWithSimilar(t: Track) = playLocal(listOf(t) + com.ltots.app.recs.LibraryRadio.similarTo(t, playable, moods))
+    fun playMix(m: Mix) {
+        val ids = m.tracks.mapTo(HashSet()) { it.id }
+        playLocal(m.tracks + com.ltots.app.recs.LibraryRadio.similarTo(m.tracks.first(), playable, moods).filter { it.id !in ids })
     }
     val actions = SongActions(
         preview = { s -> SongPreview.toggle(s) { player.controller?.pause() } },
@@ -192,6 +202,19 @@ fun HomeScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenGet: () -> Unit
         com.ltots.app.data.ListenStats.summary(null).songs.mapNotNull { s -> byKey[s.key]?.let { it to s } }.take(15)
     }
 
+    // Loved once, not played for two months.
+    val forgotten = remember(statsVersion, playable, history) {
+        val since = System.currentTimeMillis() - 60L * 24 * 3600_000L
+        val recent = history.filter { it.at >= since }.mapTo(HashSet()) { it.key }
+        val byKey = playable.associateBy { com.ltots.app.data.ListenStats.key(it.title, it.artist) }
+        com.ltots.app.data.ListenStats.summary(null).songs.take(200).mapNotNull { byKey[it.key] }.filter { it.profileKey !in recent }.take(15)
+    }
+    val fromLibrary = remember(playable) {
+        playable.shuffled(kotlin.random.Random(Calendar.getInstance().get(Calendar.DAY_OF_YEAR))).take(14)
+    }
+    val recentlyAdded = remember(playable) { playable.filter { it.addedAt != null }.sortedByDescending { it.addedAt }.take(14) }
+
+    com.ltots.app.ui.components.SwipeBackPage("Radio", enabled = radio != null, onBack = { radio = null }) {
     Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = topInset() + 10.dp, bottom = bottomChrome() + if (preview.active) 76.dp else 0.dp)) {
             // Greeting, refresh, account
@@ -247,7 +270,7 @@ fun HomeScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenGet: () -> Unit
 
             // Jump back in (Spotify's grid), from the phone
             if (mood == null && radio == null && local.jumpBackIn.isNotEmpty()) item("jump") {
-                JumpBackIn(local.jumpBackIn, onPlay = { t -> playLocal(listOf(t) + library.filter { it.albumId == t.albumId && it.id != t.id && t.album.isNotBlank() }) })
+                JumpBackIn(local.jumpBackIn, onPlay = { t -> playWithSimilar(t) })
             }
 
             // The year's listening, and the way into Wrapped and the stats.
@@ -302,11 +325,11 @@ fun HomeScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenGet: () -> Unit
             }
 
             if (mood == null && radio == null && most.size >= 3) {
-                item("mosth") { ShelfHeader(small = "Your favourites", title = "Most played", sub = "The songs you keep coming back to") }
+                item("mosth") { ShelfHeader(small = "Mixed for you", title = "Replay mix", sub = "The songs you keep coming back to") }
                 item("most") {
                     LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         items(most, key = { it.first.id }) { (t, st) ->
-                            LocalCard(t, note = "${st.plays} plays · ${st.ms / 60_000} min") { playLocal(most.map { it.first }, most.indexOfFirst { it.first.id == t.id }) }
+                            LocalCard(t, note = "${st.plays} plays · ${st.ms / 60_000} min") { playWithSimilar(t) }
                         }
                     }
                 }
@@ -341,15 +364,29 @@ fun HomeScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenGet: () -> Unit
             // From the phone: your mixes (Spotify's "Made for you") and songs to play again.
             if (mood == null && radio == null && mixes.isNotEmpty()) {
                 item("mixh") { ShelfHeader(small = "Made for you", title = "Your mixes", sub = "From the songs on your phone") }
-                item("mix") { MixCarousel(mixes) { m -> playLocal(m.tracks) } }
+                item("mix") { MixCarousel(mixes) { m -> playMix(m) } }
             }
             if (mood == null && radio == null && local.listenAgain.isNotEmpty()) {
                 item("againh") { ShelfHeader(small = null, title = "Listen again", sub = null) }
                 item("again") {
                     LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        items(local.listenAgain, key = { it.id }) { t -> LocalCard(t) { playLocal(local.listenAgain, local.listenAgain.indexOf(t)) } }
+                        items(local.listenAgain, key = { it.id }) { t -> LocalCard(t) { playWithSimilar(t) } }
                     }
                 }
+            }
+            if (mood == null && radio == null) {
+                fun localShelf(id: String, small: String, title: String, sub: String?, songs: List<Track>) {
+                    if (songs.size < 3) return
+                    item("$id-h") { ShelfHeader(small = small, title = title, sub = sub) }
+                    item(id) {
+                        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            items(songs, key = { it.id }) { t -> LocalCard(t) { playWithSimilar(t) } }
+                        }
+                    }
+                }
+                localShelf("forgotten", "Your favourites", "Forgotten favourites", "You loved these, and haven't played them in a while", forgotten)
+                localShelf("fromlib", "On your phone", "From your library", null, fromLibrary)
+                localShelf("added", "On your phone", "Recently added", null, recentlyAdded)
             }
             if (mood == null && f != null && f.basedOn.isNotEmpty()) item("based") {
                 Hint("Based on " + f.basedOn.take(4).joinToString(", ") { "“$it”" } + ". Long-press a song for Not interested.")
@@ -367,6 +404,7 @@ fun HomeScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenGet: () -> Unit
         if (preview.active) PreviewBar(preview, Modifier.align(Alignment.BottomCenter).padding(bottom = bottomChrome() - 16.dp, start = 14.dp, end = 14.dp)) {
             preview.song?.let(actions.download)
         }
+    }
     }
 }
 
@@ -561,7 +599,7 @@ private fun SongCard(r: RecSong, preview: SongPreview.State, actions: SongAction
     val s = r.song
     val have = s.videoId in downloaded || DownloadManager.isQueued(s.videoId)
     Box {
-        Column(Modifier.width(150.dp).clip(RoundedCornerShape(12.dp)).combinedClickable(onClick = { actions.preview(s) }, onLongClick = { menu = true })) {
+        Column(Modifier.width(150.dp).clip(RoundedCornerShape(12.dp)).combinedClickable(onClick = { actions.preview(s) }, onLongClick = { menu = true }).padding(bottom = 8.dp)) {
             Box {
                 NetImage(s.thumbUrl, 150.dp, RoundedCornerShape(12.dp), px = 400)
                 PreviewBadge(s, preview, 150.dp)
@@ -599,7 +637,7 @@ private fun CollectionCarousel(items: List<YtItem>, onOpen: (String) -> Unit) {
                 is YtPlaylist -> "https://music.youtube.com/playlist?list=${it.playlistId}"
                 else -> null
             } ?: return@items
-            Column(Modifier.width(150.dp).clip(RoundedCornerShape(12.dp)).combinedClickable(onClick = { onOpen(link) })) {
+            Column(Modifier.width(150.dp).clip(RoundedCornerShape(12.dp)).combinedClickable(onClick = { onOpen(link) }).padding(bottom = 8.dp)) {
                 NetImage(it.thumbUrl, 150.dp, RoundedCornerShape(12.dp), px = 400)
                 Text(it.title, color = pal.text, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
                 Text(if (it is YtAlbum) "Album · ${it.artist}" else "Playlist", color = pal.textDim, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -614,7 +652,7 @@ private fun MixCarousel(mixes: List<Mix>, onPlay: (Mix) -> Unit) {
     val pal = LocalPalette.current
     LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         items(mixes, key = { it.id }) { m ->
-            Column(Modifier.width(150.dp).clip(RoundedCornerShape(12.dp)).combinedClickable(onClick = { onPlay(m) })) {
+            Column(Modifier.width(150.dp).clip(RoundedCornerShape(12.dp)).combinedClickable(onClick = { onPlay(m) }).padding(bottom = 8.dp)) {
                 Box(Modifier.size(150.dp)) {
                     LocalArt(m.tracks.first().id, 150.dp, RoundedCornerShape(12.dp))
                     Box(Modifier.matchParentSize().clip(RoundedCornerShape(12.dp))
@@ -632,7 +670,7 @@ private fun MixCarousel(mixes: List<Mix>, onPlay: (Mix) -> Unit) {
 @Composable
 private fun LocalCard(t: Track, note: String? = null, onPlay: () -> Unit) {
     val pal = LocalPalette.current
-    Column(Modifier.width(130.dp).clip(RoundedCornerShape(12.dp)).combinedClickable(onClick = onPlay)) {
+    Column(Modifier.width(130.dp).clip(RoundedCornerShape(12.dp)).combinedClickable(onClick = onPlay).padding(bottom = 8.dp)) {
         LocalArt(t.id, 130.dp, RoundedCornerShape(12.dp))
         Text(t.title, color = pal.text, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
         Text(t.artist.takeIf { it != Track.UNKNOWN } ?: "", color = pal.textDim, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -682,7 +720,7 @@ private fun ArtistCarousel(artists: List<com.ltots.app.ytm.YtArtist>, onOpen: (S
     LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         items(artists, key = { it.browseId }) { a ->
             Column(
-                Modifier.width(110.dp).clip(RoundedCornerShape(12.dp)).combinedClickable(onClick = { onOpen("https://music.youtube.com/channel/${a.browseId}") }),
+                Modifier.width(110.dp).clip(RoundedCornerShape(12.dp)).combinedClickable(onClick = { onOpen("https://music.youtube.com/channel/${a.browseId}") }).padding(bottom = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 NetImage(a.thumbUrl, 110.dp, CircleShape, placeholder = Icons.Rounded.Person, px = 300)
@@ -698,7 +736,7 @@ private fun RadioCarousel(radios: List<com.ltots.app.recs.Radio>, onOpen: (com.l
     val pal = LocalPalette.current
     LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         items(radios, key = { it.seed.videoId }) { r ->
-            Column(Modifier.width(150.dp).clip(RoundedCornerShape(12.dp)).combinedClickable(onClick = { onOpen(r) })) {
+            Column(Modifier.width(150.dp).clip(RoundedCornerShape(12.dp)).combinedClickable(onClick = { onOpen(r) }).padding(bottom = 8.dp)) {
                 Box(Modifier.size(150.dp)) {
                     NetImage(r.thumbUrl, 150.dp, RoundedCornerShape(12.dp), px = 400)
                     Box(Modifier.matchParentSize().clip(RoundedCornerShape(12.dp))

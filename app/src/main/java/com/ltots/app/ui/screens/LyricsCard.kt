@@ -27,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,6 +37,11 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -55,7 +61,14 @@ import com.ltots.app.ui.theme.LocalPalette
 import kotlin.math.max
 
 /** Lines light up slightly before they're sung, so they never feel late. */
-private const val LEAD_MS = 150L
+private const val LEAD_MS = 60L
+
+/** Scrolling that runs out at the end of the lyrics stays here instead of moving the page. */
+private val KeepFlingInLyrics = object : NestedScrollConnection {
+    override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset =
+        if (source == NestedScrollSource.UserInput) Offset.Zero else available
+    override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity = available
+}
 
 /**
  * Lyrics under the player, Spotify-style: the line being sung is highlighted and kept in view,
@@ -70,7 +83,7 @@ fun LyricsCard(player: PlayerUi) {
     val hasLength = player.durationMs > 0
     fun query() = key?.let { SongQuery(it, player.title, player.artist.ifBlank { null }, player.album.ifBlank { null }, player.durationMs) }
     // Only once the song's length is known: it's how a match is checked.
-    LaunchedEffect(key, hasLength) { if (hasLength) query()?.let { Lyrics.show(context, it) } }
+    LaunchedEffect(key, hasLength) { if (hasLength) query()?.let { Lyrics.show(context, it, player.trackId) } }
     val state = current?.takeIf { it.first == key }?.second ?: LyricsState.Idle
     var big by rememberSaveable { mutableStateOf(false) }
     val height by animateDpAsState(if (big) 560.dp else 340.dp, label = "lyricsHeight")
@@ -121,13 +134,22 @@ fun LyricsCard(player: PlayerUi) {
                     // so they still follow along and can be tapped.
                     val estimated = remember(doc, player.durationMs) { if (doc.synced == null) Lrc.estimate(doc.plain, player.durationMs) else null }
                     val lines = doc.synced ?: estimated
+                    // Once per song, with the speech model there: corrects late, early or drifting lines.
+                    val aiOn by AudioEngine.settings.collectAsState()
+                    LaunchedEffect(key, doc, aiOn.aiLyrics) {
+                        if (key != null && aiOn.aiLyrics && doc.synced != null) com.ltots.app.identify.LyricsMatch.tune(context, key, player.trackId, doc, player.durationMs)
+                    }
+                    if (Lyrics.isUnsure(doc)) Text(
+                        "⚠ Found by AI or by name only: these lyrics may not be fully accurate.",
+                        color = pal.accent, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp, bottom = 4.dp),
+                    )
                     Box(Modifier.fillMaxWidth().height(if (lines != null) height else 340.dp)) {
                         when {
                             lines != null -> SyncedLyrics(lines, player)
                             doc.instrumental && doc.plain.isNullOrBlank() -> Message("♪  Instrumental")
                             else -> Text(
                                 doc.plain.orEmpty(), color = pal.text, fontSize = 17.sp, lineHeight = 26.sp,
-                                modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                                modifier = Modifier.fillMaxSize().nestedScroll(KeepFlingInLyrics).verticalScroll(rememberScrollState()),
                             )
                         }
                     }
@@ -147,11 +169,11 @@ fun LyricsCard(player: PlayerUi) {
                 state == LyricsState.Searching || state == LyricsState.Idle -> Message("Looking for lyrics…")
                 state == LyricsState.NotFound || state is LyricsState.MatchFailed -> {
                     if (state == LyricsState.NotFound) Message("No lyrics found for this song. Tap ✦ AI to recognise it from its sound.")
-                    Pill("Search again", false, { query()?.let { Lyrics.retry(context, it) } })
+                    Pill("Search again", false, { query()?.let { Lyrics.retry(context, it, player.trackId) } })
                 }
                 state is LyricsState.Offline -> {
                     Message(state.message)
-                    Pill("Try again", false, { query()?.let { Lyrics.retry(context, it) } })
+                    Pill("Try again", false, { query()?.let { Lyrics.retry(context, it, player.trackId) } })
                 }
             }
         }
@@ -207,7 +229,16 @@ private fun Message(text: String) {
 @Composable
 private fun SyncedLyrics(lines: List<LyricLine>, player: PlayerUi) {
     val pal = LocalPalette.current
-    val now = Lrc.lineAt(lines, player.positionMs + LEAD_MS)
+    // The line follows the player's own clock (not the seek bar's four updates a second, which
+    // made a line light up as much as a quarter of a second late), and only a new line redraws.
+    var now by remember(lines) { mutableIntStateOf(Lrc.lineAt(lines, player.positionMs + LEAD_MS)) }
+    LaunchedEffect(lines, player.isPlaying) {
+        while (true) {
+            val at = Lrc.lineAt(lines, (player.controller?.currentPosition ?: player.positionMs) + LEAD_MS)
+            if (at != now) now = at
+            kotlinx.coroutines.delay(if (player.isPlaying) 40 else 250)
+        }
+    }
     val list = rememberLazyListState()
     // Follow the song unless you've just scrolled yourself (then wait a few seconds).
     var userScrolledAt by remember { mutableLongStateOf(0L) }
@@ -222,7 +253,7 @@ private fun SyncedLyrics(lines: List<LyricLine>, player: PlayerUi) {
         autoScrolling = true
         try { list.animateScrollToItem(max(0, now - 1)) } finally { autoScrolling = false }
     }
-    LazyColumn(state = list, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 200.dp),
+    LazyColumn(state = list, modifier = Modifier.fillMaxSize().nestedScroll(KeepFlingInLyrics), contentPadding = PaddingValues(bottom = 200.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp)) {
         itemsIndexed(lines) { i, line ->
             val color by animateColorAsState(

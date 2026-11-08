@@ -12,6 +12,7 @@ import android.os.SystemClock
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import com.ltots.app.audio.AudioEngine
+import com.ltots.app.audio.Crossfade
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -36,7 +37,7 @@ object SleepTimer {
     )
 
     private const val ACTION = "com.ltots.app.SLEEP_TIMER"
-    private const val STEP_MS = 250L
+    private const val STEP_MS = 100L
 
     private val _state = MutableStateFlow<State?>(null)
     /** The running timer, or null. */
@@ -151,6 +152,7 @@ object SleepTimer {
     }
 
     private fun startFade(p: Player, length: Long) {
+        Crossfade.abort()
         fadeFrom = p.volume
         fadeStart = SystemClock.elapsedRealtime()
         fadeLength = length
@@ -168,7 +170,7 @@ object SleepTimer {
             val p = AudioEngine.player.value ?: return
             val t = ((SystemClock.elapsedRealtime() - fadeStart).toFloat() / fadeLength).coerceIn(0f, 1f)
             // An even fade to the ear: volume falls along a curve, not a straight line.
-            val v = fadeFrom * (1f - t) * (1f - t)
+            val v = fadeFrom * (1f - t) * (1f - t) * (1f - t)
             p.volume = v
             if (t >= 1f) finish() else handler.postDelayed(this, STEP_MS)
         }

@@ -83,6 +83,7 @@ import com.ltots.app.ui.topInset
 import com.ltots.app.download.DownloadManager
 import com.ltots.app.download.DownloadTask
 import com.ltots.app.download.Engine
+import com.ltots.app.download.MAX_DOWNLOADS_AT_ONCE
 import com.ltots.app.download.SyncedPlaylist
 import com.ltots.app.download.TaskState
 import com.ltots.app.identify.ClipSource
@@ -111,9 +112,6 @@ import com.ltots.app.ytm.YtItem
 import com.ltots.app.ytm.YtPlaylist
 import com.ltots.app.ytm.YtSong
 import kotlinx.coroutines.delay
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.contentDescription
 import kotlinx.coroutines.launch
 
 /** One screen in the Downloads tab's back stack. */
@@ -149,7 +147,9 @@ fun DownloadsScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
     LaunchedEffect(Unit) { if (Engine.ensureReady() && !DownloadManager.hasWork()) Engine.autoUpdateIfDue() }
 
     val page = stack.lastOrNull()
-    BackHandler(enabled = stack.isNotEmpty()) { stack.removeAt(stack.lastIndex) }
+    val finderEntries by SongFinder.entries.collectAsState()
+    // Back with best matches showing returns to the recent songs.
+    BackHandler(enabled = stack.isEmpty() && finderEntries.isNotEmpty()) { SongFinder.clear() }
 
     // Load whatever page is on top of the stack.
     var reload by remember { mutableStateOf(0) }
@@ -183,31 +183,28 @@ fun DownloadsScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
         SongFinder.start(ClipSource.Link(link))
     }
 
-    fun submit(text: String, fromShare: Boolean = false) {
-        val t = text.trim()
-        if (t.isEmpty()) return
-        focus.clearFocus()
-        // One box for everything: YouTube Music links download/open as before, a video link from
-        // any platform (TikTok, Shorts, YouTube, Instagram…) starts the song finder, words search.
+    /** Handles one thing typed or pasted. A link leaves the box empty at once, ready for the next. */
+    fun submitOne(t: String) {
         val route = LinkRoute.of(t)
-        if (route is LinkRoute.FindSong) { findSong(route.url); if (fromShare) input = ""; return }
-        if (route is LinkRoute.Search) { stack.clear(); stack += Page.Search(route.text); return }
+        if (route is LinkRoute.Search) { focus.clearFocus(); stack.clear(); stack += Page.Search(route.text); return }
+        input = ""
+        if (route is LinkRoute.FindSong) { findSong(route.url); return }
         when (val link = (route as LinkRoute.Music).target) {
-            is LinkTarget.Song -> scope.launch {
-                toast = "Looking up the song…"
-                val s = runCatching { InnerTube.song(link.videoId) }.getOrNull()
-                    ?: YtSong(link.videoId, com.ltots.app.download.Downloader.PLACEHOLDER_TITLE, emptyList(), isVideo = true)
-                val n = DownloadManager.enqueueSong(s)
-                toast = if (n > 0) "Downloading “${s.title}”" else "Already downloaded or in the queue"
-                if (fromShare) input = ""
-            }
+            is LinkTarget.Song -> toast = if (DownloadManager.enqueueLink(link.videoId)) "Added to downloads" else "Already downloaded or in the queue"
             is LinkTarget.Album -> stack += Page.AlbumPage(link.browseId)
             is LinkTarget.Playlist -> stack += Page.PlaylistPage(link.playlistId)
             is LinkTarget.Artist -> stack += Page.Artist(link.channelId)
         }
     }
 
-    val finder by SongFinder.state.collectAsState()
+    fun submit(text: String) {
+        val t = text.trim()
+        if (t.isEmpty()) return
+        // Several links pasted together each count.
+        val links = Regex("""https?://\S+""").findAll(t).map { it.value }.toList()
+        if (links.size > 1) links.forEach(::submitOne) else submitOne(t)
+    }
+
     // A video file shared to LToTS ("Find song with LToTS").
     val sharedFile by Inbox.sharedFile.collectAsState()
     LaunchedEffect(sharedFile) {
@@ -222,10 +219,11 @@ fun DownloadsScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
     LaunchedEffect(shared) {
         val s = shared ?: return@LaunchedEffect
         Inbox.sharedText.value = null
-        input = Links.parse(s)?.let { s.trim() } ?: s
-        submit(s, fromShare = true)
+        input = s
+        submit(s)
     }
 
+    com.ltots.app.ui.components.SwipeBackPage("Get page", enabled = stack.isNotEmpty(), onBack = { if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex) }) {
     Column(Modifier.fillMaxSize().padding(top = topInset()).padding(horizontal = 14.dp)) {
         // Header
         Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -246,7 +244,12 @@ fun DownloadsScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
                 Box(Modifier.weight(1f)) {
                     if (input.isEmpty()) Text("Search, or paste a song or video link", color = pal.textFaint, maxLines = 1)
                     BasicTextField(
-                        input, { input = it }, singleLine = true,
+                        input,
+                        { new ->
+                            // A link pasted in goes straight off, and the box is ready for the next.
+                            if (new.length - input.length >= 10 && LinkRoute.of(new) !is LinkRoute.Search) submit(new) else input = new
+                        },
+                        singleLine = true,
                         textStyle = TextStyle(color = pal.text, fontSize = 15.sp),
                         cursorBrush = SolidColor(pal.accent),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
@@ -260,7 +263,7 @@ fun DownloadsScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
                     IconButton(onClick = {
                         val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         val text = cb.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()
-                        if (text.isNullOrBlank()) toast = "Clipboard is empty" else { input = text; submit(text) }
+                        if (text.isNullOrBlank()) toast = "Clipboard is empty" else submit(text)
                     }, Modifier.size(36.dp)) { Icon(Icons.Rounded.ContentPaste, "Paste link", tint = pal.textDim) }
                 }
             }
@@ -276,27 +279,15 @@ fun DownloadsScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
         if (stack.isEmpty()) FinderTools(onToast = { toast = it })
 
         Spacer(Modifier.height(10.dp))
-        if (loaded == null && finder == FinderState.Idle) {
-            Intro()
-            Spacer(Modifier.height(10.dp))
-        }
-
         GlassPanel(Modifier.fillMaxWidth().weight(1f), tintBoost = 0.06f) {
             when (val l = loaded) {
-                // Best matches and Downloads in one widget, stacked like iPhone widgets: swipe up
-                // and down (or tap the dots) to switch.
-                null -> GetStack(
-                    finder,
-                    matches = {
-                        if (finder != FinderState.Idle) FinderContent(
-                            finder, player, onOpenPlayer,
-                            onOpenAlbum = { stack += Page.AlbumPage(it) },
-                            onOpenArtist = { stack += Page.Artist(it) },
-                            onToast = { toast = it },
-                        ) else MatchesIdle()
-                    },
-                    downloads = { HomeContent(player, onOpenPlayer, onToast = { toast = it }) },
-                )
+                // The recent songs, until a link is given: then its best matches take their place.
+                null -> if (finderEntries.isNotEmpty()) FinderList(
+                    finderEntries, player, onOpenPlayer,
+                    onOpenAlbum = { stack += Page.AlbumPage(it) },
+                    onOpenArtist = { stack += Page.Artist(it) },
+                    onToast = { toast = it },
+                ) else RecentsContent(player, onOpenPlayer)
                 Loaded.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = pal.accent) }
                 is Loaded.Error -> Message(l.message, "Try again") { reload++ }
                 is Loaded.Results -> SearchContent(l.result, (page as? Page.Search)?.params,
@@ -307,6 +298,7 @@ fun DownloadsScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
             }
         }
         Spacer(Modifier.height(bottomChrome()))
+    }
     }
 }
 
@@ -499,20 +491,22 @@ private fun ArtistContent(a: ArtistPage, onOpen: (YtItem) -> Unit) {
     }
 }
 
-// ---- home: queue, synced playlists, history, engine -----------------------------------------
+// ---- recents: what's downloading, then what came in lately ------------------------------------
 
 @Composable
-private fun HomeContent(player: PlayerUi, onOpenPlayer: () -> Unit, onToast: (String) -> Unit) {
+private fun RecentsContent(player: PlayerUi, onOpenPlayer: () -> Unit) {
     val pal = LocalPalette.current
-    val scope = rememberCoroutineScope()
     val tasks by DownloadManager.tasks.collectAsState()
-    val synced by DownloadManager.synced.collectAsState()
     val paused by DownloadManager.paused.collectAsState()
     val active = tasks.filter { !it.state.finished }
     val history = tasks.filter { it.state.finished }
 
-    // Recommendations live on the Home tab now; the Get tab is for getting songs.
-
+    if (active.isEmpty() && history.isEmpty()) {
+        Box(Modifier.fillMaxSize().padding(28.dp), contentAlignment = Alignment.Center) {
+            Text("Songs you download show up here.", color = pal.textDim, style = MaterialTheme.typography.bodyMedium)
+        }
+        return
+    }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 12.dp)) {
         if (active.isNotEmpty()) {
             item("qh") {
@@ -526,23 +520,10 @@ private fun HomeContent(player: PlayerUi, onOpenPlayer: () -> Unit, onToast: (St
             }
             items(active, key = { "q" + it.id }) { TaskRow(it, player, onOpenPlayer) }
         }
-
-        if (synced.isNotEmpty()) {
-            item("sh") {
-                Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    SectionTitle("Synced playlists", Modifier.weight(1f))
-                    Pill("Sync all", false, {
-                        scope.launch { onToast("Checking playlists…"); val n = DownloadManager.syncAll(); onToast(if (n == 0) "Everything is up to date" else "$n new songs queued") }
-                    })
-                }
-            }
-            items(synced, key = { "p" + it.playlistId }) { SyncedRow(it, onToast) }
-        }
-
         if (history.isNotEmpty()) {
             item("hh") {
                 Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    SectionTitle("Recent", Modifier.weight(1f))
+                    SectionTitle("Recents", Modifier.weight(1f))
                     if (history.any { it.state == TaskState.FAILED }) {
                         Pill("Retry failed", false, { DownloadManager.retryFailed() })
                         Spacer(Modifier.width(8.dp))
@@ -550,104 +531,29 @@ private fun HomeContent(player: PlayerUi, onOpenPlayer: () -> Unit, onToast: (St
                     Pill("Clear", false, { DownloadManager.clearFinished() })
                 }
             }
-            items(history.take(150), key = { "h" + it.id }) { TaskRow(it, player, onOpenPlayer) }
+            items(history.take(300), key = { "h" + it.id }) { TaskRow(it, player, onOpenPlayer) }
         }
-
-        item("finder-ai") { FinderModelsCard() }
-        item("engine") { EngineCard(onToast) }
     }
 }
 
-/**
- * One widget that holds two: Best matches and Downloads, one above the other like an iPhone
- * widget stack. Each scrolls on its own; pulling past its top or bottom moves to the other,
- * and the dots at the side switch directly. A new song search brings Best matches forward.
- */
+/** Profile > App settings · downloads: synced playlists, the song finder's AI, the engine. */
 @Composable
-private fun GetStack(finder: FinderState, matches: @Composable () -> Unit, downloads: @Composable () -> Unit) {
-    val pal = LocalPalette.current
+internal fun DownloadSettingsSection() {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val names = listOf("Best matches", "Downloads")
-    val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = if (finder != FinderState.Idle) 0 else 1) { 2 }
-    // A search starting (or a link shared to the app) shows its results.
-    val searching = finder !is FinderState.Idle
-    LaunchedEffect(searching, (finder as? FinderState.Results)?.label) { if (searching) pager.animateScrollToPage(0) }
-    Box(Modifier.fillMaxSize()) {
-        androidx.compose.foundation.pager.VerticalPager(
-            pager, Modifier.fillMaxSize(), beyondViewportPageCount = 1, pageSpacing = 10.dp,
-        ) { page ->
-            Box(
-                Modifier.fillMaxSize().graphicsLayer {
-                    // The page leaving shrinks and fades a little, as in a widget stack.
-                    val f = kotlin.math.abs((pager.currentPage - page) + pager.currentPageOffsetFraction).coerceIn(0f, 1f)
-                    val sc = 1f - 0.07f * f
-                    scaleX = sc; scaleY = sc; alpha = 1f - 0.55f * f
-                    clip = true; shape = RoundedCornerShape(22.dp)
-                }
-            ) { if (page == 0) matches() else downloads() }
+    val synced by DownloadManager.synced.collectAsState()
+    val onToast: (String) -> Unit = { android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_SHORT).show() }
+    if (synced.isNotEmpty()) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            SectionTitle("App settings · synced playlists", Modifier.weight(1f))
+            Pill("Sync all", false, {
+                scope.launch { onToast("Checking playlists…"); val n = DownloadManager.syncAll(); onToast(if (n == 0) "Everything is up to date" else "$n new songs queued") }
+            })
         }
-        // Which widget is coming, while swiping.
-        AnimatedVisibility(
-            pager.isScrollInProgress, Modifier.align(Alignment.TopCenter).padding(top = 8.dp),
-            enter = androidx.compose.animation.fadeIn(), exit = androidx.compose.animation.fadeOut(),
-        ) {
-            Text(
-                names[pager.targetPage], color = pal.onAccent, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.clip(RoundedCornerShape(50)).background(pal.accent).padding(horizontal = 12.dp, vertical = 5.dp),
-            )
-        }
-        // Page dots on the right edge.
-        Column(
-            Modifier.align(Alignment.CenterEnd).padding(end = 3.dp),
-            verticalArrangement = Arrangement.spacedBy(5.dp), horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            repeat(2) { i ->
-                val on = pager.currentPage == i
-                val h by androidx.compose.animation.core.animateDpAsState(if (on) 16.dp else 6.dp, label = "dot")
-                Box(
-                    Modifier.size(width = 6.dp, height = h).clip(RoundedCornerShape(50))
-                        .background(pal.text.copy(alpha = if (on) 0.75f else 0.25f))
-                        .clickable { scope.launch { pager.animateScrollToPage(i) } }
-                        .semantics { contentDescription = names[i] }
-                )
-            }
-        }
+        synced.forEach { SyncedRow(it, onToast) }
     }
-}
-
-/** Best matches before any search: how to start one. */
-@Composable
-private fun MatchesIdle() {
-    val pal = LocalPalette.current
-    Column(Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 16.dp)) {
-        Text("Best matches", style = MaterialTheme.typography.titleMedium, color = pal.text)
-        Spacer(Modifier.height(6.dp))
-        Text(
-            "Find the song in a TikTok, Short or any video: paste its link above, share it to LToTS, " +
-                "or let it listen with the mic. The matches show up here.",
-            color = pal.textDim, style = MaterialTheme.typography.bodyMedium,
-        )
-        Spacer(Modifier.weight(1f))
-        Text("Swipe up for Downloads", color = pal.textFaint, style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.align(Alignment.CenterHorizontally))
-    }
-}
-
-@Composable
-private fun Intro() {
-    val pal = LocalPalette.current
-    Column(Modifier.padding(18.dp)) {
-        Text("Download from YouTube Music", style = MaterialTheme.typography.titleMedium, color = pal.text)
-        Spacer(Modifier.height(6.dp))
-        listOf(
-            "Search above, or paste a YouTube Music link to a song, album, playlist or artist.",
-            "Or share straight from the YouTube Music app: Share → LToTS.",
-            "Hear a song in a video? Paste its link above — TikTok (videos and photo slideshows), YouTube, Shorts, YouTube Music, Instagram, Facebook, Snapchat, X, Reddit, Pinterest or almost any other site — or share it to LToTS. You get the best matches, most likely first.",
-            "No link? Tap Listen to use the microphone, or From a video for a saved clip.",
-            "Songs keep YouTube's original audio (Opus) with no re-encoding, plus full album tags and the full-size cover.",
-            "Music videos are swapped for the official audio release when there is one.",
-        ).forEach { Text("•  $it", color = pal.textDim, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 3.dp)) }
-    }
+    FinderModelsCard()
+    EngineCard(onToast)
 }
 
 @Composable
@@ -761,15 +667,17 @@ private fun EngineCard(onToast: (String) -> Unit) {
     var testReport by remember { mutableStateOf<String?>(null) }
     Column(Modifier.padding(16.dp)) {
         SectionTitle("Download settings")
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Downloads at once", color = pal.text, modifier = Modifier.weight(1f))
-            (1..5).forEach { n ->
-                Box(
-                    Modifier.padding(start = 6.dp).size(34.dp).clip(CircleShape)
-                        .background(if (settings.concurrency == n) pal.accent else pal.text.copy(alpha = 0.08f))
-                        .clickable { DownloadManager.updateSettings { it.copy(concurrency = n) } },
-                    contentAlignment = Alignment.Center,
-                ) { Text("$n", color = if (settings.concurrency == n) pal.onAccent else pal.text, fontWeight = FontWeight.SemiBold) }
+        Text("Downloads at once", color = pal.text)
+        (1..MAX_DOWNLOADS_AT_ONCE).chunked(5).forEach { row ->
+            Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                row.forEach { n ->
+                    Box(
+                        Modifier.size(38.dp).clip(CircleShape)
+                            .background(if (settings.concurrency == n) pal.accent else pal.text.copy(alpha = 0.08f))
+                            .clickable { DownloadManager.updateSettings { it.copy(concurrency = n) } },
+                        contentAlignment = Alignment.Center,
+                    ) { Text("$n", color = if (settings.concurrency == n) pal.onAccent else pal.text, fontWeight = FontWeight.SemiBold) }
+                }
             }
         }
         SwitchRow(

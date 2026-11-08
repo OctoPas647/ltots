@@ -22,6 +22,12 @@ newer APK updates the app and keeps your settings.
   mixes** and **Listen again**. Tap any new song to **hear 30 seconds of it** (the hook, from the
   free iTunes preview or streamed from YouTube Music) before downloading it; the preview bar has a
   Download button. Long-press for Not interested / Fewer songs by this artist.
+  Songs from your phone start at once and carry on with the songs on the phone **most like them**
+  (how they sound to the on-device music model, then genre and artist). Further shelves as on
+  YouTube Music: **Supermix, Discover mix, New release mix, Replay mix**, **Similar to / More from**
+  the artists you play, **Forgotten favourites**, **From your library**, **Recently added**, themes
+  for the genres you play at this time of day, **Long listening**, **Covers & remixes** and **Live
+  performances**.
   How the picks are made: the in-app listening history (finished songs count more than skipped
   ones, recent plays more than old ones), play counts, downloads and — signed in — your YouTube
   Music history choose a few seed songs (at most two per artist); YouTube Music's own radio for
@@ -135,6 +141,14 @@ newer APK updates the app and keeps your settings.
   late. With the speech model there, the AI also listens for the words and moves all lines by how
   much they're consistently off. Pressed ✦ AI by mistake? **↺ Revert** brings back the lyrics found
   the normal way (only shown when there were some).
+- **Matching lyrics carefully** – a database entry only counts when the title is the same song
+  (not a longer title, a remix or a live version), the artist matches, the length is within 3
+  seconds, and the words make sense (no garbled text, no lyrics that outlast the song). When no
+  database has it, the AI recognises the playing song from its sound (Shazam on six moments of the
+  file, then the words Whisper hears) and finds its lyrics; those are marked as maybe not fully
+  accurate. Lyrics saved by older versions are checked again the next time the song plays; an
+  imported .lrc is never touched. The highlighted line follows the player's own clock, and with
+  the speech model installed the AI checks each song once for late, early or drifting lines.
 - **Library preparation** – waveforms for the whole library are made while the phone charges,
   lyrics are fetched whenever you're online; the playing song is always done on the spot. Status
   and "Prepare now" on the Sound page.
@@ -174,6 +188,13 @@ newer APK updates the app and keeps your settings.
   until you turn it on) — and your own AMOLED colour comes back when you return to AMOLED or
   AMOLED Cover from another theme. **Reset** (top right, or at the bottom of the page) puts
   everything on the Look tab back to the default, for the profile in use or all of them.
+- **Back** – Android's back leaves sub-pages, then goes to Home; on Home, back twice closes the app.
+  Sub-pages also follow your finger when you swipe in from the left edge, like on iOS.
+- **Shuffle** – starts at the song playing, and Previous retraces exactly what was played.
+- **Fade into the next song** (Profile > App settings, 1–12 s) – the two songs overlap. Power-saving
+  playback pauses while it's on; with Bit-perfect USB songs don't fade.
+- **Outlines on sliders** (Look > Colours) – on, every slider has an outline and Brightness can go to
+  black; off, Brightness stops at 50 %.
 - **Profile tab** – the last tab:
   - **Users** – up to 3 people on one phone, each with their own looks, EQs, settings and every
     song's own EQ, pitch and speed. Tap someone to switch; add, rename, delete, export and import.
@@ -198,6 +219,8 @@ newer APK updates the app and keeps your settings.
   - official album metadata (title, artists, album, album artist, track number, year) and the
     full-size cover embedded in every file;
   - music videos swapped for the official audio release when one exists;
+  - up to 10 downloads at once (Profile > App settings); paste links one after the other, the
+    box empties at once, and several links pasted together each count; video links wait in line;
   - queue with several downloads at once, background downloading with a notification,
     retry/cancel, history, and playlists you can keep in sync;
   - files saved to `Music/LToTS/Artist/Album/`, visible to any app;

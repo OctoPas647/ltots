@@ -37,6 +37,16 @@ object Smoothness {
         if (loaded) return
         loaded = true
         Store.loadSmoothness()?.let { a -> _auto.value = runCatching { Effects.valueOf(a) }.getOrDefault(Effects.FULL) }
+        // Samsung's phones struggle with the full glass (the page re-rendered under the bars every
+        // frame) long before Automatic's measuring notices, so Automatic starts them a step down,
+        // once. "Measure again from Full" and picking Full by hand still work.
+        runCatching {
+            val marker = java.io.File(Store.rootDir, "smoothness_samsung")
+            if (android.os.Build.MANUFACTURER.equals("samsung", ignoreCase = true) && !marker.exists()) {
+                marker.createNewFile()
+                if (_auto.value == Effects.FULL) { _auto.value = Effects.BALANCED; Store.saveSmoothness(Effects.BALANCED.name) }
+            }
+        }
     }
 
     fun effective(mode: EffectsMode, auto: Effects = _auto.value): Effects = when (mode) {

@@ -236,6 +236,7 @@ object ThemeState {
         coverBarsOpacity = cur.coverBarsOpacity,
         libraryHeaderGlass = cur.libraryHeaderGlass,
         libraryStatusBar = cur.libraryStatusBar,
+        sliderOutlines = cur.sliderOutlines,
         scrollbarShow = cur.scrollbarShow,
         scrollbarFullHeight = cur.scrollbarFullHeight,
         playingTopFade = cur.playingTopFade,
@@ -328,8 +329,9 @@ fun glowShades(glow: Long): List<Color> {
     return listOf(glow.toColor(), shade(22f, 0.95f, 0.8f), shade(-22f, 1.05f, 0.62f))
 }
 
-val LocalThemeConfig = staticCompositionLocalOf { ThemeConfig() }
-val LocalPalette = staticCompositionLocalOf {
+// Not "static": the look changes often (a slider on the Look page), and only what reads it should redraw.
+val LocalThemeConfig = androidx.compose.runtime.compositionLocalOf { ThemeConfig() }
+val LocalPalette = androidx.compose.runtime.compositionLocalOf {
     Palette(Color.White, Color.Black, Color.White, Color.White, Color.White, Color.White, Color.White, true)
 }
 

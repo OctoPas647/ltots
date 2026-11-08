@@ -53,6 +53,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -71,6 +72,7 @@ import com.ltots.app.data.Track
 import com.ltots.app.download.DownloadManager
 import com.ltots.app.identify.AiModels
 import com.ltots.app.identify.ClipSource
+import com.ltots.app.identify.FinderEntry
 import com.ltots.app.identify.FinderState
 import com.ltots.app.identify.IdentifyProgress
 import com.ltots.app.identify.Preview
@@ -130,69 +132,128 @@ private fun displayName(context: Context, uri: Uri): String? = runCatching {
     }
 }.getOrNull()
 
-/** The song finder's content inside the Get tab's panel. */
+/**
+ * The song finder's content on the Get tab: every link given to it, one under the other, each
+ * with its search in progress or its best matches.
+ */
 @Composable
-fun FinderContent(
-    state: FinderState,
+fun FinderList(
+    entries: List<FinderEntry>,
     player: PlayerUi,
     onOpenPlayer: () -> Unit,
     onOpenAlbum: (String) -> Unit,
     onOpenArtist: (String) -> Unit,
     onToast: (String) -> Unit,
 ) {
-    when (state) {
-        FinderState.Idle -> Unit
-        is FinderState.Listening -> ListeningView(state)
-        is FinderState.Working -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 12.dp)) {
-            item { FinderHeader("Finding the song…", state.label) }
-            item { Steps(state.progress) }
-            item { Row(Modifier.padding(16.dp)) { Pill("Cancel", false, { SongFinder.cancel() }) } }
-        }
-        is FinderState.Failed -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 12.dp)) {
-            item { FinderHeader("No match", state.label) }
-            item {
-                Row(Modifier.padding(horizontal = 16.dp, vertical = 6.dp), verticalAlignment = Alignment.Top) {
-                    Icon(Icons.Rounded.ErrorOutline, null, tint = LocalPalette.current.textDim, modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(state.message, color = LocalPalette.current.textDim, style = MaterialTheme.typography.bodyMedium)
-                }
+    val pal = LocalPalette.current
+    // Which match is unfolded per link (absent: the first one; "": none), and "How it was found".
+    val unfolded = remember { mutableStateMapOf<Long, String>() }
+    val stepsShown = remember { mutableStateMapOf<Long, Boolean>() }
+    // "Download & play": play it as soon as the download lands.
+    var playWhenReady by remember { mutableStateOf<Suggestion?>(null) }
+    val done by DownloadManager.downloaded.collectAsState()
+    LaunchedEffect(done, playWhenReady) {
+        val want = playWhenReady ?: return@LaunchedEffect
+        val id = want.song?.videoId ?: return@LaunchedEffect
+        val uriStr = done[id] ?: return@LaunchedEffect
+        playWhenReady = null
+        val uri = Uri.parse(uriStr)
+        player.play(listOf(Track(
+            id = uri.lastPathSegment?.toLongOrNull() ?: -1L, uri = uri, title = want.title, artist = want.artist,
+            album = want.album ?: "", albumId = -1, durationMs = (want.song.durationSec ?: 0) * 1000L,
+            sampleRate = null, bitsPerSample = null, mime = null,
+        )), 0)
+        onOpenPlayer()
+    }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 12.dp)) {
+        if (entries.size > 1) item("clear") {
+            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("${entries.size} links", color = pal.textDim, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                Pill("Clear all", false, { Preview.stop(); SongFinder.clear() })
             }
-            state.signIn?.let { p -> item { SignInRow(p) } }
-            item { Steps(state.progress) }
-            item { FinderModelsCard() }
-            item { Row(Modifier.padding(16.dp)) { Pill("Close", false, { SongFinder.clear() }) } }
         }
-        is FinderState.Results -> ResultsView(state, player, onOpenPlayer, onOpenAlbum, onOpenArtist, onToast)
+        for (e in entries) when (val s = e.state) {
+            is FinderState.Waiting -> item("w${e.id}") { FinderHeader("In line…", s.label, e.id) }
+            is FinderState.Listening -> item("l${e.id}") { ListeningView(s, e.id) }
+            is FinderState.Working -> {
+                item("h${e.id}") { FinderHeader("Finding the song…", s.label, e.id) }
+                item("s${e.id}") { Steps(s.progress) }
+            }
+            is FinderState.Failed -> {
+                item("h${e.id}") { FinderHeader("No match", s.label, e.id) }
+                item("m${e.id}") {
+                    Row(Modifier.padding(horizontal = 16.dp, vertical = 6.dp), verticalAlignment = Alignment.Top) {
+                        Icon(Icons.Rounded.ErrorOutline, null, tint = pal.textDim, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(s.message, color = pal.textDim, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+                s.signIn?.let { p -> item("i${e.id}") { SignInRow(p, e.id) } }
+                item("s${e.id}") { Steps(s.progress) }
+                item("a${e.id}") { FinderModelsCard(onlyMissing = true) }
+            }
+            is FinderState.Results -> {
+                item("h${e.id}") {
+                    val songs = s.suggestions.mapNotNull { it.part }.distinct().size
+                    FinderHeader(
+                        if (songs >= 2) "$songs songs in this video" else "Best matches",
+                        (if (songs >= 2) "In the order they play · " else "Most likely first · ") + s.label, e.id,
+                    )
+                }
+                val open = unfolded[e.id] ?: s.suggestions.firstOrNull()?.let { keyOf(it) } ?: ""
+                itemsIndexed(s.suggestions, key = { i, it -> "${e.id}-$i-" + keyOf(it) }) { i, sug ->
+                    SuggestionRow(i + 1, sug, expanded = open == keyOf(sug), onClick = { unfolded[e.id] = if (open == keyOf(sug)) "" else keyOf(sug) },
+                        player = player, onOpenAlbum = onOpenAlbum, onOpenArtist = onOpenArtist, onToast = onToast,
+                        onDownloadAndPlay = { playWhenReady = it })
+                }
+                item("s${e.id}") {
+                    val shown = stepsShown[e.id] == true
+                    Column(Modifier.padding(top = 8.dp)) {
+                        Text(
+                            if (shown) "Hide how it was found" else "How it was found",
+                            color = pal.accent, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.clickable { stepsShown[e.id] = !shown }.padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                        if (shown) Steps(s.progress)
+                    }
+                }
+                item("a${e.id}") { FinderModelsCard(onlyMissing = true) }
+            }
+        }
     }
 }
 
 /** "Sign in to Instagram" — then the same link is tried again by itself. */
 @Composable
-private fun SignInRow(p: com.ltots.app.identify.Platform) {
+private fun SignInRow(p: com.ltots.app.identify.Platform, id: Long) {
     Row(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
         Pill("Sign in to ${p.label}", true, {
-            com.ltots.app.ui.components.SignInHost.open(com.ltots.app.ui.components.SignInTarget.Site(p)) { SongFinder.retry() }
+            com.ltots.app.ui.components.SignInHost.open(com.ltots.app.ui.components.SignInTarget.Site(p)) { SongFinder.retry(id) }
         })
     }
 }
 
+/** A link's title, with the X that stops it or closes its results. */
 @Composable
-private fun FinderHeader(title: String, label: String) {
+private fun FinderHeader(title: String, label: String, id: Long) {
     val pal = LocalPalette.current
-    Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 6.dp)) {
-        Text(title, style = MaterialTheme.typography.titleMedium, color = pal.text)
-        Text(label, color = pal.textFaint, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    Row(Modifier.padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, color = pal.text)
+            Text(label, color = pal.textFaint, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        IconButton(onClick = { Preview.stop(); SongFinder.cancel(id) }) { Icon(Icons.Rounded.Close, "Close", tint = pal.textDim) }
     }
 }
 
 @Composable
-private fun ListeningView(s: FinderState.Listening) {
+private fun ListeningView(s: FinderState.Listening, id: Long) {
     val pal = LocalPalette.current
     val pulse = rememberInfiniteTransition(label = "pulse")
     val p by pulse.animateFloat(1f, 1.12f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "p")
     val level by animateFloatAsState(s.level, label = "level")
-    Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Box(contentAlignment = Alignment.Center) {
+    Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(Modifier.padding(top = 20.dp), contentAlignment = Alignment.Center) {
             Box(Modifier.size(150.dp).scale(p + level * 0.35f).clip(CircleShape).background(pal.accent.copy(alpha = 0.18f)))
             Box(Modifier.size(104.dp).clip(CircleShape).background(pal.accent), contentAlignment = Alignment.Center) {
                 Icon(Icons.Rounded.Mic, null, tint = pal.onAccent, modifier = Modifier.size(44.dp))
@@ -202,7 +263,7 @@ private fun ListeningView(s: FinderState.Listening) {
         Text("Listening…", style = MaterialTheme.typography.titleMedium, color = pal.text)
         Text("Hold the phone near the music · ${s.secondsLeft} s", color = pal.textDim, style = MaterialTheme.typography.bodySmall)
         Spacer(Modifier.height(16.dp))
-        Pill("Cancel", false, { SongFinder.cancel() })
+        Pill("Cancel", false, { SongFinder.cancel(id) })
     }
 }
 
@@ -237,64 +298,6 @@ private fun Steps(p: IdentifyProgress) {
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun ResultsView(
-    s: FinderState.Results,
-    player: PlayerUi,
-    onOpenPlayer: () -> Unit,
-    onOpenAlbum: (String) -> Unit,
-    onOpenArtist: (String) -> Unit,
-    onToast: (String) -> Unit,
-) {
-    val pal = LocalPalette.current
-    var open by remember(s) { mutableStateOf(s.suggestions.firstOrNull()?.let { keyOf(it) }) }
-    var showSteps by remember(s) { mutableStateOf(false) }
-    // "Download & play": play it as soon as the download lands.
-    var playWhenReady by remember { mutableStateOf<Suggestion?>(null) }
-    val done by DownloadManager.downloaded.collectAsState()
-    LaunchedEffect(done, playWhenReady) {
-        val want = playWhenReady ?: return@LaunchedEffect
-        val id = want.song?.videoId ?: return@LaunchedEffect
-        val uriStr = done[id] ?: return@LaunchedEffect
-        playWhenReady = null
-        val uri = Uri.parse(uriStr)
-        player.play(listOf(Track(
-            id = uri.lastPathSegment?.toLongOrNull() ?: -1L, uri = uri, title = want.title, artist = want.artist,
-            album = want.album ?: "", albumId = -1, durationMs = (want.song.durationSec ?: 0) * 1000L,
-            sampleRate = null, bitsPerSample = null, mime = null,
-        )), 0)
-        onOpenPlayer()
-    }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 12.dp)) {
-        item("head") {
-            Row(Modifier.padding(start = 16.dp, end = 8.dp, top = 14.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    val songs = s.suggestions.mapNotNull { it.part }.distinct().size
-                    Text(if (songs >= 2) "$songs songs in this video" else "Best matches", style = MaterialTheme.typography.titleMedium, color = pal.text)
-                    Text(if (songs >= 2) "In the order they play · ${s.label}" else "Most likely first · ${s.label}", color = pal.textFaint, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                IconButton(onClick = { Preview.stop(); SongFinder.clear() }) { Icon(Icons.Rounded.Close, "Close", tint = pal.textDim) }
-            }
-        }
-        itemsIndexed(s.suggestions, key = { i, it -> "$i-" + keyOf(it) }) { i, sug ->
-            SuggestionRow(i + 1, sug, expanded = open == keyOf(sug), onClick = { open = if (open == keyOf(sug)) null else keyOf(sug) },
-                player = player, onOpenAlbum = onOpenAlbum, onOpenArtist = onOpenArtist, onToast = onToast,
-                onDownloadAndPlay = { playWhenReady = it })
-        }
-        item("steps") {
-            Column(Modifier.padding(top = 8.dp)) {
-                Text(
-                    if (showSteps) "Hide how it was found" else "How it was found",
-                    color = pal.accent, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.clickable { showSteps = !showSteps }.padding(horizontal = 16.dp, vertical = 8.dp),
-                )
-                if (showSteps) Steps(s.progress)
-            }
-        }
-        item("models") { FinderModelsCard(onlyMissing = true) }
     }
 }
 

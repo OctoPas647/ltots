@@ -193,6 +193,13 @@ private fun Register(target: ScrollTarget) {
 fun GlassScrollbar(host: ScrollbarHost, show: ScrollbarShow, modifier: Modifier = Modifier) {
     val target = host.target ?: return
     if (show == ScrollbarShow.OFF) return
+    // Everything about a held slider belongs to one list: a different list starts it afresh
+    // (the drag used to stay "held" forever when the list changed under it).
+    androidx.compose.runtime.key(target) { ScrollbarFor(target, show, modifier) }
+}
+
+@Composable
+private fun ScrollbarFor(target: ScrollTarget, show: ScrollbarShow, modifier: Modifier) {
     val canScroll by remember(target) { derivedStateOf { target.canScroll } }
     if (!canScroll) return
     val pal = LocalPalette.current

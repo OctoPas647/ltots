@@ -47,12 +47,16 @@ class NetEase(private val base: String = "https://music.163.com") {
             val songs = runCatching {
                 JSONObject(body).optJSONObject("result")?.optJSONArray("songs") ?: JSONArray()
             }.getOrNull() ?: continue
-            for (i in 0 until songs.length()) {
-                val o = songs.optJSONObject(i) ?: continue
-                val id = o.optLong("id"); if (id <= 0L) continue
-                val candTitle = o.optString("name")
-                val candArtist = o.optJSONArray("artists")?.optJSONObject(0)?.optString("name").orEmpty()
-                val durationSec = o.optLong("duration") / 1000.0
+            // By name, artist and length first; only the likeliest few have their lyrics read.
+            val likely = (0 until songs.length()).mapNotNull { i ->
+                val o = songs.optJSONObject(i) ?: return@mapNotNull null
+                val id = o.optLong("id"); if (id <= 0L) return@mapNotNull null
+                val who = o.optJSONArray("artists")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it)?.optString("name") } }.orEmpty().joinToString(", ")
+                val c = Candidate(o.optString("name"), who, o.optJSONObject("album")?.optString("name").orEmpty(), o.optLong("duration") / 1000.0, null, null, false)
+                val fit = SongMatch.identity(q, artist, title, c)
+                if (fit > 0) Triple(id, c, fit) else null
+            }.sortedByDescending { it.third }.take(3)
+            for ((id, c0, fit) in likely) {
                 val lyricBody = runCatching {
                     fetch("$base/api/song/lyric?id=$id&lv=1&kv=1&tv=-1")
                 }.getOrNull() ?: continue
@@ -60,13 +64,9 @@ class NetEase(private val base: String = "https://music.163.com") {
                     JSONObject(lyricBody).optJSONObject("lrc")?.optString("lyric").orEmpty()
                 }.getOrDefault("")
                 if (lrc.isBlank()) continue
-                val c = Candidate(
-                    title = candTitle, artist = candArtist, album = "",
-                    durationSec = durationSec,
-                    synced = lrc, plain = null, instrumental = false,
-                )
-                val score = SongMatch.score(q, artist, title, c)
-                if (score > bestScore) { best = c to "$artist — $title"; bestScore = score }
+                val c = c0.copy(synced = lrc)
+                if (!LyricsQuality.ok(q, c, fromNetEase = true)) continue
+                if (fit > bestScore) { best = c to "$artist — $title"; bestScore = fit }
             }
             if (best?.first?.synced != null) return best
         }

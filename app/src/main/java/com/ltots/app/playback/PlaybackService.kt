@@ -99,7 +99,15 @@ class PlaybackService : MediaSessionService() {
             this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        session = MediaSession.Builder(this, player)
+        // In shuffle with repeat on, Back at the song the shuffle started on restarts it, rather
+        // than wrapping round to the end of the order (a song you never played).
+        val sessionPlayer = object : androidx.media3.common.ForwardingPlayer(player) {
+            private fun atShuffleStart() = player.shuffleModeEnabled && player.repeatMode == Player.REPEAT_MODE_ALL &&
+                !player.currentTimeline.isEmpty && player.currentMediaItemIndex == player.currentTimeline.getFirstWindowIndex(true)
+            override fun seekToPrevious() { if (atShuffleStart()) player.seekTo(0L) else super.seekToPrevious() }
+            override fun seekToPreviousMediaItem() { if (atShuffleStart()) player.seekTo(0L) else super.seekToPreviousMediaItem() }
+        }
+        session = MediaSession.Builder(this, sessionPlayer)
             .setSessionActivity(openApp)
             .setMediaButtonPreferences(sleepButtons())
             .setCallback(object : MediaSession.Callback {
@@ -195,6 +203,7 @@ class PlaybackService : MediaSessionService() {
             session = null
         }
         exo = null
+        com.ltots.app.audio.Crossfade.detach()
         AudioEngine.releasePlayer()
         super.onDestroy()
     }

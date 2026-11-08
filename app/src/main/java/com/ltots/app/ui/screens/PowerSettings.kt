@@ -148,18 +148,27 @@ internal fun SleepTimerSettings() {
     val context = LocalContext.current
     val settings by AudioEngine.settings.collectAsState()
     SectionTitle("App settings · sleep timer")
+    Text("Timer from the notification", color = pal.text, style = MaterialTheme.typography.bodyMedium)
     Text(
-        "Start it from the moon on the Playing tab, or the moon in the notification (that one starts the length below; tap it again to stop).",
-        color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 8.dp),
+        "The moon in the notification always starts this length: ${minutesLabel(settings.sleepMinutes)}. Tap it again to stop. " +
+            "The moon on the Playing tab lets you pick each time.",
+        color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 2.dp),
     )
-    Text("Notification moon starts", color = pal.text, style = MaterialTheme.typography.bodyMedium)
     FlowRow(Modifier.padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         settings.sleepPresets.forEach { m ->
             Pill(minutesLabel(m), m == settings.sleepMinutes, { AudioEngine.updateSettings { it.copy(sleepMinutes = m) } })
         }
     }
     var editing by remember { mutableStateOf(false) }
-    Pill("Edit lengths", false, { editing = true }, Modifier.padding(bottom = 6.dp))
+    var custom by remember { mutableStateOf(false) }
+    Row(Modifier.padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Pill("Custom length", false, { custom = true })
+        Pill("Edit lengths", false, { editing = true })
+    }
+    if (custom) CustomMinutesDialog(onDismiss = { custom = false }) { m ->
+        AudioEngine.updateSettings { s -> s.copy(sleepPresets = (s.sleepPresets + m).distinct().sorted().takeLast(8).let { l -> if (m in l) l else (l.drop(1) + m).sorted() }, sleepMinutes = m) }
+        custom = false
+    }
     if (editing) EditPresetsDialog(settings.sleepPresets, onDismiss = { editing = false }) { list ->
         AudioEngine.updateSettings { s -> s.copy(sleepPresets = list, sleepMinutes = if (s.sleepMinutes in list) s.sleepMinutes else list.first()) }
         editing = false
@@ -220,6 +229,42 @@ private fun EditPresetsDialog(current: List<Int>, onDismiss: () -> Unit, onSave:
         },
         confirmButton = { TextButton({ onSave(parsed) }, enabled = parsed.isNotEmpty()) { Text("Save") } },
         dismissButton = { TextButton(onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun CustomMinutesDialog(onDismiss: () -> Unit, onSave: (Int) -> Unit) {
+    var text by remember { mutableStateOf("") }
+    val minutes = text.trim().toIntOrNull()?.takeIf { it in 1..600 }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Timer length") },
+        text = {
+            androidx.compose.material3.OutlinedTextField(
+                text, { text = it }, singleLine = true, label = { Text("Minutes (1–600)") },
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+            )
+        },
+        confirmButton = { TextButton({ minutes?.let(onSave) }, enabled = minutes != null) { Text("Use") } },
+        dismissButton = { TextButton(onDismiss) { Text("Cancel") } },
+    )
+}
+
+/** Profile > App settings · fading from one song into the next. */
+@UnstableApi
+@Composable
+internal fun CrossfadeSettings() {
+    val settings by AudioEngine.settings.collectAsState()
+    SectionTitle("App settings · between songs")
+    SwitchRow(
+        "Fade into the next song", settings.crossfade, { on -> AudioEngine.updateSettings { it.copy(crossfade = on) } },
+        sub = "The song fades out while the next one fades in over it. Power-saving playback and Bit-perfect USB can't overlap two songs: " +
+            "Power-saving pauses while this is on, and with Bit-perfect USB songs don't fade.",
+    )
+    if (settings.crossfade) LabeledSlider(
+        "Fade length", settings.crossfadeSeconds.toFloat(),
+        { v -> AudioEngine.updateSettings { it.copy(crossfadeSeconds = v.roundToInt()) } },
+        1f..12f, "${settings.crossfadeSeconds} s", steps = 10,
     )
 }
 

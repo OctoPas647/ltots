@@ -503,6 +503,9 @@ private fun AppSettingsCard() {
 
             ScreenOffSettings()
             SleepTimerSettings()
+            CrossfadeSettings()
+            DownloadSettingsSection()
+            Spacer(Modifier.height(10.dp))
 
             SectionTitle("App settings · quality & battery")
             SwitchRow(

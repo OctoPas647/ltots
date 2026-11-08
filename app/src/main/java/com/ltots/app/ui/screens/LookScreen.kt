@@ -43,6 +43,8 @@ import com.ltots.app.ui.theme.glowShades
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.getValue
@@ -89,7 +91,22 @@ fun LookScreen(artwork: android.graphics.Bitmap? = null, top: @Composable () -> 
     fun set(t: (ThemeConfig) -> ThemeConfig) = ThemeState.update(t)
     var resetAsk by remember { mutableStateOf(false) }
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = topInset()).padding(horizontal = 14.dp)) {
+    // Opening the page builds it a piece at a time, so the slide-in stays smooth (it all used to
+    // be built in one go inside the first frame of the animation). Where you were is restored after.
+    val scroll = rememberScrollState()
+    val restoreTo = remember { scroll.value }
+    var stage by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    LaunchedEffect(Unit) {
+        while (stage < 7) {
+            androidx.compose.runtime.withFrameNanos { }
+            androidx.compose.runtime.withFrameNanos { }
+            stage++
+        }
+        if (restoreTo > 0) scroll.scrollTo(restoreTo)
+    }
+
+    CompositionLocalProvider(com.ltots.app.ui.components.LocalSliderThrottle provides 48L) {
+    Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(top = topInset()).padding(horizontal = 14.dp)) {
         top()
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -137,9 +154,12 @@ fun LookScreen(artwork: android.graphics.Bitmap? = null, top: @Composable () -> 
         }
 
 
+        if (stage > 0) {
         Spacer(Modifier.height(12.dp))
         ColorCard(cfg, ::set)
 
+        }
+        if (stage > 1) {
         Spacer(Modifier.height(12.dp))
         GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
             Column(Modifier.padding(16.dp)) {
@@ -187,18 +207,21 @@ fun LookScreen(artwork: android.graphics.Bitmap? = null, top: @Composable () -> 
             }
         }
 
+        }
+        if (stage > 2) {
         Spacer(Modifier.height(12.dp))
         PagesSetting(cfg.swipeTabs) { on -> set { it.copy(swipeTabs = on) } }
 
+        }
+        if (stage > 3) {
         Spacer(Modifier.height(12.dp))
         GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
             Column(Modifier.padding(16.dp)) {
                 SectionTitle("Library page")
                 SwitchRow(
-                    "Clock & icons on Library", cfg.libraryStatusBar && !cfg.hideStatusBar, { on -> set { it.copy(libraryStatusBar = on) } },
-                    sub = if (cfg.hideStatusBar) "Hide status bar is on (Profile > App settings), so they're hidden everywhere: the Library's top menu sits at the very top of the screen."
-                    else "Off: hidden on the Library, and its top menu moves up to the very top of the screen, logo in the top-left corner. On: the menu sits right below them.",
-                    enabled = !cfg.hideStatusBar,
+                    "Clock & icons on Library", cfg.libraryStatusBar, { on -> set { it.copy(libraryStatusBar = on) } },
+                    sub = "Off: hidden on the Library, and its top menu moves up to the very top of the screen, logo in the top-left corner. " +
+                        "On: the Library shows them and the menu sits right below, even with Hide status bar on in App settings.",
                 )
                 Spacer(Modifier.height(6.dp))
                 Text("Scroll slider", color = pal.text, fontWeight = FontWeight.SemiBold)
@@ -217,6 +240,8 @@ fun LookScreen(artwork: android.graphics.Bitmap? = null, top: @Composable () -> 
             }
         }
 
+        }
+        if (stage > 4) {
         Spacer(Modifier.height(12.dp))
         GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
             Column(Modifier.padding(16.dp)) {
@@ -253,6 +278,8 @@ fun LookScreen(artwork: android.graphics.Bitmap? = null, top: @Composable () -> 
             }
         }
 
+        }
+        if (stage > 5) {
         Spacer(Modifier.height(12.dp))
         GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
             Column(Modifier.padding(16.dp)) {
@@ -406,13 +433,19 @@ fun LookScreen(artwork: android.graphics.Bitmap? = null, top: @Composable () -> 
             }
         }
 
+        }
+        if (stage > 6) {
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
             Pill("Reset everything to default", false, { resetAsk = true })
         }
+        }
         Spacer(Modifier.height(bottomChrome()))
     }
+    }
 }
+
+private const val MIN_ACCENT_BRIGHTNESS = 0.5f
 
 private fun pct(v: Float) = "%.0f%%".format(Locale.ROOT, v * 100)
 
@@ -459,9 +492,19 @@ private fun ColorCard(cfg: ThemeConfig, set: ((ThemeConfig) -> ThemeConfig) -> U
     // value: hue never touches saturation or brightness, and so on, whatever the colour.
     val argb = if (glow) cfg.glow else cfg.accent
     val hsv = Hsv.resolve(argb, if (glow) cfg.glowHsv else cfg.accentHsv)
+    // Without outlines the accent can't go below half brightness: sliders and buttons would vanish.
+    val minBrightness = if (!glow && !cfg.sliderOutlines) MIN_ACCENT_BRIGHTNESS else 0f
     fun setHsv(n: Hsv) {
-        val v = n.toArgb()
-        set { if (glow) it.copy(glow = v, glowHsv = n) else it.copy(accent = v, accentHsv = n) }
+        val h = if (n.v < minBrightness) n.copy(v = minBrightness) else n
+        val v = h.toArgb()
+        set { if (glow) it.copy(glow = v, glowHsv = h) else it.copy(accent = v, accentHsv = h) }
+    }
+    LaunchedEffect(cfg.sliderOutlines, cfg.accent) {
+        val a = Hsv.resolve(cfg.accent, cfg.accentHsv)
+        if (!cfg.sliderOutlines && a.v < MIN_ACCENT_BRIGHTNESS) {
+            val h = a.copy(v = MIN_ACCENT_BRIGHTNESS)
+            set { it.copy(accent = h.toArgb(), accentHsv = h) }
+        }
     }
 
     GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.05f) {
@@ -492,9 +535,13 @@ private fun ColorCard(cfg: ThemeConfig, set: ((ThemeConfig) -> ThemeConfig) -> U
                 Brush.horizontalGradient(listOf(Color.hsv(hsv.h, 0f, maxOf(hsv.v, 0.35f)), Color.hsv(hsv.h, 1f, maxOf(hsv.v, 0.35f)))),
             ) { v -> setHsv(hsv.copy(s = v)) }
             GradientSlider(
-                "Brightness", pct(hsv.v), hsv.v, 0f..1f,
+                "Brightness", pct(hsv.v), hsv.v, minBrightness..1f,
                 Brush.horizontalGradient(listOf(Color.Black, Color.hsv(hsv.h, hsv.s, 1f))),
             ) { v -> setHsv(hsv.copy(v = v)) }
+            SwitchRow(
+                "Outlines on sliders", cfg.sliderOutlines, { on -> set { it.copy(sliderOutlines = on) } },
+                sub = "On: every slider has an outline, and Brightness can go all the way down to black. Off: no outlines, and Brightness stops at 50 % so nothing disappears.",
+            )
         }
     }
 }
@@ -513,13 +560,19 @@ private fun GradientSlider(
     onChange: (Float) -> Unit,
 ) {
     val pal = LocalPalette.current
+    val throttled = com.ltots.app.ui.components.rememberThrottled(com.ltots.app.ui.components.LocalSliderThrottle.current, onChange)
+    @Suppress("NAME_SHADOWING") val value = throttled.drag ?: value
+    val outlined = LocalThemeConfig.current.sliderOutlines
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(label, color = pal.textDim, style = MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.weight(1f))
             Text(valueText, color = pal.text, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
         }
-        Box(Modifier.fillMaxWidth().padding(vertical = 8.dp).height(26.dp)) {
+        Box(
+            Modifier.fillMaxWidth().padding(vertical = 8.dp).height(26.dp)
+                .then(if (outlined) Modifier.border(1.5.dp, pal.text.copy(alpha = 0.8f), RoundedCornerShape(13.dp)) else Modifier)
+        ) {
             Canvas(Modifier.fillMaxSize().clip(RoundedCornerShape(13.dp))) {
                 drawRect(brush)
                 val r = size.height / 2
@@ -531,7 +584,7 @@ private fun GradientSlider(
                     style = androidx.compose.ui.graphics.drawscope.Stroke(width = 4f))
             }
             androidx.compose.material3.Slider(
-                value = value.coerceIn(range.start, range.endInclusive), onValueChange = onChange, valueRange = range,
+                value = value.coerceIn(range.start, range.endInclusive), onValueChange = { throttled.change(it) }, onValueChangeFinished = { throttled.finish() }, valueRange = range,
                 modifier = Modifier.fillMaxSize(),
                 colors = androidx.compose.material3.SliderDefaults.colors(
                     thumbColor = Color.Transparent, activeTrackColor = Color.Transparent, inactiveTrackColor = Color.Transparent,

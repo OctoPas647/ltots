@@ -259,10 +259,15 @@ data class ThemeConfig(
     /**
      * The clock and status icons on the Library page. Off (default): they're hidden there and the
      * top menu moves up to the very top of the screen, logo in the top-left corner beside the
-     * camera. On: the menu sits right below them. (Hide status bar in App settings hides them
-     * everywhere, this page included.)
+     * camera. On: the menu sits right below them. (This also holds when Hide status bar in App settings
+     * hides them everywhere else.)
      */
     val libraryStatusBar: Boolean = false,
+    /**
+     * Outlines on every slider (Look > Colours). On: the accent can go all the way to black, the
+     * outline keeps the sliders visible. Off: no outlines, and its Brightness stops at 50 %.
+     */
+    val sliderOutlines: Boolean = false,
     /** The Library's liquid-glass scroll slider on the right edge. */
     val scrollbarShow: ScrollbarShow = ScrollbarShow.SCROLLING,
     /** The slider runs down behind the mini player and nav bar; off: it ends just above them. */
@@ -340,6 +345,9 @@ data class AppSettings(
     val sleepFadeSeconds: Int = 30,
     /** Sleep timer: when the time is up, let the song that's playing finish first. */
     val sleepFinishSong: Boolean = false,
+    /** Fade from one song into the next, the two overlapping (Profile > App settings). */
+    val crossfade: Boolean = false,
+    val crossfadeSeconds: Int = 6,
     /** Profile: show the card with how efficiently the last listening session played. */
     val batteryStats: Boolean = true,
 )
@@ -444,7 +452,7 @@ object Json {
         put("freeze", t.freezeVisualizer); put("gFlow", t.gradientFlow)
         put("beat", t.coverBeat); put("beatK", t.beatStrength.toDouble()); put("beatSrc", t.beatSource.name); t.coverBarsOpacity?.let { put("coverBars", it.toDouble()) }
         put("libGlass", t.libraryHeaderGlass)
-        put("libStatus", t.libraryStatusBar); put("sbShow", t.scrollbarShow.name); put("sbFull", t.scrollbarFullHeight)
+        put("libStatus", t.libraryStatusBar); put("sliderOutlines", t.sliderOutlines); put("sbShow", t.scrollbarShow.name); put("sbFull", t.scrollbarFullHeight)
         put("tFade", t.playingTopFade); put("tFadeS", t.topFadeStart.toDouble()); put("tFadeL", t.topFadeLength.toDouble())
         put("tFadeD", t.topFadeDarkness.toDouble()); put("glowDown", t.glowReachDown.toDouble())
     }
@@ -513,6 +521,7 @@ object Json {
             coverBarsOpacity = if (o.has("coverBars")) o.optDouble("coverBars").toFloat().coerceIn(0f, 1f).takeIf { it < 0.999f } else null,
             libraryHeaderGlass = o.optBoolean("libGlass", d.libraryHeaderGlass),
             libraryStatusBar = o.optBoolean("libStatus", d.libraryStatusBar),
+            sliderOutlines = o.optBoolean("sliderOutlines", d.sliderOutlines),
             scrollbarShow = runCatching { ScrollbarShow.valueOf(o.optString("sbShow")) }.getOrDefault(d.scrollbarShow),
             scrollbarFullHeight = o.optBoolean("sbFull", d.scrollbarFullHeight),
             playingTopFade = o.optBoolean("tFade", d.playingTopFade),
@@ -544,6 +553,7 @@ object Json {
         put("sleepPresets", JSONArray(s.sleepPresets))
         put("sleepMin", s.sleepMinutes)
         put("sleepFade", s.sleepFade); put("sleepFadeS", s.sleepFadeSeconds)
+        put("crossfade", s.crossfade); put("crossfadeS", s.crossfadeSeconds)
         put("sleepFinish", s.sleepFinishSong)
         put("batteryStats", s.batteryStats)
     }
@@ -575,6 +585,8 @@ object Json {
         sleepMinutes = o.optInt("sleepMin", 30).coerceIn(1, 600),
         sleepFade = o.optBoolean("sleepFade", true),
         sleepFadeSeconds = o.optInt("sleepFadeS", 30).coerceIn(5, 120),
+        crossfade = o.optBoolean("crossfade", false),
+        crossfadeSeconds = o.optInt("crossfadeS", 6).coerceIn(1, 12),
         sleepFinishSong = o.optBoolean("sleepFinish", false),
         batteryStats = o.optBoolean("batteryStats", true),
     )

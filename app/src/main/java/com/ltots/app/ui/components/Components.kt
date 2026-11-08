@@ -11,7 +11,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
@@ -23,8 +25,11 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -44,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import com.ltots.app.ui.theme.LocalPalette
 import com.ltots.app.ui.theme.LocalThemeConfig
 import com.ltots.app.ui.theme.toColor
+import kotlinx.coroutines.launch
 import kotlin.math.PI
 import kotlin.math.sin
 
@@ -128,10 +134,12 @@ fun LabeledSlider(
                 trailing()
             }
         }
-        Slider(
-            value = value.coerceIn(range.start, range.endInclusive),
-            onValueChange = onChange,
-            onValueChangeFinished = onChangeFinished,
+        val throttleMs = LocalSliderThrottle.current
+        val throttled = rememberThrottled(throttleMs, onChange)
+        LSlider(
+            value = (if (throttleMs > 0) throttled.drag ?: value else value).coerceIn(range.start, range.endInclusive),
+            onValueChange = { if (throttleMs > 0) throttled.change(it) else onChange(it) },
+            onValueChangeFinished = { if (throttleMs > 0) throttled.finish(); onChangeFinished?.invoke() },
             valueRange = range,
             steps = steps,
             enabled = enabled,
@@ -150,6 +158,96 @@ fun LabeledSlider(
             ),
         )
     }
+}
+
+/**
+ * How often (ms) a held slider tells the app its new value; 0: every move. On the Look page a new
+ * value redraws the whole app, so there the thumb follows the finger by itself and the look
+ * catches up a few times a second, instead of every frame of the drag waiting for that redraw.
+ */
+val LocalSliderThrottle = androidx.compose.runtime.compositionLocalOf { 0L }
+
+@Stable
+internal class ThrottledSlider(private val scope: kotlinx.coroutines.CoroutineScope, private val everyMs: Long) {
+    /** Where the thumb is while it's held. */
+    var drag by mutableStateOf<Float?>(null)
+    var send: (Float) -> Unit = {}
+    private var job: kotlinx.coroutines.Job? = null
+    private var lastAt = 0L
+    private var pending: Float? = null
+
+    fun change(v: Float) {
+        drag = v
+        val now = android.os.SystemClock.uptimeMillis()
+        val wait = everyMs - (now - lastAt)
+        if (wait <= 0) {
+            job?.cancel(); job = null; pending = null; lastAt = now
+            send(v)
+        } else {
+            pending = v
+            if (job == null) job = scope.launch {
+                kotlinx.coroutines.delay(wait)
+                job = null
+                pending?.let { pending = null; lastAt = android.os.SystemClock.uptimeMillis(); send(it) }
+            }
+        }
+    }
+
+    fun finish() {
+        job?.cancel(); job = null
+        pending?.let { pending = null; send(it) }
+        drag = null
+    }
+}
+
+@Composable
+internal fun rememberThrottled(everyMs: Long, onChange: (Float) -> Unit): ThrottledSlider {
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val t = remember(everyMs) { ThrottledSlider(scope, everyMs) }
+    t.send = onChange
+    return t
+}
+
+/** The app's slider: with Outlines on (Look > Colours) it has an outline, so it shows at any colour. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun LSlider(
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    onValueChangeFinished: (() -> Unit)? = null,
+    valueRange: ClosedFloatingPointRange<Float> = 0f..1f,
+    steps: Int = 0,
+    colors: androidx.compose.material3.SliderColors = SliderDefaults.colors(),
+) {
+    if (!LocalThemeConfig.current.sliderOutlines) {
+        Slider(
+            value = value, onValueChange = onValueChange, modifier = modifier, enabled = enabled,
+            onValueChangeFinished = onValueChangeFinished, valueRange = valueRange, steps = steps, colors = colors,
+        )
+        return
+    }
+    val pal = LocalPalette.current
+    val edge = pal.text.copy(alpha = 0.8f)
+    val pill = RoundedCornerShape(50)
+    val span = (valueRange.endInclusive - valueRange.start).coerceAtLeast(1e-6f)
+    val fraction = ((value - valueRange.start) / span).coerceIn(0f, 1f)
+    Slider(
+        value = value, onValueChange = onValueChange, modifier = modifier, enabled = enabled,
+        onValueChangeFinished = onValueChangeFinished, colors = colors,
+        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+        steps = steps,
+        thumb = {
+            Box(Modifier.size(22.dp).clip(CircleShape).background(pal.accent).border(1.5.dp, edge, CircleShape))
+        },
+        track = {
+            Box(Modifier.fillMaxWidth().height(10.dp).clip(pill).background(pal.text.copy(alpha = 0.08f)).border(1.dp, edge, pill)) {
+                Box(Modifier.fillMaxWidth(fraction).fillMaxHeight().background(pal.accent))
+            }
+        },
+        valueRange = valueRange,
+    )
 }
 
 @Composable
@@ -178,18 +276,20 @@ fun SwitchRow(
 }
 
 /**
- * The app's on/off switch. The dot is the same size on and off — only its position and colour
- * change (Material's switch grows the dot when it's on, which looked inconsistent).
+ * The app's on/off switch, in the style of Nothing's phones: flat and monochrome. On: a solid
+ * white track with the red dot. Off: a dark track with a thin outline and a grey dot. The dot is
+ * the same size either way; only its place and colour change.
  */
 @Composable
 fun LSwitch(checked: Boolean, onChange: (Boolean) -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true) {
     val pal = LocalPalette.current
     val pos by androidx.compose.animation.core.animateFloatAsState(
-        if (checked) 1f else 0f, androidx.compose.animation.core.tween(160), label = "switch",
+        if (checked) 1f else 0f, androidx.compose.animation.core.tween(140), label = "switch",
     )
-    val track = androidx.compose.ui.graphics.lerp(pal.text.copy(alpha = 0.12f), pal.accent, pos)
-    val thumb = androidx.compose.ui.graphics.lerp(pal.text.copy(alpha = 0.7f), pal.onAccent, pos)
-    val border = pal.text.copy(alpha = 0.18f * (1f - pos))
+    val onTrack = if (pal.dark) Color.White else Color(0xFF111111)
+    val track = androidx.compose.ui.graphics.lerp(pal.text.copy(alpha = 0.07f), onTrack, pos)
+    val thumb = androidx.compose.ui.graphics.lerp(pal.text.copy(alpha = 0.5f), NothingRed, pos)
+    val border = pal.text.copy(alpha = 0.42f * (1f - pos))
     Box(
         modifier
             .size(width = SwitchW, height = SwitchH)
@@ -217,9 +317,10 @@ fun LSwitch(checked: Boolean, onChange: (Boolean) -> Unit, modifier: Modifier = 
     }
 }
 
+private val NothingRed = Color(0xFFD71921)
 private val SwitchW = 52.dp
-private val SwitchH = 32.dp
-private val SwitchPad = 5.dp
+private val SwitchH = 30.dp
+private val SwitchPad = 7.dp
 
 /** Small pill-shaped choice chip. */
 @Composable

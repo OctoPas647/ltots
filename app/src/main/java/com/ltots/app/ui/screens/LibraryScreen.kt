@@ -5,7 +5,6 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -161,7 +160,6 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenHistory: () 
     var query by rememberSaveable { mutableStateOf("") }
     var view by rememberSaveable { mutableStateOf(LibView.SONGS) }
     var openGroup by remember { mutableStateOf<Group?>(null) }
-    BackHandler(enabled = openGroup != null) { openGroup = null }
 
     // The order of the Songs list (and so what plays next): a button's pick on this page, kept
     // until the app restarts, or else the one in App settings. Neither changes the other.
@@ -207,8 +205,8 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenHistory: () 
     // moves up to the top of the screen: the logo in the top-left corner, level with the camera
     // (kept inside the screen's rounded corner, and below the camera if it's right above).
     // With the clock shown (Look > Library page), the menu sits right below it.
-    val compactTop = !cfg.libraryStatusBar || cfg.hideStatusBar
-    PageBars.HideStatusBar(compactTop && !cfg.hideStatusBar)
+    val compactTop = !cfg.libraryStatusBar
+    PageBars.StatusBar(hide = compactTop && !cfg.hideStatusBar, show = cfg.libraryStatusBar && cfg.hideStatusBar)
     val area = rememberTopArea()
     val sidePad = if (headerGlass) 30.dp else 16.dp
     val screenWidth = LocalConfiguration.current.screenWidthDp.dp
@@ -324,7 +322,9 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenHistory: () 
             ) { launcher.launch(arrayOf(audioPerm)) }
             tracks.isEmpty() && allTracks.isNotEmpty() -> EmptyState("No songs yet", "Only recordings and sounds were found. Tap All to see them.", "Show all") { showAll = true }
             tracks.isEmpty() -> EmptyState("No songs found", "Put some music files on your phone (any folder) and they'll show up here.", null) {}
-            openGroup != null -> GroupDetail(openGroup!!, player, bottom, onBack = { openGroup = null }, onPlayed = onOpenPlayer)
+            openGroup != null -> com.ltots.app.ui.components.SwipeBackPage("Library group", onBack = { openGroup = null }) {
+                GroupDetail(openGroup!!, player, bottom, onBack = { openGroup = null }, onPlayed = onOpenPlayer)
+            }
             view == LibView.SONGS -> SongList(
                 remember(filtered, sortBy, if (sortBy == SongSort.COLOR) colors else null) { SongSorter.sort(filtered, sortBy, colors) },
                 player, bottom, onOpenPlayer,
@@ -527,7 +527,7 @@ private fun AlbumGrid(groups: List<Group>, bottom: Dp, onOpen: (Group) -> Unit) 
     LazyVerticalGrid(GridCells.Adaptive(150.dp), Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(start = 2.dp, end = 2.dp, top = LocalListTop.current + 4.dp, bottom = bottom),
         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         items(groups, key = { it.tracks.first().albumId }) { g ->
-            Column(Modifier.clip(RoundedCornerShape(14.dp)).clickable { onOpen(g) }) {
+            Column(Modifier.clip(RoundedCornerShape(14.dp)).clickable { onOpen(g) }.padding(bottom = 10.dp)) {
                 Box(Modifier.fillMaxWidth().aspectRatio(1f)) { BigThumb(g.tracks.first().id) }
                 Spacer(Modifier.height(6.dp))
                 Text(g.title, color = pal.text, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -581,7 +581,7 @@ private fun MixGridBody(mixes: List<Mix>, bottom: Dp, onOpen: (Mix) -> Unit) {
                 }
             }
             items(group, key = { it.id }) { m ->
-                Column(Modifier.clip(RoundedCornerShape(14.dp)).clickable { onOpen(m) }) {
+                Column(Modifier.clip(RoundedCornerShape(14.dp)).clickable { onOpen(m) }.padding(bottom = 10.dp)) {
                     Box(Modifier.fillMaxWidth().aspectRatio(1f)) { BigThumb(m.tracks.first().id) }
                     Spacer(Modifier.height(6.dp))
                     Text(m.title, color = pal.text, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)

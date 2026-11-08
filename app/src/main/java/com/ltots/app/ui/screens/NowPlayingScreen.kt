@@ -39,7 +39,6 @@ import androidx.compose.material.icons.rounded.Usb
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -51,6 +50,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clip
@@ -99,7 +102,9 @@ fun NowPlayingScreen(
 ) {
     // Nothing playing (or the history asked for): the songs played lately, YouTube Music style.
     if (!player.hasMedia || showHistory) {
-        HistoryPage(player, onPlayed = { onShowHistory(false) }, onBack = if (player.hasMedia) ({ onShowHistory(false) }) else null, onOpenEq = onOpenEq)
+        com.ltots.app.ui.components.SwipeBackPage("History", enabled = player.hasMedia, onBack = { onShowHistory(false) }) {
+            HistoryPage(player, onPlayed = { onShowHistory(false) }, onBack = if (player.hasMedia) ({ onShowHistory(false) }) else null, onOpenEq = onOpenEq)
+        }
         return
     }
     val pal = LocalPalette.current
@@ -117,7 +122,7 @@ fun NowPlayingScreen(
         // same line (both centred on it).
         var chipHeight by remember { mutableStateOf(36.dp) }
         val density = androidx.compose.ui.platform.LocalDensity.current
-        Box(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 14.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.zIndex(2f).fillMaxWidth().padding(top = 10.dp, bottom = 14.dp), contentAlignment = Alignment.Center) {
             com.ltots.app.ui.glass.GlassCircleButton({ onShowHistory(true) }, Modifier.align(Alignment.CenterEnd).size(chipHeight)) {
                 Icon(Icons.Rounded.History, "History", tint = pal.text, modifier = Modifier.size(chipHeight * 0.56f))
             }
@@ -158,6 +163,8 @@ fun NowPlayingScreen(
             // No icon (or it can't be read): the cover with the visualizer, as usual.
             com.ltots.app.ui.components.IconLoad.None -> CoverWithSpectrum(visual, artwork)
         }
+        // Over the cover, under everything after it and the buttons at the top.
+        TopFadeOverlay()
 
         Spacer(Modifier.height(18.dp))
         Text(player.title, style = MaterialTheme.typography.headlineSmall, color = pal.text, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -169,7 +176,7 @@ fun NowPlayingScreen(
         // Seek bar
         var dragging by remember { mutableStateOf<Float?>(null) }
         val dur = player.durationMs.coerceAtLeast(1)
-        Slider(
+        com.ltots.app.ui.components.LSlider(
             value = dragging ?: (player.positionMs.toFloat() / dur).coerceIn(0f, 1f),
             onValueChange = { dragging = it },
             onValueChangeFinished = { dragging?.let { player.controller?.seekTo((it * dur).toLong()) }; dragging = null },
@@ -233,6 +240,31 @@ fun NowPlayingScreen(
         EqShortcut(onOpenEq)
         Spacer(Modifier.height(bottomChrome()))
     }
+}
+
+/**
+ * Top fade (Look > Visualizer): black at the top of the screen, clearing further down, over the
+ * cover too. Drawn fixed to the screen, so the cover pumps with the beat under it and the page
+ * scrolls under it while the fade itself never moves.
+ */
+@Composable
+private fun TopFadeOverlay() {
+    val cfg = com.ltots.app.ui.theme.LocalThemeConfig.current
+    if (!com.ltots.app.ui.TopFade.on(cfg)) return
+    val view = androidx.compose.ui.platform.LocalView.current
+    val at = remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+    Spacer(
+        Modifier.fillMaxWidth().height(1.dp)
+            .onGloballyPositioned { at.value = it.positionInWindow() }
+            .drawBehind {
+                val h = view.height.toFloat()
+                drawRect(
+                    com.ltots.app.ui.TopFade.overlay(cfg, -at.value.y, h),
+                    topLeft = androidx.compose.ui.geometry.Offset(-at.value.x, -at.value.y),
+                    size = androidx.compose.ui.geometry.Size(view.width.toFloat(), h),
+                )
+            }
+    )
 }
 
 /**
@@ -391,7 +423,7 @@ private fun PitchSpeedCard() {
                 Spacer(Modifier.width(8.dp))
                 Pill("Reset", false, { setCents(0) })
             }
-            Slider(
+            com.ltots.app.ui.components.LSlider(
                 value = semis.toFloat().coerceIn(-12f, 12f),
                 // Whole semitones; the fine slider below keeps its cents.
                 onValueChange = { v -> AudioEngine.setPitch((v.roundToInt() * 100 + fine).coerceIn(-1200, 1200)) },
@@ -402,7 +434,7 @@ private fun PitchSpeedCard() {
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Fine", color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(36.dp))
-                Slider(
+                com.ltots.app.ui.components.LSlider(
                     value = fine.toFloat().coerceIn(-50f, 50f),
                     onValueChange = { v ->
                         val base = fineBase ?: semis.also { fineBase = it }
@@ -443,7 +475,7 @@ private fun PitchSpeedCard() {
                     Text("Mids", color = pal.textDim, modifier = Modifier.weight(1f))
                     Text(pitchLabel(cents), color = pal.text, fontWeight = FontWeight.SemiBold)
                 }
-                Slider(
+                com.ltots.app.ui.components.LSlider(
                     value = (cents / 100f).coerceIn(-12f, 12f),
                     onValueChange = { v -> AudioEngine.setPitch(v.roundToInt() * 100) },
                     steps = 23,
@@ -464,7 +496,7 @@ private fun PitchSpeedCard() {
                 Spacer(Modifier.width(8.dp))
                 Pill("Reset", false, { AudioEngine.previewSpeed(1f); AudioEngine.commit() })
             }
-            Slider(
+            com.ltots.app.ui.components.LSlider(
                 value = speed.coerceIn(0.5f, 2f),
                 onValueChange = { AudioEngine.previewSpeed((it * 100).roundToInt() / 100f) },
                 onValueChangeFinished = { AudioEngine.commit() },

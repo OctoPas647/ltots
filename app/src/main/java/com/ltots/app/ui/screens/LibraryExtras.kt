@@ -16,7 +16,6 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -105,7 +104,7 @@ private fun ToggleRow(title: String, sub: String, on: Boolean, onChange: (Boolea
             Text(sub, color = pal.textDim, style = MaterialTheme.typography.bodySmall)
         }
         Spacer(Modifier.width(8.dp))
-        Switch(on, onChange)
+        com.ltots.app.ui.components.LSwitch(on, onChange)
     }
 }
 

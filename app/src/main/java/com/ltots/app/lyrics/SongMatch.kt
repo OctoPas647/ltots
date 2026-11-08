@@ -160,20 +160,94 @@ object SongMatch {
     }
 
     /** Lengths must agree: lyrics for a different edit would drift out of sync. */
-    const val MAX_LENGTH_DIFF_SEC = 4.0
+    const val MAX_LENGTH_DIFF_SEC = 3.0
+
+    // "- 2011 Remaster", "(Album Version)", "- Radio Edit": the same recording under another label.
+    private val sameRecording = Regex(
+        """\s*[-–—(\[]\s*(?:(?:\d{4}\s*)?(?:digital(?:ly)?\s*)?remaster(?:ed)?(?:\s*\d{4})?(?:\s*version)?|(?:album|single|radio|original|stereo|mono)\s*(?:version|edit|mix))\s*[)\]]?""",
+        RegexOption.IGNORE_CASE,
+    )
+    // Words that mean a different recording of the song: its lyrics or timing won't fit.
+    private val otherVersion = Regex(
+        """\b(?:remix|live|acoustic|instrumental|karaoke|cover|sped|slowed|nightcore|daycore|demo|unplugged|reverb|mashup|edit|mix)\b""",
+        RegexOption.IGNORE_CASE,
+    )
+    private fun versionsIn(t: String): Set<String> =
+        otherVersion.findAll(t.replace(sameRecording, "")).map { it.value.lowercase(Locale.ROOT) }.toSet()
+
+    private val artistSplit = Regex("""\s*(?:,|;|/|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\s&\s|\band\b|\bwith\b|\bx\b)\s*""", RegexOption.IGNORE_CASE)
+    private fun names(a: String): List<String> =
+        (a.replace(topic, "").split(artistSplit) + a.replace(topic, "")).map { norm(it).removePrefix("the ") }.filter { it.isNotBlank() }.distinct()
+
+    /** The artist tag, when it says anything. */
+    fun knownArtist(q: SongQuery): String? =
+        q.artist?.takeIf { it.isNotBlank() && !it.equals("<unknown>", true) && !it.equals("unknown artist", true) }
+
+    private fun editDistance(a: String, b: String): Int {
+        var prev = IntArray(b.length + 1) { it }
+        for (i in 1..a.length) {
+            val cur = IntArray(b.length + 1); cur[0] = i
+            for (j in 1..b.length) cur[j] = minOf(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + if (a[i - 1] == b[j - 1]) 0 else 1)
+            prev = cur
+        }
+        return prev[b.length]
+    }
 
     /**
-     * How well [c] fits [q] (0 = reject). Prefers synced lyrics; the length must match; the
-     * title must match well and, when we know the artist, so must the artist.
+     * Whether two names are the same song title (1 = exactly). "Love" and "Love Story" are not,
+     * and neither are a song and its remix or live version; a typo or "&" for "and" is forgiven.
      */
-    fun score(q: SongQuery, artist: String?, title: String, c: Candidate): Double {
+    fun titleMatch(wanted: String, found: String): Double {
+        val a = norm(cleanTitle(wanted).replace(sameRecording, ""))
+        val b = norm(cleanTitle(found).replace(sameRecording, ""))
+        if (a.isEmpty() || b.isEmpty()) return 0.0
+        if (a == b) return 1.0
+        if (versionsIn(wanted) != versionsIn(found)) return 0.0
+        if (norm(baseTitle(wanted)) == norm(baseTitle(found))) return 0.95
+        val ratio = 1.0 - editDistance(a, b).toDouble() / max(a.length, b.length)
+        return if (ratio >= 0.9) ratio else 0.0
+    }
+
+    /** Whether [found] (possibly several credited artists) includes the artist [wanted]. */
+    fun artistMatch(wanted: String, found: String): Double {
+        val w = names(wanted); val f = names(found)
+        if (w.isEmpty() || f.isEmpty()) return 0.0
+        if (w.any { it in f }) return 1.0
+        var best = 0.0
+        for (x in w) for (y in f) {
+            val short = minOf(x.length, y.length)
+            val s = when {
+                short >= 6 && (x.startsWith("$y ") || y.startsWith("$x ") || x.endsWith(" $y") || y.endsWith(" $x")) -> 0.85
+                else -> 1.0 - editDistance(x, y).toDouble() / max(x.length, y.length)
+            }
+            best = max(best, s)
+        }
+        return best
+    }
+
+    /**
+     * How well the name, artist and length of [c] fit [q] (0 = not this song), not looking at
+     * the lyrics themselves. The artist has to match whenever the file says who it is, also for
+     * a search by title alone; with no artist at all, only an exact title of the same length counts.
+     */
+    fun identity(q: SongQuery, artist: String?, title: String, c: Candidate): Double {
         val lenDiff = abs(c.durationSec - q.durationMs / 1000.0)
         if (q.durationMs > 0 && lenDiff > MAX_LENGTH_DIFF_SEC) return 0.0
-        val ts = max(similarity(title, c.title), similarity(title, cleanTitle(c.title)))
-        if (ts < 0.6) return 0.0
-        val asim = if (artist == null) 0.7 else max(similarity(artist, c.artist), similarity(artist, mainArtist(c.artist)))
-        if (artist != null && asim < 0.5) return 0.0
+        val ts = max(titleMatch(title, c.title), titleMatch(q.title, c.title))
+        if (ts < 0.9) return 0.0
+        val who = artist ?: knownArtist(q)
+        if (who == null && (q.durationMs <= 0 || lenDiff > 2.0 || ts < 1.0)) return 0.0
+        val asim = if (who == null) 0.7 else artistMatch(who, c.artist)
+        if (who != null && asim < 0.8) return 0.0
         val lenScore = if (q.durationMs > 0) 1.0 - lenDiff / (MAX_LENGTH_DIFF_SEC * 2) else 0.6
+        val album = if (!q.album.isNullOrBlank() && c.album.isNotBlank() && norm(q.album) == norm(c.album)) 0.03 else 0.0
+        return ts * 0.3 + asim * 0.25 + lenScore * 0.3 + album
+    }
+
+    /** How well [c] fits [q] (0 = reject): [identity], then whether it has lyrics, synced best. */
+    fun score(q: SongQuery, artist: String?, title: String, c: Candidate): Double {
+        val id = identity(q, artist, title, c)
+        if (id == 0.0) return 0.0
         val content = when {
             !c.synced.isNullOrBlank() -> 1.0
             c.instrumental -> 0.8
@@ -181,9 +255,48 @@ object SongMatch {
             else -> 0.0
         }
         if (content == 0.0) return 0.0
-        return ts * 0.35 + asim * 0.25 + lenScore * 0.2 + content * 0.2
+        return id + content * 0.15
     }
 
+    /** The best fit: synced lyrics first, then the closest match. */
     fun best(q: SongQuery, artist: String?, title: String, cs: List<Candidate>): Candidate? =
-        cs.map { it to score(q, artist, title, it) }.filter { it.second > 0 }.maxByOrNull { it.second }?.first
+        cs.map { it to score(q, artist, title, it) }.filter { it.second > 0 }
+            .maxWithOrNull(compareBy<Pair<Candidate, Double>> { !it.first.synced.isNullOrBlank() }.thenBy { it.second })?.first
+}
+
+/** Catches lyrics that are garbled, or plainly belong to a different recording. */
+object LyricsQuality {
+    private val credit = Regex("""^\s*(?:作词|作曲|编曲|制作人|混音|母带|监制|吉他|贝斯|鼓|和声|录音|出品|人声|弦乐|Lyrics by|Composed by|Written by|Producer)\s*[:：].*""", RegexOption.IGNORE_CASE)
+    private val stamp = Regex("""\[[^\]]*]""")
+    private val mojibake = Regex("""[ÃÂÐÑØÙ][\u0080-\u00BF\u0152-\u0178\u20AC\u201A-\u2122]|â€""")
+
+    /** Without the credit lines NetEase puts in front of the words. */
+    fun withoutCredits(lines: List<LyricLine>): List<LyricLine> = lines.filterNot { credit.matches(it.text) }
+
+    private fun isHan(c: Char) = Character.UnicodeScript.of(c.code) == Character.UnicodeScript.HAN
+    private fun isLatinName(s: String) = s.any { it.isLetter() } && s.filter { it.isLetter() }.all { Character.UnicodeScript.of(it.code) == Character.UnicodeScript.LATIN }
+
+    /** Whether the words of [c] can be real lyrics of [q]. */
+    fun ok(q: SongQuery, c: Candidate, fromNetEase: Boolean = false): Boolean {
+        val synced = c.synced?.let { Lrc.parse(it) }?.let(::withoutCredits)
+        val text = synced?.joinToString("\n") { it.text } ?: c.plain?.replace(stamp, "").orEmpty()
+        if (text.isBlank()) return c.instrumental
+        if ('\uFFFD' in text) return false
+        val ink = text.count { !it.isWhitespace() }
+        if (ink == 0 || mojibake.findAll(text).count() * 2.0 / ink > 0.02) return false
+        if (text.count { it.isLetter() }.toDouble() / ink < 0.6) return false
+        if (q.durationMs > 60_000 && text.lines().map { it.trim() }.filter { it.isNotEmpty() }.distinct().size < 3) return false
+        if (synced != null && synced.isNotEmpty() && q.durationMs > 0) {
+            val last = synced.last { it.text.isNotBlank() || it === synced.last() }.timeMs
+            if (last > q.durationMs + 5_000 || last < q.durationMs * 0.4) return false
+        }
+        if (fromNetEase) {
+            if ("纯音乐" in text) return false
+            // Chinese words for a song whose title and artist aren't: a wrong entry.
+            val han = text.count(::isHan).toDouble() / text.count { it.isLetter() }.coerceAtLeast(1)
+            val kanaOrHangul = text.any { Character.UnicodeScript.of(it.code).let { s -> s == Character.UnicodeScript.HIRAGANA || s == Character.UnicodeScript.KATAKANA || s == Character.UnicodeScript.HANGUL } }
+            if (han > 0.5 && !kanaOrHangul && isLatinName(q.title + (q.artist ?: ""))) return false
+        }
+        return true
+    }
 }

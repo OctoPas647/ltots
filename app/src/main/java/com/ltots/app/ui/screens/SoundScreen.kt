@@ -56,7 +56,6 @@ fun SoundScreen(onBack: () -> Unit) {
     val phoneEq by AudioEngine.phoneEq.status.collectAsState()
     val bands = (phoneEq as? com.ltots.app.audio.PhoneEq.Status.Ready)?.layout?.bandCount ?: 0
 
-    androidx.activity.compose.BackHandler(onBack = onBack)
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = topInset()).padding(horizontal = 14.dp)) {
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             com.ltots.app.ui.glass.GlassCircleButton(onBack, Modifier.size(40.dp)) {

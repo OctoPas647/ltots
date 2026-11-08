@@ -25,6 +25,7 @@ class MainActivity : ComponentActivity() {
 
     private var bars: ThemeConfig = ThemeState.config.value
     private var hideStatusForPage = false
+    private var showStatusForPage = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -37,9 +38,11 @@ class MainActivity : ComponentActivity() {
             val cfg by ThemeState.config.collectAsState()
             // A page can hide the status bar while it's open (the Library, by default).
             val pageHidesStatus by com.ltots.app.ui.PageBars.hideStatus.collectAsState()
-            LaunchedEffect(cfg.hideNavBar, cfg.hideStatusBar, cfg.darkMode, pageHidesStatus) {
+            val pageShowsStatus by com.ltots.app.ui.PageBars.showStatus.collectAsState()
+            LaunchedEffect(cfg.hideNavBar, cfg.hideStatusBar, cfg.darkMode, pageHidesStatus, pageShowsStatus) {
                 bars = cfg
                 hideStatusForPage = pageHidesStatus
+                showStatusForPage = pageShowsStatus
                 applySystemBars()
             }
             LaunchedEffect(cfg.maxRefresh) { applyRefreshRate(cfg.maxRefresh) }
@@ -135,7 +138,7 @@ class MainActivity : ComponentActivity() {
         c.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         if (bars.hideNavBar) c.hide(WindowInsetsCompat.Type.navigationBars())
         else c.show(WindowInsetsCompat.Type.navigationBars())
-        if (bars.hideStatusBar || hideStatusForPage) c.hide(WindowInsetsCompat.Type.statusBars())
+        if ((bars.hideStatusBar && !showStatusForPage) || hideStatusForPage) c.hide(WindowInsetsCompat.Type.statusBars())
         else c.show(WindowInsetsCompat.Type.statusBars())
         // Dark icons on light themes, light icons on dark ones.
         c.isAppearanceLightStatusBars = !bars.darkMode

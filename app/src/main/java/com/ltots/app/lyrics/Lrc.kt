@@ -19,6 +19,8 @@ data class LyricsDoc(
     val note: String = "",
     /** Length of the recording these lyrics were timed to (s), when the database says; not saved. */
     val recordSec: Double? = null,
+    /** The on-device AI has checked these lines' timing against the song (done once). */
+    val tuned: Boolean = false,
 ) {
     val isEmpty: Boolean get() = synced.isNullOrEmpty() && plain.isNullOrBlank() && !instrumental
 
@@ -32,6 +34,7 @@ data class LyricsDoc(
         put("source", source)
         put("as", matchedAs)
         if (note.isNotBlank()) put("note", note)
+        if (tuned) put("tuned", true)
     }
 
     companion object {
@@ -42,6 +45,7 @@ data class LyricsDoc(
             source = o.optString("source"),
             matchedAs = o.optString("as"),
             note = o.optString("note"),
+            tuned = o.optBoolean("tuned"),
         )
     }
 }

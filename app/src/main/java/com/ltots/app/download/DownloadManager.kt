@@ -24,8 +24,10 @@ import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 
+const val MAX_DOWNLOADS_AT_ONCE = 10
+
 data class DownloadSettings(
-    val concurrency: Int = 3,
+    val concurrency: Int = MAX_DOWNLOADS_AT_ONCE,
     val preferOfficialAudio: Boolean = true,
 )
 
@@ -74,8 +76,8 @@ object DownloadManager {
      * few hours, so a read-ahead is only used while fresh.
      */
     private val readAhead = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.Deferred<Downloader.Prefetched?>>()
-    private val readAheadGate = kotlinx.coroutines.sync.Semaphore(2)
-    private const val READ_AHEAD = 2
+    private val readAheadGate = kotlinx.coroutines.sync.Semaphore(4)
+    private const val READ_AHEAD = 4
     private const val READ_AHEAD_FRESH_MS = 2 * 3600_000L
 
     private fun readAheadFor(videoId: String): kotlinx.coroutines.Deferred<Downloader.Prefetched?> =
@@ -125,7 +127,9 @@ object DownloadManager {
                 val sp = o.optJSONArray("synced") ?: JSONArray()
                 _synced.value = List(sp.length()) { SyncedPlaylist.fromJson(sp.getJSONObject(it)) }
                 o.optJSONObject("settings")?.let {
-                    _settings.value = DownloadSettings(it.optInt("conc", 3).coerceIn(1, 6), it.optBoolean("official", true))
+                    // Set once to the new limit; "ten" marks a choice made since it went up to 10.
+                    val conc = if (it.optBoolean("ten")) it.optInt("conc", MAX_DOWNLOADS_AT_ONCE) else MAX_DOWNLOADS_AT_ONCE
+                    _settings.value = DownloadSettings(conc.coerceIn(1, MAX_DOWNLOADS_AT_ONCE), it.optBoolean("official", true))
                 }
             }
         }
@@ -142,7 +146,7 @@ object DownloadManager {
             o.put("tasks", JSONArray().apply { keep.forEach { put(it.toJson()) } })
             o.put("index", JSONObject(_downloaded.value as Map<*, *>))
             o.put("synced", JSONArray().apply { _synced.value.forEach { put(it.toJson()) } })
-            o.put("settings", JSONObject().put("conc", _settings.value.concurrency).put("official", _settings.value.preferOfficialAudio))
+            o.put("settings", JSONObject().put("conc", _settings.value.concurrency).put("ten", true).put("official", _settings.value.preferOfficialAudio))
             val f = File(root, "downloads.json")
             val tmp = File(root, "downloads.json.tmp")
             tmp.writeText(o.toString())
@@ -195,6 +199,26 @@ object DownloadManager {
     }
 
     fun enqueueSong(s: YtSong) = enqueue(listOf(TrackMeta.from(s)))
+
+    private val linkLookups = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    /**
+     * Queues a pasted song link without making the caller wait for its details, so the next link
+     * can be pasted at once. False when the song is already here or on its way.
+     */
+    fun enqueueLink(videoId: String): Boolean {
+        if (isDownloaded(videoId) || isQueued(videoId) || !linkLookups.add(videoId)) return false
+        scope.launch {
+            try {
+                val s = runCatching { InnerTube.song(videoId) }.getOrNull()
+                    ?: YtSong(videoId, Downloader.PLACEHOLDER_TITLE, emptyList(), isVideo = true)
+                enqueueSong(s)
+            } finally {
+                linkLookups.remove(videoId)
+            }
+        }
+        return true
+    }
 
     /** Downloads a whole album, keeping its track order and album metadata. */
     fun enqueueAlbum(album: Collection, only: Set<String>? = null): Int = enqueue(
@@ -269,7 +293,7 @@ object DownloadManager {
     }
 
     fun updateSettings(transform: (DownloadSettings) -> DownloadSettings) {
-        _settings.value = transform(_settings.value).let { it.copy(concurrency = it.concurrency.coerceIn(1, 6)) }
+        _settings.value = transform(_settings.value).let { it.copy(concurrency = it.concurrency.coerceIn(1, MAX_DOWNLOADS_AT_ONCE)) }
         save()
         pump()
     }
@@ -330,7 +354,7 @@ object DownloadManager {
             val result = downloader.download(pid, meta, lossless = lossless, prefetched = prefetched, onProgress = { p, line ->
                 val now = System.currentTimeMillis()
                 if (line == "tagging") updateTask(task.id) { it.copy(state = TaskState.TAGGING, progress = 1f) }
-                else if (now - lastUi > 250) {
+                else if (now - lastUi > 500) {
                     lastUi = now
                     update(save = false) { l -> l.map { if (it.id == task.id && it.state == TaskState.DOWNLOADING) it.copy(progress = p) else it } }
                 }

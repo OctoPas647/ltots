@@ -256,17 +256,43 @@ object AudioEngine : SoundSource {
                 if (isPlaying) com.ltots.app.recs.SongPreview.stop()
             }
             override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+                if (p.shuffleModeEnabled) shuffleFromCurrent(p)
                 updateDirect(); snapshotUpcoming(); prepareBeats(); keepRenderedFiles(); maybePreRender()
             }
             override fun onRepeatModeChanged(repeatMode: Int) = snapshotUpcoming()
-            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) = snapshotUpcoming()
+            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+                shuffledQueue = 0
+                if (shuffleModeEnabled) shuffleFromCurrent(p)
+                snapshotUpcoming()
+            }
             override fun onAudioSessionIdChanged(audioSessionId: Int) = syncPhoneEq()
         })
         _player.value = p
         onSongChanged(p.currentMediaItem)
         applySpeedToPlayer()
         syncPhoneEq()
+        if (initialized) Crossfade.attach(context, p)
         return p
+    }
+
+    /** Which queue the current shuffle order was made for (0: none). */
+    private var shuffledQueue = 0
+
+    /**
+     * Shuffle starts at the song that's playing, then goes through the rest in random order. Left
+     * to the player, that song lands somewhere in the middle of the order, and Back then runs
+     * into songs that never played. This way Back retraces exactly what was played.
+     */
+    private fun shuffleFromCurrent(p: ExoPlayer) {
+        val n = p.mediaItemCount
+        if (n < 2) return
+        // A pre-rendered copy swapped in is still the same queue.
+        val queue = (0 until n).fold(n) { h, i -> 31 * h + p.getMediaItemAt(i).mediaId.substringBefore(PreRender.ID_SUFFIX).hashCode() }.let { if (it == 0) 1 else it }
+        if (queue == shuffledQueue) return
+        shuffledQueue = queue
+        val cur = p.currentMediaItemIndex.coerceIn(0, n - 1)
+        val order = intArrayOf(cur) + (0 until n).filter { it != cur }.shuffled().toIntArray()
+        p.setShuffleOrder(androidx.media3.exoplayer.source.ShuffleOrder.DefaultShuffleOrder(order, System.nanoTime()))
     }
 
     /** Media3's audio output with LToTS' processing chain (shared with the tests). */
@@ -514,6 +540,9 @@ object AudioEngine : SoundSource {
             reapplyBitPerfect(forceRebuild = true)
         }
         if (old.batteryEq != new.batteryEq) syncPhoneEq()
+        // The notification's moon says the length it will start.
+        if (old.sleepMinutes != new.sleepMinutes) com.ltots.app.playback.SleepTimer.onChanged?.invoke()
+        if (old.crossfade != new.crossfade || old.crossfadeSeconds != new.crossfadeSeconds) Crossfade.settingsChanged()
         edited()
         updateDirect()
     }
@@ -774,7 +803,7 @@ object AudioEngine : SoundSource {
         if (!initialized) return
         val p = _player.value ?: return
         val s = settings.value
-        if (!s.preRender || !s.directPlayback || s.bitPerfectUsb || !preRenderNow()) return
+        if (!s.preRender || !s.directPlayback || s.bitPerfectUsb || s.crossfade || !preRenderNow()) return
         val idx = p.nextMediaItemIndex.takeIf { it != C.INDEX_UNSET } ?: return
         val item = p.getMediaItemAt(idx)
         if (PreRender.isRendered(item)) return
@@ -839,7 +868,7 @@ object AudioEngine : SoundSource {
 
     private fun wantsDirect(p: ExoPlayer): Boolean {
         val s = settings.value
-        if (!s.directPlayback || s.bitPerfectUsb) return false
+        if (!s.directPlayback || s.bitPerfectUsb || s.crossfade) return false
         if (!PreRender.isRendered(p.currentMediaItem)) {
             // What the UI shows right now (covers a slider that is still being dragged)...
             if (pitchSpeedNeedsProcessor(_pitchCents.value, _speed.value)) return false

@@ -11,12 +11,14 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.github.takahirom.roborazzi.captureRoboImage
+import com.ltots.app.identify.ClipSource
+import com.ltots.app.identify.FinderEntry
 import com.ltots.app.identify.FinderState
 import com.ltots.app.identify.IdentifyProgress
 import com.ltots.app.identify.Step
 import com.ltots.app.identify.StepState
 import com.ltots.app.identify.Suggestion
-import com.ltots.app.ui.screens.FinderContent
+import com.ltots.app.ui.screens.FinderList
 import com.ltots.app.ui.theme.LToTSTheme
 import com.ltots.app.ui.theme.LocalPalette
 import com.ltots.app.ytm.YtRef
@@ -48,10 +50,10 @@ class FinderUiTest {
         fraction = null,
     )
 
-    private fun show(state: FinderState) = rule.setContent {
+    private fun show(vararg states: FinderState) = rule.setContent {
         LToTSTheme {
             Box(Modifier.fillMaxSize().background(LocalPalette.current.glows.first())) {
-                FinderContent(state, PlayerUi(), {}, {}, {}, {})
+                FinderList(states.mapIndexed { i, st -> FinderEntry(i + 1L, ClipSource.Mic, st) }, PlayerUi(), {}, {}, {}, {})
             }
         }
     }
@@ -81,6 +83,13 @@ class FinderUiTest {
         rule.onNodeWithText("How it was found").performClick()
         rule.waitForIdle()
         rule.onRoot().captureRoboImage("build/ui-shots/32_finder_results_steps.png")
+    }
+
+    @Test fun severalLinksShowOneUnderTheOther() {
+        show(FinderState.Working("https://vm.tiktok.com/first/", progress), FinderState.Waiting("https://vm.tiktok.com/second/"))
+        rule.onNodeWithText("Finding the song…").assertIsDisplayed()
+        rule.onNodeWithText("In line…").assertIsDisplayed()
+        rule.onNodeWithText("Clear all").assertIsDisplayed()
     }
 
     @Test fun listening() {

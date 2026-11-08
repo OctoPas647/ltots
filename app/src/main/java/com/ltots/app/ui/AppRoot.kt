@@ -232,6 +232,22 @@ fun AppRoot() {
         }
     }
 
+    // Back on a tab with nothing open: to Home, and on Home a second press within 2 s closes the
+    // app. Registered before the pages, so a page with something to close goes first.
+    val backContext = androidx.compose.ui.platform.LocalContext.current
+    val lastBackAt = remember { longArrayOf(0L) }
+    androidx.activity.compose.BackHandler {
+        if (tab != Tab.HOME) { goTo(Tab.HOME, "back"); return@BackHandler }
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - lastBackAt[0] < 2_000L) {
+            CrashReport.step("close the app (back twice on Home)")
+            (backContext as? android.app.Activity)?.finish()
+        } else {
+            lastBackAt[0] = now
+            android.widget.Toast.makeText(backContext, "Press back again to close", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
     /** Straight to [t] without animating (links from outside the app, notifications). */
     suspend fun jumpTo(t: Tab) {
         switchJob[0]?.cancel()
@@ -336,8 +352,12 @@ fun AppRoot() {
                 ) { o ->
                     holder.SaveableStateProvider(o?.name ?: "tabs") {
                         when (o) {
-                            Overlay.SOUND -> SoundScreen(onBack = { CrashReport.step("close SOUND (back)"); overlay = null })
-                            Overlay.EQ -> EqScreen(player, onBack = { CrashReport.step("close EQ (back)"); overlay = null })
+                            Overlay.SOUND -> com.ltots.app.ui.components.SwipeBackPage("SOUND", keepOffset = true, onBack = { overlay = null }) {
+                                SoundScreen(onBack = { CrashReport.step("close SOUND (back)"); overlay = null })
+                            }
+                            Overlay.EQ -> com.ltots.app.ui.components.SwipeBackPage("EQ", keepOffset = true, onBack = { overlay = null }) {
+                                EqScreen(player, onBack = { CrashReport.step("close EQ (back)"); overlay = null })
+                            }
                             null -> TabPages(
                                 pager, swipe, pageEnter, enterPage, enterRisePx,
                             ) { t ->
@@ -461,7 +481,9 @@ private fun ProfileTab(artwork: android.graphics.Bitmap?, showLook: Boolean, onS
         label = "profileLook",
     ) { look ->
         holder.SaveableStateProvider(if (look) "look" else "profile") {
-            if (look) LookScreen(artwork, top = switch) else ProfileScreen(top = switch)
+            if (look) com.ltots.app.ui.components.SwipeBackPage("Look", keepOffset = true, onBack = { onShowLook(false) }) {
+                LookScreen(artwork, top = switch)
+            } else ProfileScreen(top = switch)
         }
     }
 }

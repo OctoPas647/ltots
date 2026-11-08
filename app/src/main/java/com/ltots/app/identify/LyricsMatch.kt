@@ -61,6 +61,39 @@ object LyricsMatch {
         }
     }
 
+    /**
+     * No lyrics database had this exact song: the AI recognises the song that's playing by itself
+     * and finds its lyrics. If it can't, [Lyrics.gaveUp] decides what to show.
+     */
+    fun auto(context: Context, q: SongQuery, trackId: Long, previous: LyricsDoc?) {
+        job?.cancel()
+        val app = context.applicationContext
+        job = scope.launch {
+            Lyrics.showMatching(q.key, "Listening to the song to recognise it…")
+            try {
+                Lyrics.saveMatched(q.key, match(app, q, trackId) { Lyrics.showMatching(q.key, it) })
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                withContext(Dispatchers.IO) { Lyrics.gaveUp(q, previous) }
+            }
+        }
+    }
+
+    private var tuneJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * Synced lyrics that came from a database: with the speech model installed, the AI listens
+     * once for how far off they are (late, early, or drifting) and corrects them.
+     */
+    fun tune(context: Context, key: String, trackId: Long, doc: LyricsDoc, durationMs: Long) {
+        tuneJob?.cancel()
+        if (doc.tuned || doc.synced == null || trackId < 0 || durationMs <= 0 || Lyrics.isAiMatch(doc)) return
+        if (!com.ltots.app.lyrics.AiSync.modelReady.value) return
+        val app = context.applicationContext
+        tuneJob = scope.launch { runCatching { Lyrics.saveTuned(key, refine(app, doc, trackId, durationMs) {}) } }
+    }
+
     suspend fun match(context: Context, q: SongQuery, trackId: Long, onStatus: (String) -> Unit): LyricsDoc = withContext(Dispatchers.Default) {
         if (trackId < 0) throw Failed("The AI match works on songs saved on the phone.")
         onStatus("Listening to the song…")
@@ -76,7 +109,9 @@ object LyricsMatch {
                 .maxWith(compareBy<List<Moment>> { it.size }.thenBy { g -> -g.minOf { abs(it.hit.timeSkew) } })
             val hit = song.first().hit
             onStatus("It's ${hit.artist} — ${hit.title}. Getting its lyrics…")
-            val doc = lyricsFor(q.key, hit.title, hit.artist, hit.album)
+            // The record's own length is unknown here; this file's is the best first guess.
+            val doc = runCatching { Lyrics.lookup(SongQuery(q.key, hit.title, hit.artist, hit.album, q.durationMs)) }.getOrNull()
+                ?: lyricsFor(q.key, hit.title, hit.artist, hit.album)
                 ?: throw Failed("It's ${hit.artist} — ${hit.title}, but no lyrics database has it.")
             val fileSec = if (q.durationMs > 0) q.durationMs / 1000.0 else pcm.size / ClipAudio.RATE.toDouble()
             val lined = lineUp(doc, song, fileSec, hit)
@@ -91,10 +126,11 @@ object LyricsMatch {
             ?: throw Failed("Couldn't recognise it or make out any words.")
         val phrase = Lyricist.searchPhrase(heard.text) ?: throw Failed("Heard only “${heard.text.take(40)}” — not enough to find the song.")
         onStatus("Heard “${phrase.take(50)}” — looking it up…")
-        val song = runCatching { searchSongs(phrase) }.getOrNull().orEmpty().firstOrNull()
-            ?: throw Failed("Heard “${phrase.take(50)}”, but no song has those words.")
-        val doc = lyricsFor(q.key, song.title, song.artistText, song.album?.name)
-            ?: throw Failed("It sounds like ${song.artistText} — ${song.title}, but no lyrics database has it.")
+        // Several songs can share a phrase: the one whose lyrics hold most of what was heard.
+        val found = runCatching { searchSongs(phrase) }.getOrNull().orEmpty().take(5).mapNotNull { s ->
+            runCatching { lyricsFor(q.key, s.title, s.artistText, s.album?.name) }.getOrNull()?.let { d -> Triple(s, d, wordsShared(heard.text, d)) }
+        }.maxByOrNull { it.third }?.takeIf { it.third >= 0.3 } ?: throw Failed("Heard “${phrase.take(50)}”, but no song's lyrics have those words.")
+        val (song, doc) = found
         // No timing from the words alone: keep the record's timing only if the lengths agree.
         val sameLength = song.durationSec?.let { abs(it - q.durationMs / 1000.0) <= 4 } == true
         doc.copy(
@@ -105,11 +141,20 @@ object LyricsMatch {
         )
     }
 
-    /** Fingerprints four moments across the song; if none is known, tries the speeds edits use. */
+    /** How many of the words heard (3 letters or more) are in [doc]'s lyrics, 0..1. */
+    internal fun wordsShared(heard: String, doc: LyricsDoc): Double {
+        fun words(s: String) = com.ltots.app.lyrics.SongMatch.norm(s).split(' ').filter { it.length >= 3 }
+        val text = doc.synced?.joinToString(" ") { it.text } ?: doc.plain.orEmpty()
+        val known = words(text).toSet()
+        val said = words(heard)
+        return if (said.isEmpty() || known.isEmpty()) 0.0 else said.count { it in known }.toDouble() / said.size
+    }
+
+    /** Fingerprints six moments across the song; if none is known, tries the speeds edits use. */
     private suspend fun recognise(pcm: FloatArray, onStatus: (String) -> Unit): List<Moment> {
         val rate = ClipAudio.RATE
         val len = minOf(pcm.size, SEG * rate)
-        val starts = listOf(0.2, 0.4, 0.6, 0.8).map { ((pcm.size - len) * it).toInt() }.distinct()
+        val starts = listOf(0.12, 0.28, 0.44, 0.6, 0.76, 0.9).map { ((pcm.size - len) * it).toInt() }.distinct()
         val first = ask(pcm, starts.map { it to 1.0 })
         if (first.isNotEmpty()) return first
         for (batch in Identifier.SPEEDS.chunked(3)) {
