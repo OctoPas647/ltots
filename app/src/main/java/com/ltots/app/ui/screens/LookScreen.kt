@@ -729,7 +729,7 @@ private fun BeatAiSetting() {
             downloading -> androidx.compose.material3.LinearProgressIndicator(progress = { models.progress }, modifier = Modifier.fillMaxWidth(), color = pal.accent)
             !installed -> Pill("Download beat AI ($mb MB)", true, {
                 val app = context.applicationContext
-                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + com.ltots.app.CrashReport.guard("beat AI download")).launch {
                     val ok = runCatching { for (m in parts) com.ltots.app.identify.AiModels.download(m) }.isSuccess
                     if (ok) {
                         // The queue is the player's: read it on the main thread.

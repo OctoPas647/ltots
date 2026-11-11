@@ -1,5 +1,6 @@
 package com.ltots.app.ui.screens
 
+import androidx.compose.material.icons.rounded.Casino
 import android.widget.Toast
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -134,7 +135,7 @@ fun HomeScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenGet: () -> Unit
     LaunchedEffect(settings.chartsRegion, account) { com.ltots.app.recs.Discover.load(context) }
     // The all-time numbers start with what's already in the history (once).
     LaunchedEffect(history.isNotEmpty()) {
-        if (history.isNotEmpty()) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.ltots.app.data.ListenStats.backfill(history) }
+        if (history.isNotEmpty()) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.ltots.app.data.ListenStats.backfill(history); com.ltots.app.data.ListenStats.backfillExtras(history) }
     }
     val statsVersion by com.ltots.app.data.ListenStats.version.collectAsState()
     var showStats by rememberSaveable { mutableStateOf(false) }
@@ -185,6 +186,14 @@ fun HomeScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenGet: () -> Unit
     fun playMix(m: Mix) {
         val ids = m.tracks.mapTo(HashSet()) { it.id }
         playLocal(m.tracks + com.ltots.app.recs.LibraryRadio.similarTo(m.tracks.first(), playable, moods).filter { it.id !in ids })
+    }
+    // Rolls: mixes dealt from the library, spread over its genres; the same until re-rolled.
+    val genreTags by com.ltots.app.data.GenreFinder.genres.collectAsState()
+    val playCounts by com.ltots.app.data.PlayStats.plays.collectAsState()
+    val rolls by produceState(emptyList<com.ltots.app.data.Roll>(), playable, genreTags, settings.rollSeed) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            com.ltots.app.data.Rolls.deal(com.ltots.app.data.GenreFinder.apply(playable, genreTags), settings.rollSeed, playCounts)
+        }
     }
     val actions = SongActions(
         preview = { s -> SongPreview.toggle(s) { player.controller?.pause() } },
@@ -266,6 +275,20 @@ fun HomeScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenGet: () -> Unit
                 else if (rs.isEmpty()) item("radio0") { Hint("Couldn't load this radio — check your connection.") }
                 else item("radioq") { QuickPicks(rs, preview, actions) }
                 item("radiob") { Pill("← Back to Home", false, { radio = null }, Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
+            }
+
+            // Rolls: fresh mixes from the phone's songs, every one spread over genres.
+            if (mood == null && radio == null && rolls.isNotEmpty()) {
+                item("rollsh") {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.weight(1f)) { ShelfHeader(small = "From your library", title = "Rolls", sub = "Mixed across your genres · tap the dice for a new deal") }
+                        IconButton(
+                            onClick = { com.ltots.app.audio.AudioEngine.updateSettings { it.copy(rollSeed = kotlin.random.Random.nextLong()) } },
+                            modifier = Modifier.padding(end = 8.dp, top = 12.dp),
+                        ) { Icon(Icons.Rounded.Casino, "Re-roll", tint = pal.accent) }
+                    }
+                }
+                item("rolls") { RollCarousel(rolls) { r -> playLocal(r.tracks) } }
             }
 
             // Jump back in (Spotify's grid), from the phone
@@ -780,6 +803,32 @@ private fun PreviewBar(p: SongPreview.State, modifier: Modifier, onDownload: () 
             }
             IconButton(onClick = onDownload) { Icon(Icons.Rounded.Download, "Download", tint = pal.accent) }
             IconButton(onClick = { SongPreview.stop() }) { Icon(Icons.Rounded.Close, "Stop preview", tint = pal.text) }
+        }
+    }
+}
+
+/** Rolls: each card shows four covers from the roll (so its spread is visible), its name and how it was made. */
+@Composable
+private fun RollCarousel(rolls: List<com.ltots.app.data.Roll>, onPlay: (com.ltots.app.data.Roll) -> Unit) {
+    val pal = LocalPalette.current
+    LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        items(rolls, key = { it.id }) { r ->
+            Column(Modifier.width(150.dp).clip(RoundedCornerShape(12.dp)).combinedClickable(onClick = { onPlay(r) }).padding(bottom = 8.dp)) {
+                Box(Modifier.size(150.dp).clip(RoundedCornerShape(12.dp))) {
+                    // Four covers from different places in the roll.
+                    val picks = remember(r.id) { List(4) { i -> r.tracks[(i * r.tracks.size / 4).coerceAtMost(r.tracks.lastIndex)] } }
+                    Column {
+                        for (row in 0..1) Row {
+                            for (col in 0..1) LocalArt(picks[row * 2 + col].id, 75.dp, RoundedCornerShape(0.dp))
+                        }
+                    }
+                    Box(Modifier.matchParentSize().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.15f), Color.Black.copy(alpha = 0.78f)))))
+                    Text(r.title, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.align(Alignment.BottomStart).padding(10.dp))
+                }
+                Text("${r.tracks.size} songs · ${r.sub}", color = pal.textDim, style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
+            }
         }
     }
 }

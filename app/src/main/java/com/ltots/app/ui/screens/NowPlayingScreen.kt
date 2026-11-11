@@ -173,21 +173,9 @@ fun NowPlayingScreen(
             color = pal.textDim, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis,
         )
 
-        // Seek bar
-        var dragging by remember { mutableStateOf<Float?>(null) }
-        val dur = player.durationMs.coerceAtLeast(1)
-        com.ltots.app.ui.components.LSlider(
-            value = dragging ?: (player.positionMs.toFloat() / dur).coerceIn(0f, 1f),
-            onValueChange = { dragging = it },
-            onValueChangeFinished = { dragging?.let { player.controller?.seekTo((it * dur).toLong()) }; dragging = null },
-            colors = SliderDefaults.colors(thumbColor = pal.text, activeTrackColor = pal.accent, inactiveTrackColor = pal.text.copy(alpha = 0.15f)),
-            modifier = Modifier.padding(top = 10.dp),
-        )
-        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
-            Text(formatTime(dragging?.let { (it * dur).toLong() } ?: player.positionMs), color = pal.textDim, style = MaterialTheme.typography.bodySmall)
-            Spacer(Modifier.weight(1f))
-            Text(formatTime(player.durationMs), color = pal.textDim, style = MaterialTheme.typography.bodySmall)
-        }
+        // Seek bar: its own piece, so the position ticking along redraws only the bar and the
+        // time, never the whole Playing tab.
+        SeekBar(player)
 
         // Transport
         Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
@@ -635,3 +623,23 @@ private const val COVER_FULL = 0.82f
 /** The Playing tab's margin at the left and right. */
 private val PAGE_PAD = 18.dp
 private const val COVER_WRAPPED = 0.62f
+
+/** The seek bar with the time played and the song's length under it. */
+@Composable
+private fun SeekBar(player: PlayerUi) {
+    val pal = LocalPalette.current
+    var dragging by remember { mutableStateOf<Float?>(null) }
+    val dur = player.durationMs.coerceAtLeast(1)
+    com.ltots.app.ui.components.LSlider(
+        value = dragging ?: (player.positionMs.toFloat() / dur).coerceIn(0f, 1f),
+        onValueChange = { dragging = it },
+        onValueChangeFinished = { dragging?.let { player.controller?.seekTo((it * dur).toLong()) }; dragging = null },
+        colors = SliderDefaults.colors(thumbColor = pal.text, activeTrackColor = pal.accent, inactiveTrackColor = pal.text.copy(alpha = 0.15f)),
+        modifier = Modifier.padding(top = 10.dp),
+    )
+    Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+        Text(formatTime(dragging?.let { (it * dur).toLong() } ?: player.positionMs), color = pal.textDim, style = MaterialTheme.typography.bodySmall)
+        Spacer(Modifier.weight(1f))
+        Text(formatTime(player.durationMs), color = pal.textDim, style = MaterialTheme.typography.bodySmall)
+    }
+}

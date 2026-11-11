@@ -188,6 +188,7 @@ fun StatsDialog(onDismiss: () -> Unit, onOpenWrapped: (Int) -> Unit) {
                         Bars(s.months.toList(), labels = listOf("Jan", "Apr", "Jul", "Oct"), height = 90.dp)
                     }
                 }
+                WrappedStyle()
                 SectionTitle("Import your history", Modifier.padding(top = 22.dp))
                 ImportSection()
                 Spacer(Modifier.height(40.dp))
@@ -302,7 +303,15 @@ fun WrappedDialog(year: Int, onDismiss: () -> Unit) {
         val pal = LocalPalette.current
         val s = remember(year) { ListenStats.summary(year) }
         val library = remember { LocalLibrary.cachedSongs().orEmpty() }
-        val slides = remember(s) { wrappedSlides(s) }
+        val app by com.ltots.app.audio.AudioEngine.settings.collectAsState()
+        // Songs on the phone that have never been played at all (for the graveyard).
+        val unplayed = remember(library) {
+            val ever = ListenStats.summary(null).songs.mapTo(HashSet()) { it.key }
+            library.count { ListenStats.key(it.title, it.artist) !in ever }
+        }
+        val slides = remember(s, app.wrappedTone, app.sleepRule, app.wrappedSlides, unplayed) {
+            wrappedSlides(s, app.wrappedSlides, com.ltots.app.data.WrappedStats.lines(s, app.wrappedTone, app.sleepRule, unplayed, library.size))
+        }
         var at by remember { mutableIntStateOf(0) }
         var progress by remember { mutableStateOf(0f) }
         BackHandler { onDismiss() }
@@ -357,10 +366,17 @@ private sealed interface Slide {
     data class Summary(val s: StatsSummary) : Slide
 }
 
-private fun wrappedSlides(s: StatsSummary): List<Slide> {
+private fun wrappedSlides(s: StatsSummary, which: com.ltots.app.data.WrappedSlides, lines: List<com.ltots.app.data.WrappedLine>): List<Slide> {
     if (s.plays == 0) return listOf(Slide.Big("Wrapped ${s.year}", "Nothing yet", "Play some songs and come back."))
     val out = ArrayList<Slide>()
     out += Slide.Big("Your ${s.year}", "Wrapped", "A year of music, in a few taps.")
+    val stats = lines.map { Slide.Big(it.small, it.big, it.sub) }
+    if (which == com.ltots.app.data.WrappedSlides.STATS) {
+        out += stats
+        if (stats.isEmpty()) out += Slide.Big("Not enough yet", "Keep listening", "The stats need a little more of your year to have an opinion about.")
+        out += Slide.Summary(s)
+        return out
+    }
     val days = s.totalMs / 86_400_000.0
     out += Slide.Big("You listened for", "${minutes(s.totalMs)} minutes",
         (if (days >= 1) "That's %.1f whole days of music".format(Locale.ROOT, days) else "${num(s.plays.toLong())} plays") + ", on ${s.activeDays} different days.")
@@ -370,6 +386,7 @@ private fun wrappedSlides(s: StatsSummary): List<Slide> {
         out += Slide.Big("Your top artist", a.name, "${minutes(a.ms)} minutes, ${a.plays} plays across ${a.songs} songs.")
     }
     if (s.artists.size >= 2) out += Slide.List5("Your top artists", s.artists.take(5).map { it.name to "${minutes(it.ms)} minutes" })
+    if (which == com.ltots.app.data.WrappedSlides.BOTH) out += stats
     val peakHour = s.hours.indices.maxBy { s.hours[it] }
     val peakMonth = s.months.indices.maxBy { s.months[it] }
     out += Slide.Big("You listen most at", hourName(peakHour),
@@ -437,4 +454,32 @@ private fun Art(trackId: Long?, size: Dp) {
         if (b != null) Image(remember(b) { b.asImageBitmap() }, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         else Icon(Icons.Rounded.MusicNote, null, tint = Color.White, modifier = Modifier.size(size / 3))
     }
+}
+
+/** All stats > Wrapped style: the tone of the stat screens, what counts as asleep, which slides show. */
+@Composable
+private fun WrappedStyle() {
+    val pal = LocalPalette.current
+    val app by com.ltots.app.audio.AudioEngine.settings.collectAsState()
+    SectionTitle("Wrapped style", Modifier.padding(top = 22.dp))
+    Text("Tone", color = Color.White, style = MaterialTheme.typography.bodyMedium)
+    com.ltots.app.ui.components.SegmentedToggle(
+        com.ltots.app.data.WrappedTone.entries.map { it.label }, app.wrappedTone.ordinal, Modifier.padding(vertical = 8.dp),
+    ) { i -> com.ltots.app.audio.AudioEngine.updateSettings { it.copy(wrappedTone = com.ltots.app.data.WrappedTone.entries[i]) } }
+    Text("Asleep means", color = Color.White, style = MaterialTheme.typography.bodyMedium)
+    com.ltots.app.ui.components.SegmentedToggle(
+        com.ltots.app.data.SleepRule.entries.map { it.label }, app.sleepRule.ordinal, Modifier.padding(vertical = 8.dp),
+    ) { i -> com.ltots.app.audio.AudioEngine.updateSettings { it.copy(sleepRule = com.ltots.app.data.SleepRule.entries[i]) } }
+    Text(
+        when (app.sleepRule) {
+            com.ltots.app.data.SleepRule.NIGHT -> "A song counts when it plays between midnight and 5 am and the phone hasn't been touched for 20 minutes."
+            com.ltots.app.data.SleepRule.TIMER -> "A song counts when it plays while the sleep timer is running."
+            com.ltots.app.data.SleepRule.EITHER -> "A song counts when it plays late with the phone untouched for 20 minutes, or while the sleep timer is running."
+        },
+        color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 8.dp),
+    )
+    Text("Slides", color = Color.White, style = MaterialTheme.typography.bodyMedium)
+    com.ltots.app.ui.components.SegmentedToggle(
+        com.ltots.app.data.WrappedSlides.entries.map { it.label }, app.wrappedSlides.ordinal, Modifier.padding(vertical = 8.dp),
+    ) { i -> com.ltots.app.audio.AudioEngine.updateSettings { it.copy(wrappedSlides = com.ltots.app.data.WrappedSlides.entries[i]) } }
 }

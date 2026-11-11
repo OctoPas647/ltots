@@ -36,6 +36,14 @@ class LToTSApp : Application(), androidx.work.Configuration.Provider {
         // Waveforms (while charging) and lyrics (when online) for the whole library. Not in the
         // desktop UI tests: there the background-job service keeps the simulated phone from
         // ever going idle.
-        if (android.os.Build.FINGERPRINT != "robolectric") com.ltots.app.prep.LibraryPrep.schedule(this)
+        if (android.os.Build.FINGERPRINT != "robolectric") {
+            com.ltots.app.prep.LibraryPrep.schedule(this)
+            // The history and the listening numbers are read from storage here, in the background,
+            // so the first screen that shows them (Home) doesn't stop to read them itself.
+            Thread({
+                runCatching { com.ltots.app.data.ListenHistory.ensureLoaded() }
+                com.ltots.app.data.ListenStats.warm()
+            }, "ltots-warm").apply { priority = Thread.MIN_PRIORITY; isDaemon = true }.start()
+        }
     }
 }

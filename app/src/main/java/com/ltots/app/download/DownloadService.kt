@@ -21,7 +21,7 @@ import kotlinx.coroutines.launch
 
 /** Keeps downloads running with the screen off, with a progress notification. */
 class DownloadService : Service() {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + com.ltots.app.CrashReport.guard("download service"))
     private lateinit var nm: NotificationManager
 
     override fun onBind(intent: Intent?): IBinder? = null

@@ -78,6 +78,7 @@ object ScreenState {
 
     private fun setScreen(on: Boolean) {
         if (_screenOn.value == on) return
+        if (on) com.ltots.app.data.Awake.mark()
         _screenOn.value = on
         notifyListeners()
     }

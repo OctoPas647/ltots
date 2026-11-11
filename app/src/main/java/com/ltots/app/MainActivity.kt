@@ -46,8 +46,20 @@ class MainActivity : ComponentActivity() {
                 applySystemBars()
             }
             LaunchedEffect(cfg.maxRefresh) { applyRefreshRate(cfg.maxRefresh) }
+            // Screen on but untouched for a while: the app rests (still background, slower visualizer).
+            com.ltots.app.ui.WhileOnScreen {
+                com.ltots.app.ui.ScreenRest.wake()
+                com.ltots.app.ui.ScreenRest.run { runCatching { com.ltots.app.audio.AudioEngine.settings.value.restAfterSeconds }.getOrDefault(0) }
+            }
+            val app by com.ltots.app.audio.AudioEngine.settings.collectAsState()
+            androidx.compose.runtime.SideEffect { com.ltots.app.ui.Springs.firmness = app.motion.firmness }
             LToTSTheme { AppRoot() }
         }
+    }
+
+    override fun dispatchTouchEvent(ev: android.view.MotionEvent?): Boolean {
+        com.ltots.app.ui.ScreenRest.touched()
+        return super.dispatchTouchEvent(ev)
     }
 
     // Smoothness > Automatic: frame timings are only watched while the app is in front.

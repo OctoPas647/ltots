@@ -123,7 +123,8 @@ fun rememberLiveVisual(wave: Boolean = true): LiveVisual {
     val settings by AudioEngine.settings.collectAsState()
     val cfg = LocalThemeConfig.current
     val saver by rememberBatterySaver()
-    val fps = visualizerFps(cfg.visualizerFps, saver, com.ltots.app.ui.LocalEffects.current)
+    val resting by com.ltots.app.ui.ScreenRest.resting.collectAsState()
+    val fps = visualizerFps(cfg.visualizerFps, saver, com.ltots.app.ui.LocalEffects.current, if (resting) settings.restVisualizerFps else 0)
     val freeze = cfg.freezeVisualizer
     val lv = remember(cfg.analyzerBands) {
         LiveVisual(Analyzer(AudioEngine.tap, cfg.analyzerBands)).also { v ->
@@ -159,13 +160,14 @@ fun rememberLiveVisual(wave: Boolean = true): LiveVisual {
 }
 
 /** The visualizer's frame rate: the chosen one, capped by Battery Saver and by Smoothness. */
-fun visualizerFps(chosen: Int, batterySaver: Boolean, effects: com.ltots.app.data.Effects): Int {
+fun visualizerFps(chosen: Int, batterySaver: Boolean, effects: com.ltots.app.data.Effects, restCap: Int = 0): Int {
     val cap = when {
         batterySaver || effects == com.ltots.app.data.Effects.LIGHT -> 30
         effects == com.ltots.app.data.Effects.BALANCED -> 60
         else -> Int.MAX_VALUE
     }
-    return minOf(chosen, cap)
+    // Resting (screen on, untouched for a while): at most [restCap] frames a second; 0 = no cap.
+    return minOf(chosen, cap, if (restCap > 0) restCap else Int.MAX_VALUE)
 }
 
 @androidx.annotation.OptIn(UnstableApi::class)

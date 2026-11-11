@@ -60,6 +60,60 @@ import kotlin.math.roundToInt
 
 // Screen-off listening, the sleep timer and the battery card (Profile > App settings).
 
+/** Profile > App settings · screen on: what the app stops drawing when nobody is touching it. */
+@UnstableApi
+@Composable
+internal fun ScreenOnSettings() {
+    val pal = LocalPalette.current
+    val settings by AudioEngine.settings.collectAsState()
+    SectionTitle("App settings · screen on")
+    Text(
+        "With the screen on, most of the battery goes into redrawing the moving glass. These decide how much of that " +
+            "happens while you're only looking. Touching the screen brings everything back at once.",
+        color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 8.dp),
+    )
+
+    val restChoices = listOf(0, 5, 10, 30, 60)
+    Text("Rest when untouched for", color = pal.text, style = MaterialTheme.typography.bodyMedium)
+    SegmentedToggle(
+        restChoices.map { if (it == 0) "Never" else "$it s" }, restChoices.indexOf(settings.restAfterSeconds).coerceAtLeast(0), Modifier.padding(vertical = 8.dp),
+    ) { i -> AudioEngine.updateSettings { it.copy(restAfterSeconds = restChoices[i]) } }
+    val rests = settings.restAfterSeconds > 0
+    SwitchRow(
+        "Resting: background stands still", settings.restBackground && rests,
+        { on -> AudioEngine.updateSettings { it.copy(restBackground = on) } },
+        sub = "The drifting colours stop where they are until you touch the screen. With nothing moving, the glass isn't redrawn at all.",
+        enabled = rests,
+    )
+    val visChoices = listOf(0, 60, 30, 15)
+    Text("Resting: visualizer", color = if (rests) pal.text else pal.textFaint, style = MaterialTheme.typography.bodyMedium)
+    SegmentedToggle(
+        visChoices.map { if (it == 0) "Same" else "$it fps" }, visChoices.indexOf(settings.restVisualizerFps).coerceAtLeast(0), Modifier.padding(vertical = 8.dp),
+    ) { i -> if (rests) AudioEngine.updateSettings { it.copy(restVisualizerFps = visChoices[i]) } }
+
+    val bgChoices = listOf(0, 60, 30)
+    Text("Background motion", color = pal.text, style = MaterialTheme.typography.bodyMedium)
+    SegmentedToggle(
+        bgChoices.map { if (it == 0) "Every frame" else "$it fps" }, bgChoices.indexOf(settings.backgroundFps).coerceAtLeast(0), Modifier.padding(vertical = 8.dp),
+    ) { i -> AudioEngine.updateSettings { it.copy(backgroundFps = bgChoices[i]) } }
+    Text(
+        "How often the drifting colours move. They drift slowly, so 30 looks the same as every frame and is about a quarter of the work on a 120 Hz screen. " +
+            "(Smoothness on the Look tab can lower this further.)",
+        color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 10.dp),
+    )
+
+    SectionTitle("App settings · motion")
+    val feels = com.ltots.app.data.MotionFeel.entries
+    SegmentedToggle(feels.map { it.label }, settings.motion.ordinal, Modifier.padding(vertical = 8.dp)) { i ->
+        AudioEngine.updateSettings { it.copy(motion = feels[i]) }
+    }
+    Text(
+        "How firmly pages, bars and buttons move. Every movement can be caught or turned round mid-way and carries the speed of your finger; " +
+            "Firm arrives sooner than the old feel (Relaxed), Snappy sooner still.",
+        color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 10.dp),
+    )
+}
+
 /** Profile > App settings · screen off: what the EQ and pitch do with the screen off, and pre-render. */
 @UnstableApi
 @Composable

@@ -28,7 +28,7 @@ object Store {
     private lateinit var root: File
     /** The folder of the user in use. */
     @Volatile private lateinit var userDir: File
-    private val io = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val io = CoroutineScope(SupervisorJob() + Dispatchers.IO + com.ltots.app.CrashReport.guard("saving"))
 
     private class Pending(val file: File, val content: () -> String, val job: Job)
     private val pending = mutableMapOf<String, Pending>()

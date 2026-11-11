@@ -350,7 +350,33 @@ data class AppSettings(
     val crossfadeSeconds: Int = 6,
     /** Profile: show the card with how efficiently the last listening session played. */
     val batteryStats: Boolean = true,
+    /**
+     * Screen on: after this many seconds without a touch the app "rests" (see [restBackground],
+     * [restVisualizerFps]); 0 = never. Any touch wakes it.
+     */
+    val restAfterSeconds: Int = 10,
+    /** Resting: the moving background stands still. */
+    val restBackground: Boolean = true,
+    /** Resting: the visualizer runs at most this fast (0 = as fast as always). */
+    val restVisualizerFps: Int = 60,
+    /** The moving background's frame rate (0 = every frame the screen shows). It drifts slowly, so 30 looks the same. */
+    val backgroundFps: Int = 30,
+    /** Home > Rolls: the deal on show; the re-roll button picks a new one. */
+    val rollSeed: Long = 1L,
+    /** Wrapped: how kindly the stats are put, what counts as falling asleep, and which slides show. */
+    val wrappedTone: WrappedTone = WrappedTone.SNARKY,
+    val sleepRule: SleepRule = SleepRule.EITHER,
+    val wrappedSlides: WrappedSlides = WrappedSlides.BOTH,
+    /** How firm pages, bars and buttons move. */
+    val motion: MotionFeel = MotionFeel.FIRM,
 )
+
+/** How firm the app's springs are (see Springs.firmness). */
+enum class MotionFeel(val label: String, val firmness: Float) {
+    RELAXED("Relaxed", 0.62f),
+    FIRM("Firm", 1f),
+    SNAPPY("Snappy", 1.6f),
+}
 
 /** What the EQ does while the screen is off. */
 enum class ScreenOffEq(val label: String) {
@@ -556,6 +582,11 @@ object Json {
         put("crossfade", s.crossfade); put("crossfadeS", s.crossfadeSeconds)
         put("sleepFinish", s.sleepFinishSong)
         put("batteryStats", s.batteryStats)
+        put("restAfter", s.restAfterSeconds); put("restBg", s.restBackground)
+        put("restVisFps", s.restVisualizerFps); put("bgFps", s.backgroundFps)
+        put("motion", s.motion.name)
+        put("rollSeed", s.rollSeed)
+        put("wTone", s.wrappedTone.name); put("wSleep", s.sleepRule.name); put("wSlides", s.wrappedSlides.name)
     }
 
     fun settings(o: JSONObject) = AppSettings(
@@ -589,5 +620,14 @@ object Json {
         crossfadeSeconds = o.optInt("crossfadeS", 6).coerceIn(1, 12),
         sleepFinishSong = o.optBoolean("sleepFinish", false),
         batteryStats = o.optBoolean("batteryStats", true),
+        restAfterSeconds = o.optInt("restAfter", 10).coerceIn(0, 600),
+        restBackground = o.optBoolean("restBg", true),
+        restVisualizerFps = o.optInt("restVisFps", 60).coerceIn(0, 240),
+        backgroundFps = o.optInt("bgFps", 30).coerceIn(0, 240),
+        motion = runCatching { MotionFeel.valueOf(o.optString("motion")) }.getOrDefault(MotionFeel.FIRM),
+        rollSeed = o.optLong("rollSeed", 1L),
+        wrappedTone = runCatching { WrappedTone.valueOf(o.optString("wTone")) }.getOrDefault(WrappedTone.SNARKY),
+        sleepRule = runCatching { SleepRule.valueOf(o.optString("wSleep")) }.getOrDefault(SleepRule.EITHER),
+        wrappedSlides = runCatching { WrappedSlides.valueOf(o.optString("wSlides")) }.getOrDefault(WrappedSlides.BOTH),
     )
 }

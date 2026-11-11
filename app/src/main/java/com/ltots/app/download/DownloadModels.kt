@@ -98,6 +98,14 @@ data class DownloadTask(
     }
 }
 
+/** A song LToTS downloaded whose file has since been deleted: kept so it's one tap to get back. */
+data class DeletedSong(val meta: TrackMeta, val deletedAt: Long) {
+    fun toJson(): JSONObject = JSONObject().put("m", meta.toJson()).put("at", deletedAt)
+    companion object {
+        fun fromJson(o: JSONObject) = DeletedSong(TrackMeta.fromJson(o.getJSONObject("m")), o.optLong("at"))
+    }
+}
+
 /** A playlist the user downloaded and can re-sync to pick up new songs. */
 data class SyncedPlaylist(val playlistId: String, val title: String, val thumbUrl: String?, val lastSync: Long, val trackCount: Int) {
     fun toJson(): JSONObject = JSONObject().put("id", playlistId).put("t", title).put("th", thumbUrl).put("ls", lastSync).put("n", trackCount)

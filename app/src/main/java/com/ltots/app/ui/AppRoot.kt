@@ -339,8 +339,8 @@ fun AppRoot() {
                         // iOS push: the new page slides in from the right over the old one, which
                         // drifts a little left and fades; going back is the same in reverse.
                         val opening = targetState != null
-                        val move = spring(dampingRatio = 1f, stiffness = Spring.StiffnessMediumLow, visibilityThreshold = IntOffset.VisibilityThreshold)
-                        val fade = spring<Float>(dampingRatio = 1f, stiffness = Spring.StiffnessMediumLow)
+                        val move = Springs.pushOffset
+                        val fade = Springs.push
                         (if (opening) slideInHorizontally(move) { it } + fadeIn(fade, 0.6f)
                         else slideInHorizontally(move) { -it / 4 } + fadeIn(fade))
                             .togetherWith(
@@ -401,10 +401,8 @@ fun AppRoot() {
             ) {
                 AnimatedVisibility(
                     visible = miniShown,
-                    enter = fadeIn(spring(stiffness = Spring.StiffnessMediumLow)) +
-                        slideInVertically(spring(stiffness = Spring.StiffnessMediumLow, visibilityThreshold = IntOffset.VisibilityThreshold)) { it / 2 },
-                    exit = fadeOut(spring(stiffness = Spring.StiffnessMediumLow)) +
-                        slideOutVertically(spring(stiffness = Spring.StiffnessMediumLow, visibilityThreshold = IntOffset.VisibilityThreshold)) { it / 2 },
+                    enter = fadeIn(Springs.push) + slideInVertically(Springs.pushOffset) { it / 2 },
+                    exit = fadeOut(Springs.push) + slideOutVertically(Springs.pushOffset) { it / 2 },
                 ) {
                     MiniPlayer(player, artwork, bar) {
                         CrashReport.step("open PLAYER (mini player)")
@@ -441,7 +439,8 @@ private fun TabPages(
         userScrollEnabled = swipe,
         beyondViewportPageCount = 0,
         key = { Tab.entries[it].name },
-        flingBehavior = PagerDefaults.flingBehavior(pager, snapAnimationSpec = Springs.page),
+        // A third of the way (or any clear flick) is enough to mean "next tab"; less springs back.
+        flingBehavior = PagerDefaults.flingBehavior(pager, snapAnimationSpec = Springs.page, snapPositionalThreshold = 0.33f),
     ) { i ->
         Box(
             Modifier.fillMaxSize().graphicsLayer {
@@ -472,7 +471,7 @@ private fun ProfileTab(artwork: android.graphics.Bitmap?, showLook: Boolean, onS
         targetState = showLook,
         transitionSpec = {
             // Look is to the right of Profile, as on the switch.
-            val move = spring(dampingRatio = 1f, stiffness = Spring.StiffnessMediumLow, visibilityThreshold = IntOffset.VisibilityThreshold)
+            val move = Springs.pushOffset
             val fade = spring<Float>(dampingRatio = 1f, stiffness = Spring.StiffnessMediumLow)
             val dir = if (targetState) 1 else -1
             (slideInHorizontally(move) { dir * it / 3 } + fadeIn(fade))
@@ -576,8 +575,10 @@ private fun NavBar(bar: BarCollapse, indicator: Animatable<Float, AnimationVecto
         ) {
             Tab.entries.forEach { t ->
                 val on = t == selected
+                val touch = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
                 Box(
-                    Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(50)).clickable { onSelect(t) },
+                    Modifier.weight(1f).fillMaxHeight().pressScale(touch, 0.9f).clip(RoundedCornerShape(50))
+                        .clickable(touch, androidx.compose.material3.ripple()) { onSelect(t) },
                     contentAlignment = Alignment.Center,
                 ) {
                     // Full size: icon above its label. Compact: the label fades away and the

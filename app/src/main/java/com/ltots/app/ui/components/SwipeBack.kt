@@ -50,7 +50,10 @@ fun SwipeBackPage(
     var width by remember { mutableFloatStateOf(0f) }
     val back by rememberUpdatedState(onBack)
     val gestureNav = rememberGestureNav()
-    val ease = spring<Float>(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+    val ease = com.ltots.app.ui.Springs.push
+    // How fast the finger is moving, so letting go hands that speed to the spring (no stop-start)
+    // and a quick flick closes the page from anywhere, as a slow drag past half-way does.
+    val tracker = remember { androidx.compose.ui.input.pointer.util.VelocityTracker() }
 
     fun close(how: String) {
         CrashReport.step("back: $label ($how)")
@@ -81,17 +84,22 @@ fun SwipeBackPage(
             Box(
                 Modifier.align(Alignment.CenterStart).width(20.dp).fillMaxHeight().pointerInput(Unit) {
                     detectHorizontalDragGestures(
+                        // A finger landing on a page that's still springing catches it where it is.
+                        onDragStart = { tracker.resetTracking(); scope.launch { offset.stop() } },
                         onDragEnd = {
+                            val v = tracker.calculateVelocity().x
                             scope.launch {
-                                if (offset.value > width / 3f) {
-                                    offset.animateTo(width, ease)
+                                // Decided by where the swipe is heading, not where the finger left.
+                                if (com.ltots.app.ui.Springs.project(offset.value, v) > width / 2f) {
+                                    offset.animateTo(width, ease, initialVelocity = v)
                                     close("swipe")
                                     if (!keepOffset) offset.snapTo(0f)
-                                } else offset.animateTo(0f, ease)
+                                } else offset.animateTo(0f, ease, initialVelocity = v)
                             }
                         },
                         onDragCancel = { scope.launch { offset.animateTo(0f, ease) } },
                     ) { change, dx ->
+                        tracker.addPosition(change.uptimeMillis, change.position)
                         change.consume()
                         scope.launch { offset.snapTo((offset.value + dx).coerceAtLeast(0f)) }
                     }

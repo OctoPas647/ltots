@@ -65,7 +65,7 @@ object SongPreview {
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state
     private var player: ExoPlayer? = null
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + com.ltots.app.CrashReport.guard("preview"))
     private var job: Job? = null
     private var ticker: Job? = null
     private var app: Context? = null

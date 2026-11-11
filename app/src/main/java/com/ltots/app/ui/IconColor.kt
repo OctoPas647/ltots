@@ -33,7 +33,7 @@ object IconColor {
     private const val MIN_GAP_MS = 60_000L
 
     private lateinit var app: Context
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + com.ltots.app.CrashReport.guard("icon colour"))
     private val _enabled = MutableStateFlow(true)
     /** "Icon follows the song colour" (Profile > App settings). */
     val enabled: StateFlow<Boolean> = _enabled

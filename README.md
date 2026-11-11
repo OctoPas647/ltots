@@ -14,6 +14,56 @@ newer APK updates the app and keeps your settings.
 
 ## What's in phase 1
 
+- **Rolls** (top of Home) – mixes dealt fresh from the songs on your phone: *A bit of everything*,
+  two-genre clashes (*Rock × Jazz*), *Never played*, *Favourites remixed* (yours, cut with genres
+  your favourites don't cover), a decade roll and *One song each*. Every roll is dealt one genre
+  at a time, round and round, so it never sits in one style, no artist appears more than twice,
+  and across a deal every genre in your library gets its turn. They stay the same until you tap
+  the **dice**, which deals a new set.
+- **No duplicate downloads** – before downloading, the whole library is checked, not only what
+  LToTS downloaded itself: a song whose recording is already on the phone (same title, main
+  artist, version and length, wherever the file came from) isn't fetched again. A single song
+  skipped that way shows in Recents as "Already in your library" with **Get anyway**.
+- **Duplicates** (Library > Duplicates) – every recording that's on the phone more than once. The
+  best copy of each (lossless before lossy, then the finer and bigger file) is marked Keep and
+  the others are ticked; tap a copy to change that, the play button to hear it first, then
+  **Delete N copies** (Android asks once). A remix, a live take, a sped-up or slowed edit, an
+  acoustic, instrumental or remastered version is a different recording and never counts.
+- **Deleted** (bottom of Get > Recents) – songs LToTS downloaded that you've since deleted are
+  remembered (up to 500): the arrow downloads one again, **Get all back** all of them, the cross
+  forgets one for good. Syncing a playlist doesn't bring back songs you deleted.
+- **Recents, edge to edge** (Get tab) – the list has no box around it: it runs to both sides of
+  the screen and on under the bars at the bottom, and fades in under the search box.
+- **Wrapped with an opinion** – besides the classic slides, stat screens in the spirit of
+  Stick Fight's end-of-match stats: **The opportunity cost** (your top song's hours as a share
+  of learning Spanish, German or Russian, by the US Foreign Service Institute's class-hour
+  estimates: 750, 900 and 1,100 hours), **The sleep track** (what mostly played while you were
+  asleep), **The runner-up** (how few more plays your #2 needed), **The skip victim** (the song
+  you keep skipping in its first seconds), **The graveyard** (songs on the phone never played)
+  and **The broken record** (the most times one song played back to back, and the day). Each
+  only shows when there's enough to say. Home > All stats > **Wrapped style** sets the tone
+  (Mild / Snarky / Brutal), what counts as asleep (late and untouched for 20 minutes, the sleep
+  timer, or either) and which slides show (Both / New stats / Classic). Skips, late-night plays
+  and back-to-back runs are counted from now on; the plays already in the history are worked in
+  once, roughly.
+- **Firmer, catchable motion** (Profile > App settings · motion: Relaxed / Firm / Snappy) – every
+  page, bar and button moves on a spring with no fixed length, so it can be caught or turned
+  round mid-way and carries on from the speed your finger had. Buttons, pills and tabs give the
+  moment they're touched. Swiping a page away is judged by where the swipe is *going* (a short
+  quick flick closes it; a slow drag has to pass half-way), and a third of the way is enough to
+  change tab.
+- **Screen-on battery** (Profile > App settings · screen on) – most of the screen-on drain was
+  the moving glass being redrawn up to 120 times a second with nobody touching the phone. Now:
+  after **10 s** untouched (Never / 5 / 10 / 30 / 60 s) the app *rests* — the drifting
+  background stands still (so the glass isn't redrawn at all) and the visualizer runs at 60 fps
+  at most (Same / 60 / 30 / 15); any touch wakes it at once. The background's own motion is
+  capped at **30 fps** (Every frame / 60 / 30): it drifts slowly, so it looks the same. The
+  Playing tab no longer rebuilds itself four times a second for the seek bar, Home's listening
+  numbers are worked out once per change instead of three times on the screen's thread, and the
+  history is read in the background at start-up.
+- **Sturdier** – an error in background work (saving settings with the storage full, indexing,
+  lyrics, downloads) used to close the whole app, music included; now only that job stops and
+  the error is kept for the next crash report.
 - **Home** (first tab, where the app opens) – recommendations, a mix of YouTube Music's and
   Spotify's home screens: a greeting and a grid of things to jump back into (from your phone, they
   play at once), YouTube Music's mood chips (Energize, Relax, Workout…) and **Quick picks** (pages

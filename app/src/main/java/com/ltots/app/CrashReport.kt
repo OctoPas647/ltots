@@ -59,6 +59,17 @@ object CrashReport {
         }
     }
 
+    /**
+     * For background work that outlives any screen (indexing, lyrics, downloads, saving settings):
+     * an error nobody caught there used to take the whole app down, music included. With this on
+     * the job's scope the one job stops, the error is kept as a step in the next report, and
+     * everything else carries on.
+     */
+    fun guard(where: String) = kotlinx.coroutines.CoroutineExceptionHandler { _, e ->
+        handled(where, e)
+        runCatching { android.util.Log.w("LToTS", "background job failed in $where", e) }
+    }
+
     /** Something went wrong but was handled (the app carried on): kept as a step in the report. */
     fun handled(where: String, error: Throwable) {
         step("handled in $where: ${error.javaClass.simpleName}: ${error.message?.take(160)}")

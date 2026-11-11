@@ -1,5 +1,6 @@
 package com.ltots.app.ui.components
 
+import com.ltots.app.ui.pressScale
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -334,13 +335,15 @@ fun Pill(
 ) {
     val pal = LocalPalette.current
     val shape = RoundedCornerShape(50)
+    val touch = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
     Box(
         modifier
             .then(if (enabled) Modifier else Modifier.alpha(0.4f))
+            .pressScale(touch)
             .clip(shape)
             .background(if (selected) pal.accent else pal.text.copy(alpha = 0.08f))
             .border(1.dp, if (selected) Color.Transparent else pal.text.copy(alpha = 0.12f), shape)
-            .combinedClickable(enabled = enabled, onClick = onClick, onLongClick = onLongClick)
+            .combinedClickable(interactionSource = touch, indication = androidx.compose.material3.ripple(), enabled = enabled, onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 14.dp, vertical = 8.dp),
     ) {
         Text(

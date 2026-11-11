@@ -1,5 +1,7 @@
 package com.ltots.app.ui.screens
 
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.horizontalScroll
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -114,7 +116,7 @@ import com.ltots.app.ui.theme.LocalPalette
 import com.ltots.app.ui.theme.LocalThemeConfig
 import java.util.Locale
 
-private enum class LibView { SONGS, ALBUMS, ARTISTS, MIXES }
+private enum class LibView { SONGS, ALBUMS, ARTISTS, MIXES, DUPLICATES }
 
 private data class Group(val title: String, val subtitle: String, val tracks: List<Track>)
 
@@ -156,6 +158,10 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenHistory: () 
     LaunchedEffect(allTracks, kindsAi) { if (allTracks.isNotEmpty()) com.ltots.app.data.SongKinds.classify(context, allTracks) }
     val songsOnly = remember(allTracks, kindVerdicts) { com.ltots.app.data.SongKinds.songs(allTracks, kindVerdicts) }
     val tracks = if (showAll) allTracks else songsOnly
+    // The same recording saved more than once (worked out off the screen's thread).
+    val duplicates by produceState(emptyList<List<Track>>(), songsOnly) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { com.ltots.app.data.Duplicates.groups(songsOnly) }
+    }
 
     var query by rememberSaveable { mutableStateOf("") }
     var view by rememberSaveable { mutableStateOf(LibView.SONGS) }
@@ -296,11 +302,19 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenHistory: () 
             }
         }
 
-        Row(Modifier.padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.padding(vertical = 12.dp).horizontalScroll(androidx.compose.foundation.rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
+        ) {
             Pill("Songs", view == LibView.SONGS, { view = LibView.SONGS; openGroup = null })
             Pill("Albums", view == LibView.ALBUMS, { view = LibView.ALBUMS; openGroup = null })
             Pill("Artists", view == LibView.ARTISTS, { view = LibView.ARTISTS; openGroup = null })
             Pill("Mixes", view == LibView.MIXES, { view = LibView.MIXES; openGroup = null })
+            // The same recording saved more than once (remixes, live and sped-up versions don't count).
+            Pill(
+                if (duplicates.isEmpty()) "Duplicates" else "Duplicates · ${duplicates.sumOf { it.size - 1 }}",
+                view == LibView.DUPLICATES, { view = LibView.DUPLICATES; openGroup = null },
+            )
         }
 
         if (hasPerm && tracks.isNotEmpty() && openGroup == null && view == LibView.SONGS) {
@@ -324,6 +338,10 @@ fun LibraryScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenHistory: () 
             tracks.isEmpty() -> EmptyState("No songs found", "Put some music files on your phone (any folder) and they'll show up here.", null) {}
             openGroup != null -> com.ltots.app.ui.components.SwipeBackPage("Library group", onBack = { openGroup = null }) {
                 GroupDetail(openGroup!!, player, bottom, onBack = { openGroup = null }, onPlayed = onOpenPlayer)
+            }
+            view == LibView.DUPLICATES -> DuplicatesView(duplicates, player, bottom, onOpenPlayer) {
+                reload++
+                com.ltots.app.download.DownloadManager.onLibraryFilesDeleted()
             }
             view == LibView.SONGS -> SongList(
                 remember(filtered, sortBy, if (sortBy == SongSort.COLOR) colors else null) { SongSorter.sort(filtered, sortBy, colors) },
@@ -648,6 +666,96 @@ private fun GroupDetail(g: Group, player: PlayerUi, bottom: Dp, onBack: () -> Un
         LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(bottom = bottom)) {
             itemsIndexed(g.tracks, key = { _, t -> t.id }) { i, t ->
                 TrackRow(t, playing = player.trackId == t.id) { player.play(g.tracks, i); onPlayed() }
+            }
+        }
+    }
+}
+
+/**
+ * Library > Duplicates: every recording that's on the phone more than once. The best copy of each
+ * (lossless before lossy, then the finer and bigger file) is kept; the others are ticked for
+ * deleting. Tap a copy to tick or untick it, the play button to hear it first. Android asks once
+ * before anything is deleted.
+ */
+@Composable
+private fun DuplicatesView(groups: List<List<Track>>, player: PlayerUi, bottom: Dp, onPlayed: () -> Unit, onDeleted: () -> Unit) {
+    val pal = LocalPalette.current
+    val context = LocalContext.current
+    if (groups.isEmpty()) {
+        EmptyState("No duplicates", "No recording is on your phone twice. Remixes, live, sped-up and other versions count as different songs.", null) {}
+        return
+    }
+    val extras = remember(groups) { groups.flatMap { it.drop(1) }.mapTo(HashSet()) { it.id } }
+    var remove by remember(groups) { mutableStateOf<Set<Long>>(extras) }
+    val asked = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { r ->
+        if (r.resultCode == android.app.Activity.RESULT_OK) onDeleted()
+    }
+    fun delete() {
+        val uris = groups.flatten().filter { it.id in remove }.map { it.uri }
+        if (uris.isEmpty()) return
+        runCatching {
+            val request = android.provider.MediaStore.createDeleteRequest(context.contentResolver, uris)
+            asked.launch(androidx.activity.result.IntentSenderRequest.Builder(request.intentSender).build())
+        }.onFailure { android.widget.Toast.makeText(context, "Couldn't ask Android to delete these files", android.widget.Toast.LENGTH_SHORT).show() }
+    }
+    val bytes = groups.flatten().filter { it.id in remove }.sumOf { it.sizeBytes }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = LocalListTop.current + 2.dp, bottom = bottom)) {
+        item("head") {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp)) {
+                Text(
+                    "${groups.size} recording${if (groups.size == 1) " is" else "s are"} on your phone more than once. " +
+                        "The best copy of each is kept; remixes, live and sped-up versions aren't counted.",
+                    color = pal.textDim, style = MaterialTheme.typography.bodySmall,
+                )
+                Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Pill(
+                        if (remove.isEmpty()) "Nothing ticked" else "Delete ${remove.size} cop${if (remove.size == 1) "y" else "ies"} · ${"%.0f".format(Locale.ROOT, bytes / 1_000_000.0)} MB",
+                        remove.isNotEmpty(), { delete() }, enabled = remove.isNotEmpty(),
+                    )
+                    Pill(if (remove == extras) "Untick all" else "Tick the extras", false, { remove = if (remove == extras) emptySet() else extras })
+                }
+            }
+        }
+        groups.forEach { g ->
+            val first = g.first()
+            item("g" + first.id) {
+                Text(
+                    listOfNotNull(first.title, first.artist.takeIf { it != Track.UNKNOWN }).joinToString(" — ") + "  ·  ${g.size} copies",
+                    color = pal.text, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 4.dp, end = 4.dp, top = 14.dp, bottom = 2.dp),
+                )
+            }
+            items(g, key = { "c" + it.id }) { t ->
+                val going = t.id in remove
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                        .clickable {
+                            // One copy of every recording always stays.
+                            remove = if (going) remove - t.id else if (g.count { it.id !in remove } > 1) remove + t.id else remove
+                        }
+                        .padding(horizontal = 4.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        Modifier.size(22.dp).clip(CircleShape).background(if (going) Color(0xFFE5484D) else pal.text.copy(alpha = 0.1f)),
+                        contentAlignment = Alignment.Center,
+                    ) { if (going) Icon(Icons.Rounded.Close, null, tint = Color.White, modifier = Modifier.size(14.dp)) }
+                    Spacer(Modifier.width(10.dp))
+                    Thumb(t.id, 44)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            listOfNotNull(t.qualityLabel, "%.1f MB".format(Locale.ROOT, t.sizeBytes / 1_000_000.0), formatTime(t.durationMs)).joinToString("  ·  "),
+                            color = if (going) pal.textDim else pal.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            (if (going) "Delete" else "Keep") + "  ·  " + listOfNotNull(t.folder, t.fileName).joinToString(""),
+                            color = if (going) Color(0xFFFF8A80) else pal.accent, style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    IconButton(onClick = { player.play(listOf(t), 0) }) { Icon(Icons.Rounded.PlayArrow, "Play this copy", tint = pal.textDim) }
+                }
             }
         }
     }

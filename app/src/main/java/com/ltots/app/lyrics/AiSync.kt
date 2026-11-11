@@ -55,7 +55,7 @@ object AiSync {
     private val _modelReady = MutableStateFlow(false)
     val modelReady: StateFlow<Boolean> = _modelReady
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + com.ltots.app.CrashReport.guard("AI lyrics"))
     private val lock = Mutex()
     /** Songs waiting or being timed. */
     private val pending = HashSet<String>()

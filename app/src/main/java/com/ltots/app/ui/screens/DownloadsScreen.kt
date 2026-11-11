@@ -1,5 +1,9 @@
 package com.ltots.app.ui.screens
 
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.layout
 import android.content.ClipboardManager
 import android.content.Context
 import android.net.Uri
@@ -170,7 +174,7 @@ fun DownloadsScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
         when (item) {
             is YtSong -> {
                 val n = DownloadManager.enqueueSong(item)
-                toast = if (n > 0) "Downloading “${item.title}”" else "Already downloaded or in the queue"
+                toast = if (n > 0) "Downloading “${item.title}”" else "Already on your phone or in the queue"
             }
             is YtAlbum -> stack += Page.AlbumPage(item.browseId)
             is YtPlaylist -> stack += Page.PlaylistPage(item.playlistId)
@@ -190,7 +194,7 @@ fun DownloadsScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
         input = ""
         if (route is LinkRoute.FindSong) { findSong(route.url); return }
         when (val link = (route as LinkRoute.Music).target) {
-            is LinkTarget.Song -> toast = if (DownloadManager.enqueueLink(link.videoId)) "Added to downloads" else "Already downloaded or in the queue"
+            is LinkTarget.Song -> toast = if (DownloadManager.enqueueLink(link.videoId)) "Added to downloads" else "Already on your phone or in the queue"
             is LinkTarget.Album -> stack += Page.AlbumPage(link.browseId)
             is LinkTarget.Playlist -> stack += Page.PlaylistPage(link.playlistId)
             is LinkTarget.Artist -> stack += Page.Artist(link.channelId)
@@ -279,7 +283,14 @@ fun DownloadsScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
         if (stack.isEmpty()) FinderTools(onToast = { toast = it })
 
         Spacer(Modifier.height(10.dp))
-        GlassPanel(Modifier.fillMaxWidth().weight(1f), tintBoost = 0.06f) {
+        // Recents has no box around it: the list runs to both sides of the screen and on under
+        // the bars at the bottom, fading in under the search box, so it never shows an end.
+        val recentsOpen = loaded == null && finderEntries.isEmpty()
+        if (recentsOpen) {
+            Box(Modifier.fillMaxWidth().weight(1f).bleed(14.dp).fadeTopEdge(18.dp)) {
+                RecentsContent(player, onOpenPlayer, bottomPad = bottomChrome() + 12.dp)
+            }
+        } else GlassPanel(Modifier.fillMaxWidth().weight(1f), tintBoost = 0.06f) {
             when (val l = loaded) {
                 // The recent songs, until a link is given: then its best matches take their place.
                 null -> if (finderEntries.isNotEmpty()) FinderList(
@@ -297,7 +308,7 @@ fun DownloadsScreen(player: PlayerUi, onOpenPlayer: () -> Unit) {
                 is Loaded.Art -> ArtistContent(l.a, onOpen = ::open)
             }
         }
-        Spacer(Modifier.height(bottomChrome()))
+        if (!recentsOpen) Spacer(Modifier.height(bottomChrome()))
     }
     }
 }
@@ -494,20 +505,21 @@ private fun ArtistContent(a: ArtistPage, onOpen: (YtItem) -> Unit) {
 // ---- recents: what's downloading, then what came in lately ------------------------------------
 
 @Composable
-private fun RecentsContent(player: PlayerUi, onOpenPlayer: () -> Unit) {
+private fun RecentsContent(player: PlayerUi, onOpenPlayer: () -> Unit, bottomPad: androidx.compose.ui.unit.Dp = 12.dp) {
     val pal = LocalPalette.current
     val tasks by DownloadManager.tasks.collectAsState()
     val paused by DownloadManager.paused.collectAsState()
     val active = tasks.filter { !it.state.finished }
     val history = tasks.filter { it.state.finished }
+    val deleted by DownloadManager.deleted.collectAsState()
 
-    if (active.isEmpty() && history.isEmpty()) {
+    if (active.isEmpty() && history.isEmpty() && deleted.isEmpty()) {
         Box(Modifier.fillMaxSize().padding(28.dp), contentAlignment = Alignment.Center) {
             Text("Songs you download show up here.", color = pal.textDim, style = MaterialTheme.typography.bodyMedium)
         }
         return
     }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 12.dp)) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 6.dp, bottom = bottomPad)) {
         if (active.isNotEmpty()) {
             item("qh") {
                 Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -533,6 +545,38 @@ private fun RecentsContent(player: PlayerUi, onOpenPlayer: () -> Unit) {
             }
             items(history.take(300), key = { "h" + it.id }) { TaskRow(it, player, onOpenPlayer) }
         }
+        // Songs LToTS downloaded that were deleted from the phone since: one tap to get back.
+        if (deleted.isNotEmpty()) {
+            item("dh") {
+                Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    SectionTitle("Deleted · ${deleted.size}", Modifier.weight(1f))
+                    Pill("Get all back", false, { DownloadManager.redownloadAll() })
+                    Spacer(Modifier.width(8.dp))
+                    Pill("Forget all", false, { DownloadManager.forgetDeleted() })
+                }
+            }
+            items(deleted, key = { "d" + it.meta.videoId }) { d -> DeletedRow(d) }
+        }
+    }
+}
+
+/** A deleted download: tap the arrow to download it again, the cross to forget it for good. */
+@Composable
+private fun DeletedRow(d: com.ltots.app.download.DeletedSong) {
+    val pal = LocalPalette.current
+    val m = d.meta
+    Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 5.dp, bottom = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.alpha(0.55f)) { NetImage(m.coverUrl, 46.dp, RoundedCornerShape(10.dp)) }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(m.title, color = pal.textDim, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                listOfNotNull(m.artist.takeIf { it.isNotBlank() }, "deleted " + android.text.format.DateUtils.getRelativeTimeSpanString(d.deletedAt, System.currentTimeMillis(), android.text.format.DateUtils.DAY_IN_MILLIS)).joinToString(" · "),
+                color = pal.textFaint, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+        }
+        IconButton(onClick = { DownloadManager.redownload(m.videoId) }) { Icon(Icons.Rounded.Refresh, "Download again", tint = pal.accent) }
+        IconButton(onClick = { DownloadManager.forgetDeleted(m.videoId) }) { Icon(Icons.Rounded.Close, "Forget", tint = pal.textFaint) }
     }
 }
 
@@ -581,6 +625,7 @@ private fun TaskRow(t: DownloadTask, player: PlayerUi, onOpenPlayer: () -> Unit)
                 val sub = when (t.state) {
                     TaskState.DONE -> listOfNotNull(m.artist, m.album, t.qualityNote).joinToString(" · ")
                     TaskState.FAILED -> t.error ?: "Failed"
+                    TaskState.SKIPPED -> "${m.artist} · ${t.error ?: t.state.label}"
                     TaskState.DOWNLOADING -> "${m.artist} · ${(t.progress * 100).toInt()}%"
                     else -> "${m.artist} · ${t.state.label}"
                 }
@@ -591,7 +636,9 @@ private fun TaskRow(t: DownloadTask, player: PlayerUi, onOpenPlayer: () -> Unit)
             }
             when (t.state) {
                 TaskState.FAILED, TaskState.CANCELED -> IconButton(onClick = { DownloadManager.retry(t.id) }) { Icon(Icons.Rounded.Refresh, "Retry", tint = pal.text) }
-                TaskState.DONE, TaskState.SKIPPED -> Icon(Icons.Rounded.CheckCircle, null, tint = pal.accent, modifier = Modifier.padding(12.dp))
+                TaskState.SKIPPED -> if (t.error == DownloadManager.IN_LIBRARY) Pill("Get anyway", false, { DownloadManager.downloadAnyway(t.id) })
+                    else Icon(Icons.Rounded.CheckCircle, null, tint = pal.accent, modifier = Modifier.padding(12.dp))
+                TaskState.DONE -> Icon(Icons.Rounded.CheckCircle, null, tint = pal.accent, modifier = Modifier.padding(12.dp))
                 else -> IconButton(onClick = { DownloadManager.cancel(t.id) }) { Icon(Icons.Rounded.Close, "Cancel", tint = pal.textDim) }
             }
         }
@@ -722,3 +769,24 @@ private fun ago(t: Long): String {
         else -> "${m / (60 * 24)} days ago"
     }
 }
+
+/** Lets a part of the page run [by] past its parent's padding on both sides (to the screen's edges). */
+private fun Modifier.bleed(by: androidx.compose.ui.unit.Dp): Modifier = layout { measurable, constraints ->
+    val extra = by.roundToPx()
+    val wide = constraints.maxWidth + 2 * extra
+    val placeable = measurable.measure(constraints.copy(minWidth = wide, maxWidth = wide))
+    layout(constraints.maxWidth, placeable.height) { placeable.place(-extra, 0) }
+}
+
+/** The top [height] fades to nothing, so a list scrolls out of sight instead of being cut off. */
+private fun Modifier.fadeTopEdge(height: androidx.compose.ui.unit.Dp): Modifier = this
+    .graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
+    .drawWithContent {
+        drawContent()
+        val h = height.toPx()
+        drawRect(
+            androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Transparent, Color.Black), startY = 0f, endY = h),
+            size = androidx.compose.ui.geometry.Size(size.width, h),
+            blendMode = androidx.compose.ui.graphics.BlendMode.DstIn,
+        )
+    }

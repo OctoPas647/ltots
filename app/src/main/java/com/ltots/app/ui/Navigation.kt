@@ -1,5 +1,7 @@
 package com.ltots.app.ui
 
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.animation.core.VisibilityThreshold
 import android.content.Context
 import android.provider.Settings
 import androidx.compose.animation.core.Spring
@@ -25,6 +27,9 @@ import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.ltots.app.CrashReport
+import androidx.compose.ui.composed
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.Modifier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -32,12 +37,52 @@ import kotlin.math.abs
 
 /** The springs the app's navigation moves with (no fixed-length tweens: they can be caught mid-way). */
 object Springs {
+    /**
+     * How firm every spring is (Profile > App settings · motion): 1 = Firm, the default. Firmer
+     * springs arrive sooner and feel tied to the finger; none of them has a fixed length, so each
+     * can be caught, turned round or redirected at any point, carrying on from the speed it had.
+     */
+    @Volatile var firmness: Float = 1f
+
     /** The bottom bar and mini player shrinking and growing. */
-    val bar = spring<Float>(dampingRatio = 0.86f, stiffness = 420f)
+    val bar get() = spring<Float>(dampingRatio = 0.9f, stiffness = 620f * firmness)
     /** Pages sliding sideways: settles without overshoot, like iOS paging. */
-    val page = spring<Float>(dampingRatio = 1f, stiffness = Spring.StiffnessMediumLow)
+    val page get() = spring<Float>(dampingRatio = 1f, stiffness = 650f * firmness)
     /** A page coming in after a jump to a tab further away. */
-    val enter = spring<Float>(dampingRatio = 0.9f, stiffness = 500f)
+    val enter get() = spring<Float>(dampingRatio = 0.92f, stiffness = 760f * firmness)
+    /** A pushed page (EQ, Sound, a swipe-back page) sliding over or away. */
+    val push get() = spring<Float>(dampingRatio = 1f, stiffness = 650f * firmness)
+    val pushOffset get() = spring<IntOffset>(dampingRatio = 1f, stiffness = 650f * firmness, visibilityThreshold = IntOffset.VisibilityThreshold)
+    /** A button giving under the finger: quick down, a slight spring back. */
+    val press get() = spring<Float>(dampingRatio = 1f, stiffness = 1500f * firmness)
+    val release get() = spring<Float>(dampingRatio = 0.72f, stiffness = 900f * firmness)
+
+    /**
+     * Where a flick would come to rest: [position] plus the distance its [velocity] (px/s) still
+     * carries it, with the same deceleration iOS scrolling uses. Deciding by where the gesture is
+     * *going* instead of where the finger was lifted is what lets a short quick flick count.
+     */
+    fun project(position: Float, velocity: Float, decelerationRate: Float = 0.998f): Float =
+        position + velocity / 1000f * decelerationRate / (1f - decelerationRate)
+}
+
+/**
+ * The thing under the finger gives a little the moment it's touched and springs back on release:
+ * the answer to a touch comes before the tap is over. Drawn as a layer (no rebuilding), and a
+ * new touch catches a spring that's still moving.
+ */
+fun Modifier.pressScale(source: androidx.compose.foundation.interaction.InteractionSource, pressed: Float = 0.94f): Modifier = composed {
+    val scale = remember { androidx.compose.animation.core.Animatable(1f) }
+    androidx.compose.runtime.LaunchedEffect(source) {
+        source.interactions.collect { i ->
+            when (i) {
+                is androidx.compose.foundation.interaction.PressInteraction.Press -> launch { scale.animateTo(pressed, Springs.press) }
+                is androidx.compose.foundation.interaction.PressInteraction.Release,
+                is androidx.compose.foundation.interaction.PressInteraction.Cancel -> launch { scale.animateTo(1f, Springs.release) }
+            }
+        }
+    }
+    graphicsLayer { val s = scale.value; scaleX = s; scaleY = s }
 }
 
 /**

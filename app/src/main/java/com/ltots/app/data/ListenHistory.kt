@@ -75,6 +75,8 @@ object ListenHistory {
     fun onSong(key: String?, trackId: Long, title: String, artist: String, album: String, durationMs: Long, playing: Boolean) {
         ensureLoaded()
         settle()
+        // The song being left was started and dropped within its first seconds: a skip.
+        current?.let { prev -> if (logged && prev.skipped) runCatching { ListenStats.addSkip(prev.title, prev.artist, prev.at) } }
         current = key?.let { Listen(it, trackId, title, artist.takeIf { a -> a != Track.UNKNOWN } ?: "", album, durationMs, System.currentTimeMillis()) }
         logged = false
         playingSince = if (playing && current != null) System.currentTimeMillis() else 0L
@@ -105,7 +107,12 @@ object ListenHistory {
             logged = true
             publish(listOf(now) + _items.value)
             // The all-time numbers (Home's stats and Wrapped): one play, and the time so far.
-            runCatching { ListenStats.addPlay(now.title, now.artist, now.album, now.listenedMs) }
+            runCatching {
+                ListenStats.addPlay(
+                    now.title, now.artist, now.album, now.listenedMs,
+                    night = Awake.asleepAt(), timer = runCatching { com.ltots.app.playback.SleepTimer.state.value != null }.getOrDefault(false),
+                )
+            }
         } else if (logged) {
             runCatching { ListenStats.addTime(now.title, now.artist, added) }
             // Update the listened time of the entry already logged (always the newest one).

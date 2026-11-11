@@ -501,6 +501,7 @@ private fun AppSettingsCard() {
             com.ltots.app.ui.components.FinderAccounts()
             Spacer(Modifier.height(10.dp))
 
+            ScreenOnSettings()
             ScreenOffSettings()
             SleepTimerSettings()
             CrossfadeSettings()

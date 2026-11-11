@@ -35,7 +35,7 @@ sealed interface LyricsState {
  */
 object Lyrics {
     private lateinit var root: File
-    private val io = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val io = CoroutineScope(SupervisorJob() + Dispatchers.IO + com.ltots.app.CrashReport.guard("lyrics"))
     private val lock = Mutex()
     private val memory = HashMap<String, LyricsDoc?>()
     private val _current = MutableStateFlow<Pair<String, LyricsState>?>(null)

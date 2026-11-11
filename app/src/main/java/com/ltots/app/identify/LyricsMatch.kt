@@ -39,7 +39,7 @@ object LyricsMatch {
     internal data class Timing(val rate: Double, val intercept: Double)
 
     private const val SEG = 12
-    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Default)
+    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Default + com.ltots.app.CrashReport.guard("lyrics match"))
     private var job: kotlinx.coroutines.Job? = null
 
     /** Runs the match for the lyrics card; progress and the result show there. */

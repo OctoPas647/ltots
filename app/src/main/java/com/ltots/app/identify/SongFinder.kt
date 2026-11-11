@@ -47,7 +47,7 @@ object SongFinder {
     private val _entries = MutableStateFlow<List<FinderEntry>>(emptyList())
     /** Everything given to the finder, oldest first; empty when there's nothing to show. */
     val entries: StateFlow<List<FinderEntry>> = _entries
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + com.ltots.app.CrashReport.guard("song finder"))
     private val nextId = java.util.concurrent.atomic.AtomicLong(1)
     private val lock = Any()
     private var job: Job? = null

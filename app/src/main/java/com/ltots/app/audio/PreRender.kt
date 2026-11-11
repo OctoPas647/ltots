@@ -89,7 +89,7 @@ object PreRender {
             r.run()
         }, "ltots-prerender").apply { isDaemon = true }
     }.asCoroutineDispatcher()
-    private val scope = CoroutineScope(SupervisorJob() + thread)
+    private val scope = CoroutineScope(SupervisorJob() + thread + com.ltots.app.CrashReport.guard("pre-render"))
     private var running: Pair<String, Job>? = null
     private var runningJob: kotlinx.coroutines.Job? = null
     /** Files the queue points at right now: never removed to make room. */

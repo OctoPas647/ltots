@@ -99,7 +99,7 @@ object WaveIndex {
 
     private lateinit var root: File
     private val memory = LruCache<String, Wave>(6)
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1) + com.ltots.app.CrashReport.guard("waveforms"))
     private val buildLock = Mutex()
     private val decodeThread = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
         Thread({

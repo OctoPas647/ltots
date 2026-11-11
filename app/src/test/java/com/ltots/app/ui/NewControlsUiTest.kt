@@ -366,7 +366,7 @@ class NewControlsUiTest {
     }
 
     /** Profile: screen-off EQ / pitch choices, pre-render, the sleep timer's settings and the battery card switch. */
-    @Config(qualifiers = "w411dp-h2300dp-xxhdpi")
+    @Config(qualifiers = "w411dp-h3000dp-xxhdpi")
     @Test fun screenOffAndSleepSettings() {
         rule.mainClock.autoAdvance = false
         idle()

@@ -1,5 +1,6 @@
 package com.ltots.app.ui.glass
 
+import com.ltots.app.ui.pressScale
 import android.graphics.Bitmap
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -201,12 +202,14 @@ fun GlassCircleButton(
     content: @Composable BoxScope.() -> Unit,
 ) {
     val pal = LocalPalette.current
+    val touch = remember { MutableInteractionSource() }
     Box(
         modifier
+            .pressScale(touch, 0.9f)
             .glass(CircleShape, strength = 0.7f)
             .then(if (highlighted) Modifier.background(pal.accent, CircleShape) else Modifier)
             .clip(CircleShape)
-            .clickable(remember { MutableInteractionSource() }, indication = androidx.compose.material3.ripple(), onClick = onClick),
+            .clickable(touch, indication = androidx.compose.material3.ripple(), onClick = onClick),
         contentAlignment = Alignment.Center,
         content = content,
     )
@@ -238,12 +241,19 @@ fun AppBackground(artwork: Bitmap?, modifier: Modifier = Modifier) {
     val phase = remember { androidx.compose.runtime.mutableFloatStateOf(0.8f) }
     val saver by com.ltots.app.ui.rememberBatterySaver()
     val effects = com.ltots.app.ui.LocalEffects.current
-    if (backgroundMoves(cfg, saver, effects)) {
-        val minFrameNs = when (effects) {
-            com.ltots.app.data.Effects.BALANCED -> 16_000_000L
-            com.ltots.app.data.Effects.LIGHT -> 33_000_000L
-            else -> 0L
-        }
+    // Screen on: the chosen frame rate for the drift (Profile > App settings · screen on), and
+    // it stands still while the app "rests" untouched. A touch starts it again where it stopped.
+    val app by com.ltots.app.audio.AudioEngine.settings.collectAsState()
+    val resting by com.ltots.app.ui.ScreenRest.resting.collectAsState()
+    if (backgroundMoves(cfg, saver, effects) && !(resting && app.restBackground)) {
+        val minFrameNs = com.ltots.app.ui.ScreenRest.minFrameNs(
+            when (effects) {
+                com.ltots.app.data.Effects.BALANCED -> 16_000_000L
+                com.ltots.app.data.Effects.LIGHT -> 33_000_000L
+                else -> 0L
+            },
+            app.backgroundFps,
+        )
         com.ltots.app.ui.WhileOnScreen(cfg.animationSpeed, minFrameNs) {
             val periodNs = motionPeriodNs(cfg.animationSpeed)
             var last = 0L

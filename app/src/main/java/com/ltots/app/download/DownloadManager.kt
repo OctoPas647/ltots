@@ -39,7 +39,7 @@ data class DownloadSettings(
 object DownloadManager {
     /** How long the free-lossless check may hold a download up. */
     private const val LOSSLESS_BUDGET_MS = 3_000L
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + com.ltots.app.CrashReport.guard("downloads"))
     private lateinit var app: Context
     private lateinit var downloader: Downloader
     private val root get() = File(app.filesDir, "ltots").apply { mkdirs() }
@@ -51,6 +51,15 @@ object DownloadManager {
     private val _downloaded = MutableStateFlow<Map<String, String>>(emptyMap())
     /** videoId → content URI of everything downloaded so far. */
     val downloaded: StateFlow<Map<String, String>> = _downloaded
+
+    /** videoId → what was downloaded (title, artist, cover…), so a deleted song can be offered again. */
+    @Volatile private var metaIndex: Map<String, TrackMeta> = emptyMap()
+
+    private val _deleted = MutableStateFlow<List<DeletedSong>>(emptyList())
+    /** Songs LToTS downloaded that were deleted from the phone since, newest first. */
+    val deleted: StateFlow<List<DeletedSong>> = _deleted
+    /** False until this version has looked through the old download history for deleted songs (once). */
+    private var deletedSeeded = false
 
     private val _synced = MutableStateFlow<List<SyncedPlaylist>>(emptyList())
     val synced: StateFlow<List<SyncedPlaylist>> = _synced
@@ -106,8 +115,9 @@ object DownloadManager {
         downloader = Downloader(app)
         Engine.init(app)
         load()
-        // Forget downloads whose files were deleted from the phone, so they can be downloaded again.
-        scope.launch { pruneMissing() }
+        // Downloads whose files were deleted from the phone move to the "Deleted" list, so they
+        // can be downloaded again (and are one tap away there).
+        scope.launch { runCatching { pruneMissing() } }
         // Anything that was mid-download when the app closed starts again.
         update { list -> list.map { if (it.state.active) it.copy(state = TaskState.QUEUED, progress = 0f) else it } }
         if (_tasks.value.any { it.state == TaskState.QUEUED }) pump()
@@ -124,6 +134,13 @@ object DownloadManager {
                 _tasks.value = List(arr.length()) { DownloadTask.fromJson(arr.getJSONObject(it)) }
                 val idx = o.optJSONObject("index") ?: JSONObject()
                 _downloaded.value = idx.keys().asSequence().associateWith { idx.getString(it) }
+                o.optJSONObject("meta")?.let { m ->
+                    metaIndex = m.keys().asSequence().mapNotNull { k -> runCatching { k to TrackMeta.fromJson(m.getJSONObject(k)) }.getOrNull() }.toMap()
+                }
+                o.optJSONArray("deleted")?.let { d ->
+                    deletedSeeded = true
+                    _deleted.value = (0 until d.length()).mapNotNull { i -> runCatching { DeletedSong.fromJson(d.getJSONObject(i)) }.getOrNull() }
+                }
                 val sp = o.optJSONArray("synced") ?: JSONArray()
                 _synced.value = List(sp.length()) { SyncedPlaylist.fromJson(sp.getJSONObject(it)) }
                 o.optJSONObject("settings")?.let {
@@ -145,6 +162,8 @@ object DownloadManager {
             val keep = _tasks.value.let { l -> l.filter { !it.state.finished } + l.filter { it.state.finished }.take(300) }
             o.put("tasks", JSONArray().apply { keep.forEach { put(it.toJson()) } })
             o.put("index", JSONObject(_downloaded.value as Map<*, *>))
+            o.put("meta", JSONObject().apply { metaIndex.forEach { (k, v) -> put(k, v.toJson()) } })
+            if (deletedSeeded) o.put("deleted", JSONArray().apply { _deleted.value.take(MAX_DELETED).forEach { put(it.toJson()) } })
             o.put("synced", JSONArray().apply { _synced.value.forEach { put(it.toJson()) } })
             o.put("settings", JSONObject().put("conc", _settings.value.concurrency).put("ten", true).put("official", _settings.value.preferOfficialAudio))
             val f = File(root, "downloads.json")
@@ -174,28 +193,131 @@ object DownloadManager {
             ?.use { it.moveToFirst() } ?: true // no answer from the provider: assume it's still there
     }.getOrDefault(true)
 
-    private fun pruneMissing() {
-        val gone = _downloaded.value.filterValues { !fileExists(it) }.keys
-        if (gone.isNotEmpty()) {
-            synchronized(lock) { _downloaded.value = _downloaded.value - gone }
-            save()
+    /** At most this many deleted songs are remembered (the oldest drop off). */
+    private const val MAX_DELETED = 500
+
+    /** The phone's audio, to tell whether a recording is (still) there; null when it can't be read. */
+    private suspend fun librarySnapshot(): List<com.ltots.app.data.Track>? =
+        runCatching { com.ltots.app.data.LocalLibrary.load(app) }.getOrNull()?.takeIf { it.isNotEmpty() }
+
+    private fun inLibrary(lib: List<com.ltots.app.data.Track>?, m: TrackMeta): com.ltots.app.data.Track? =
+        lib?.let { com.ltots.app.data.Duplicates.find(it, m.title, m.artist, (m.durationSec ?: 0) * 1000L) }
+
+    /**
+     * Downloads whose files are gone from the phone: forgotten as "downloaded" (so they can be
+     * downloaded again) and remembered as deleted, unless another copy of the same recording is
+     * still on the phone (a duplicate was cleaned up: nothing is missing).
+     */
+    private suspend fun pruneMissing() {
+        val lib = librarySnapshot()
+        // What each download was, for the ones saved before LToTS kept that: from the history.
+        val known = HashMap(metaIndex)
+        for (t in _tasks.value) if (t.state == TaskState.DONE) known.putIfAbsent(t.meta.videoId, t.meta)
+        val gone = _downloaded.value.filterValues { !fileExists(it) }
+        val lost = ArrayList<TrackMeta>()
+        // Several ids can point at one file (a music video and its official audio): one entry.
+        gone.entries.groupBy { it.value }.values.forEach { ids -> ids.firstNotNullOfOrNull { known[it.key] }?.let { lost += it } }
+        if (!deletedSeeded) {
+            // First run with the Deleted list: songs in the download history that aren't on the
+            // phone any more were deleted before LToTS remembered such things.
+            for (t in _tasks.value) {
+                if (t.state == TaskState.DONE && !_downloaded.value.containsKey(t.meta.videoId) &&
+                    t.savedUri != null && !fileExists(t.savedUri)) lost += t.meta
+            }
         }
+        val now = System.currentTimeMillis()
+        synchronized(lock) {
+            if (gone.isNotEmpty()) _downloaded.value = _downloaded.value - gone.keys
+            metaIndex = (known - gone.keys).filterKeys { _downloaded.value.containsKey(it) }
+            val have = _deleted.value.mapTo(HashSet()) { it.meta.videoId }
+            val fresh = lost.distinctBy { it.videoId }
+                .filter { it.videoId !in have && !_downloaded.value.containsKey(it.videoId) && it.title != Downloader.PLACEHOLDER_TITLE && inLibrary(lib, it) == null }
+                .map { DeletedSong(it, now) }
+            if (fresh.isNotEmpty()) _deleted.value = (fresh + _deleted.value).take(MAX_DELETED)
+            deletedSeeded = true
+        }
+        save()
+    }
+
+    /** Files were deleted from the phone inside LToTS (the Duplicates view): catch up at once. */
+    fun onLibraryFilesDeleted() {
+        _libraryVersion.value++
+        scope.launch { runCatching { pruneMissing() } }
+    }
+
+    /** Downloads a deleted song again; it leaves the Deleted list. */
+    fun redownload(videoId: String): Boolean {
+        val d = _deleted.value.firstOrNull { it.meta.videoId == videoId } ?: return false
+        return enqueue(listOf(d.meta), anyway = true) > 0
+    }
+
+    /** Downloads every deleted song again. Returns how many were queued. */
+    fun redownloadAll(): Int = enqueue(_deleted.value.map { it.meta }, anyway = true)
+
+    /** Drops one song (or, with null, all of them) from the Deleted list for good. */
+    fun forgetDeleted(videoId: String? = null) {
+        synchronized(lock) { _deleted.value = if (videoId == null) emptyList() else _deleted.value.filterNot { it.meta.videoId == videoId } }
+        save()
     }
 
     fun isQueued(videoId: String) = _tasks.value.any { it.meta.videoId == videoId && !it.state.finished }
 
-    /** Adds songs to the queue. Returns how many were actually added (the rest are already here). */
-    fun enqueue(songs: List<TrackMeta>, sourcePlaylist: String? = null): Int {
+    /**
+     * Adds songs to the queue. Returns how many were actually added (the rest are already here).
+     *
+     * Besides what LToTS downloaded itself, the whole library is checked: a song whose recording
+     * is already on the phone (same title, artist, version and length, wherever the file came
+     * from) isn't downloaded a second time. A single song skipped that way shows in Recents as
+     * "Already in your library" with a button to download it anyway.
+     *
+     * @param anyway skip the library check (the user asked for this exact song again).
+     * @param bringBack false for a playlist sync: songs the user deleted stay deleted.
+     */
+    fun enqueue(songs: List<TrackMeta>, sourcePlaylist: String? = null, anyway: Boolean = false, bringBack: Boolean = true): Int {
         // Re-check files the index thinks we have (the user may have deleted them).
         val claimed = songs.mapNotNull { s -> _downloaded.value[s.videoId]?.let { s.videoId to it } }
         val missing = claimed.filter { !fileExists(it.second) }.map { it.first }
         if (missing.isNotEmpty()) synchronized(lock) { _downloaded.value = _downloaded.value - missing.toSet() }
-        val fresh = songs.distinctBy { it.videoId }.filter { !isDownloaded(it.videoId) && !isQueued(it.videoId) }
+        val deletedIds = if (bringBack) emptySet() else _deleted.value.mapTo(HashSet()) { it.meta.videoId }
+        var fresh = songs.distinctBy { it.videoId }.filter { !isDownloaded(it.videoId) && !isQueued(it.videoId) && it.videoId !in deletedIds }
+        if (!anyway && fresh.isNotEmpty()) {
+            val lib = com.ltots.app.data.LocalLibrary.cached()
+            if (!lib.isNullOrEmpty()) {
+                val byKey = lib.groupBy { com.ltots.app.data.Duplicates.key(it.title, it.artist) }
+                val (have, need) = fresh.partition { m ->
+                    m.title != Downloader.PLACEHOLDER_TITLE &&
+                        byKey[com.ltots.app.data.Duplicates.key(m.title, m.artist)].orEmpty()
+                            .any { com.ltots.app.data.Duplicates.sameLength(it.durationMs, (m.durationSec ?: 0) * 1000L) }
+                }
+                fresh = need
+                // One song asked for by itself: say why nothing happened, and offer it anyway.
+                if (have.size == 1 && songs.size == 1) {
+                    val now = System.currentTimeMillis()
+                    update { l ->
+                        listOf(DownloadTask(UUID.randomUUID().toString(), have[0], state = TaskState.SKIPPED, error = IN_LIBRARY, sourcePlaylist = sourcePlaylist, finishedAt = now)) +
+                            l.filterNot { it.state == TaskState.SKIPPED && it.meta.videoId == have[0].videoId }
+                    }
+                }
+            }
+        }
         if (fresh.isEmpty()) return 0
+        // Asked for again: no longer "deleted".
+        val back = fresh.mapTo(HashSet()) { it.videoId }
+        if (_deleted.value.any { it.meta.videoId in back }) synchronized(lock) { _deleted.value = _deleted.value.filterNot { it.meta.videoId in back } }
         val newTasks = fresh.map { DownloadTask(UUID.randomUUID().toString(), it, sourcePlaylist = sourcePlaylist) }
         update { newTasks.reversed() + it }
         pump()
         return fresh.size
+    }
+
+    /** Marks a download skipped because the recording is already in the library (see [enqueue]). */
+    const val IN_LIBRARY = "Already in your library"
+
+    /** A song skipped as already in the library is downloaded after all. */
+    fun downloadAnyway(taskId: String) {
+        val t = _tasks.value.firstOrNull { it.id == taskId } ?: return
+        update { l -> l.filterNot { it.id == taskId } }
+        enqueue(listOf(t.meta), t.sourcePlaylist, anyway = true)
     }
 
     fun enqueueSong(s: YtSong) = enqueue(listOf(TrackMeta.from(s)))
@@ -247,7 +369,8 @@ object DownloadManager {
             if (it.playlistId == playlistId) it.copy(lastSync = System.currentTimeMillis(), trackCount = p.tracks.size, title = p.title) else it
         }
         save()
-        return enqueue(p.tracks.map { TrackMeta.from(it) }, playlistId)
+        // Songs deleted since the last sync aren't fetched again (Get > Deleted brings them back).
+        return enqueue(p.tracks.map { TrackMeta.from(it) }, playlistId, bringBack = false)
     }
 
     suspend fun syncAll(): Int = _synced.value.sumOf { runCatching { sync(it.playlistId) }.getOrDefault(0) }
@@ -361,6 +484,9 @@ object DownloadManager {
             })
             synchronized(lock) {
                 _downloaded.value = _downloaded.value + (meta.videoId to result.uri.toString()) + (task.meta.videoId to result.uri.toString())
+                metaIndex = metaIndex + (meta.videoId to result.meta.copy(videoId = meta.videoId)) + (task.meta.videoId to result.meta.copy(videoId = task.meta.videoId))
+                val ids = setOf(meta.videoId, task.meta.videoId)
+                if (_deleted.value.any { it.meta.videoId in ids }) _deleted.value = _deleted.value.filterNot { it.meta.videoId in ids }
             }
             updateTask(task.id) {
                 it.copy(meta = result.meta, state = TaskState.DONE, progress = 1f, finishedAt = System.currentTimeMillis(),

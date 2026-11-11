@@ -48,7 +48,7 @@ object BeatIndex {
             r.run()
         }, "ltots-beats").apply { isDaemon = true }
     }.asCoroutineDispatcher()
-    private val scope = CoroutineScope(SupervisorJob() + thread)
+    private val scope = CoroutineScope(SupervisorJob() + thread + com.ltots.app.CrashReport.guard("beats"))
     private val pending = HashSet<String>()
 
     private val _ready = MutableStateFlow(0)
