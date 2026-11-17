@@ -57,7 +57,9 @@ object Crossfade {
     private var ownSeekAt = 0L
 
     private val settings: AppSettings get() = AudioEngine.settings.value
-    private fun lengthMs(): Long = if (settings.crossfade && !settings.bitPerfectUsb) settings.crossfadeSeconds * 1000L else 0L
+    private fun lengthMs(): Long =
+        // In a room the second player would play on this phone only: no fades there.
+        if (settings.crossfade && !settings.bitPerfectUsb && !com.ltots.app.rooms.RoomStream.active) settings.crossfadeSeconds * 1000L else 0L
     private fun ownSeek() = SystemClock.uptimeMillis() - ownSeekAt < OWN_SEEK_MS
 
     private val listener = object : Player.Listener {

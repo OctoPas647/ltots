@@ -1,0 +1,6 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <!-- Two speakers side by side with sound between them: the room. -->
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M3,5h6v14H3zM5,8a1,1 0,1 0,2 0a1,1 0,1 0,-2 0zM4.5,14a1.5,1.5 0,1 0,3 0a1.5,1.5 0,1 0,-3 0zM15,5h6v14h-6zM17,8a1,1 0,1 0,2 0a1,1 0,1 0,-2 0zM16.5,14a1.5,1.5 0,1 0,3 0a1.5,1.5 0,1 0,-3 0zM11,9h2v6h-2z"/>
+</vector>

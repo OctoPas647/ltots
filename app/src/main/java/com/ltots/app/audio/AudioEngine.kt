@@ -177,7 +177,8 @@ object AudioEngine : SoundSource {
         // A pre-rendered file already has its EQ in it.
         if (mediaId != null && mediaId.endsWith(PreRender.ID_SUFFIX)) return EqState(enabled = false)
         // Battery EQ: the phone's own EQ shapes the sound, so LToTS's stays out of the way.
-        if (phoneEqHandles) return EqState(enabled = false)
+        // (Not in a room: the music leaves this phone before the phone's EQ could touch it.)
+        if (phoneEqHandles && !com.ltots.app.rooms.RoomStream.active) return EqState(enabled = false)
         // Screen off with the EQ set to Off.
         if (leanEq == ScreenOffEq.OFF) return EqState(enabled = false)
         val prof = mediaId?.let { Store.loadProfile(it) }
@@ -211,7 +212,7 @@ object AudioEngine : SoundSource {
                 context: Context,
                 enableFloatOutput: Boolean,
                 enableAudioOutputPlaybackParams: Boolean,
-            ): AudioSink = buildSink(context, chain, ScreenOffBuffer.provider(context))
+            ): AudioSink = buildSink(context, chain, com.ltots.app.rooms.RoomStream.provider(ScreenOffBuffer.provider(context)))
         }
         // Exact seeking: MP3s without a seek table (most VBR files) were seeked by an estimate, so
         // tapping a lyrics line (or the seek bar) landed a little off and the lyrics looked out
@@ -220,7 +221,9 @@ object AudioEngine : SoundSource {
         val extractors = androidx.media3.extractor.DefaultExtractorsFactory()
             .setMp3ExtractorFlags(androidx.media3.extractor.mp3.Mp3Extractor.FLAG_ENABLE_INDEX_SEEKING)
             .setConstantBitrateSeekingEnabled(true)
-        val p = ExoPlayer.Builder(context, renderers, androidx.media3.exoplayer.source.DefaultMediaSourceFactory(context, extractors))
+        // Songs lent by another phone in a room (Make this main) are read with LToTS's own client.
+        val sources = com.ltots.app.rooms.RoomDataSource.Factory(androidx.media3.datasource.DefaultDataSource.Factory(context))
+        val p = ExoPlayer.Builder(context, renderers, androidx.media3.exoplayer.source.DefaultMediaSourceFactory(sources, extractors))
             .setAudioAttributes(attributes, /* handleAudioFocus = */ true)
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_LOCAL)
@@ -867,6 +870,8 @@ object AudioEngine : SoundSource {
     }
 
     private fun wantsDirect(p: ExoPlayer): Boolean {
+        // In a room the music goes to the other phones, through LToTS.
+        if (com.ltots.app.rooms.RoomStream.active) return false
         val s = settings.value
         if (!s.directPlayback || s.bitPerfectUsb || s.crossfade) return false
         if (!PreRender.isRendered(p.currentMediaItem)) {
@@ -933,6 +938,20 @@ object AudioEngine : SoundSource {
     }
 
     /** Re-create the audio output (needed after switching output format or routing mode). */
+    /**
+     * This phone started or stopped sending its music to a room (Rooms): no direct playback,
+     * no pausing when its own Bluetooth goes (the earbuds may simply have moved to another
+     * phone), and a fresh output so the music goes the new way at once. Main thread.
+     */
+    fun roomChanged() {
+        val p = _player.value ?: return
+        val inRoom = com.ltots.app.rooms.RoomStream.active
+        p.setHandleAudioBecomingNoisy(!inRoom)
+        changed()
+        updateDirect()
+        rebuildAudioTrack()
+    }
+
     private fun rebuildAudioTrack() {
         val p = _player.value ?: return
         if (p.mediaItemCount == 0) return

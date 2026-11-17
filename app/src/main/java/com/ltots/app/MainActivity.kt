@@ -31,6 +31,11 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         PlayerConnection.connect(this)
+        // Rooms: a phone left waiting for rooms carries on doing so.
+        runCatching {
+            com.ltots.app.rooms.Rooms.init(this)
+            if (com.ltots.app.rooms.Rooms.wantsAvailable()) com.ltots.app.rooms.Rooms.setAvailable(this, true)
+        }.onFailure { CrashReport.handled("Rooms.init", it) }
         handleIntent(intent)
         applySystemBars()
         com.ltots.app.ui.Smoothness.init()

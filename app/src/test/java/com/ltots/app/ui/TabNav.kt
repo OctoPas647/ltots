@@ -34,6 +34,8 @@ internal fun SemanticsNodeInteractionsProvider.openPlace(label: String, idle: (L
         // The switch at the top of the Profile tab (it comes before the bar).
         "Look" -> { tapLast("Profile"); tapFirst("Look") }
         "Profile" -> { tapLast("Profile"); tapFirst("Profile") }
+        // Rooms opens from the switch at the top of the Profile tab, over the tabs.
+        "Rooms" -> { tapLast("Profile"); tapFirst("Rooms") }
         else -> tapLast(label)
     }
 }

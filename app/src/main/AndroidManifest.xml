@@ -18,6 +18,18 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <!-- Song finder: "Listen" mode. Asked for only when you tap Listen. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Rooms: finding the other phones on the Wi-Fi, keeping it fast while in a room, the
+         earbuds' link (signal strength over Bluetooth LE, never used for location). -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="s" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
 
     <application
         android:name=".LToTSApp"
@@ -327,6 +339,11 @@
                 <action android:name="androidx.media3.session.MediaSessionService" />
             </intent-filter>
         </service>
+        <!-- Rooms: this phone playing with your other phones. -->
+        <service
+            android:name=".rooms.RoomService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback|connectedDevice" />
         <!-- The crash report (its own process, so it can always open). -->
         <activity
             android:name=".CrashActivity"

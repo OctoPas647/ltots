@@ -44,7 +44,7 @@ import java.util.Locale
  * (the switches for quality and battery are on the Profile tab, with the other app settings).
  */
 @Composable
-fun SoundScreen(onBack: () -> Unit) {
+fun SoundScreen(onBack: () -> Unit, onOpenRooms: () -> Unit = {}) {
     val pal = LocalPalette.current
     val context = LocalContext.current
     val device by AudioEngine.output.device.collectAsState()
@@ -94,6 +94,24 @@ fun SoundScreen(onBack: () -> Unit) {
                         }
                     })
                 }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        // Rooms: this phone with your others.
+        GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.06f) {
+            Column(Modifier.padding(16.dp)) {
+                SectionTitle("Rooms")
+                val room by com.ltots.app.rooms.Rooms.ui.collectAsState()
+                Text(
+                    when (room.role) {
+                        com.ltots.app.rooms.Rooms.Role.OFF -> "Play through your other phones too: earbuds that follow you from room to room, or several speakers in sync."
+                        com.ltots.app.rooms.Rooms.Role.MAIN -> "This phone is the main of a room (" + (if (room.mode == com.ltots.app.rooms.Rooms.Mode.EARBUDS) "Earbuds" else "Speakers") + ")."
+                        com.ltots.app.rooms.Rooms.Role.NODE -> if (room.mainName.isNotBlank()) "In ${room.mainName}'s room." else "Waiting for a room."
+                    },
+                    color = pal.textDim, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 10.dp),
+                )
+                Pill("Open Rooms", false, onOpenRooms)
             }
         }
 

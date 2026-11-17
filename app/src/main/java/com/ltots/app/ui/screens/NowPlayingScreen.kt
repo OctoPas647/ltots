@@ -97,6 +97,7 @@ fun NowPlayingScreen(
     artwork: Bitmap?,
     onOpenEq: () -> Unit,
     onOpenSound: () -> Unit,
+    onOpenRooms: () -> Unit = {},
     showHistory: Boolean = false,
     onShowHistory: (Boolean) -> Unit = {},
 ) {
@@ -133,14 +134,20 @@ fun NowPlayingScreen(
                 Modifier.onSizeChanged { with(density) { chipHeight = it.height.toDp() } },
                 shape = RoundedCornerShape(50), strength = 0.7f,
             ) {
+                // In a room the chip says so, and opens the room.
+                val room by com.ltots.app.rooms.Rooms.ui.collectAsState()
+                val inRoom = room.role == com.ltots.app.rooms.Rooms.Role.MAIN
                 Row(
-                    Modifier.clip(RoundedCornerShape(50)).clickable(onClick = onOpenSound).padding(horizontal = 14.dp, vertical = 8.dp),
+                    Modifier.clip(RoundedCornerShape(50)).clickable(onClick = if (inRoom) onOpenRooms else onOpenSound).padding(horizontal = 14.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(deviceIcon(device.kind), null, tint = pal.accent, modifier = Modifier.size(18.dp))
+                    Icon(if (inRoom) Icons.Rounded.Speaker else deviceIcon(device.kind), null, tint = pal.accent, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text(device.name, color = pal.text, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                    if (device.kind == OutputDevice.Kind.BLUETOOTH_LE) {
+                    Text(
+                        if (inRoom) "Room · " + (if (room.mode == com.ltots.app.rooms.Rooms.Mode.EARBUDS) "Earbuds" else "Speakers") else device.name,
+                        color = pal.text, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                    )
+                    if (!inRoom && device.kind == OutputDevice.Kind.BLUETOOTH_LE) {
                         Spacer(Modifier.width(6.dp))
                         Text("LC3", color = Color(0xFFFFC14D), style = MaterialTheme.typography.labelSmall)
                     }

@@ -124,7 +124,7 @@ enum class Tab(val label: String, val icon: ImageVector) {
 }
 
 /** Pages that slide in over the tabs, from the Playing tab; any tab in the bar closes them. */
-enum class Overlay { SOUND, EQ }
+enum class Overlay { SOUND, EQ, ROOMS }
 
 /**
  * Space the floating nav, the mini player (when shown) and the system navigation bar take at the
@@ -353,7 +353,13 @@ fun AppRoot() {
                     holder.SaveableStateProvider(o?.name ?: "tabs") {
                         when (o) {
                             Overlay.SOUND -> com.ltots.app.ui.components.SwipeBackPage("SOUND", keepOffset = true, onBack = { overlay = null }) {
-                                SoundScreen(onBack = { CrashReport.step("close SOUND (back)"); overlay = null })
+                                SoundScreen(
+                                    onBack = { CrashReport.step("close SOUND (back)"); overlay = null },
+                                    onOpenRooms = { CrashReport.step("open ROOMS (from Sound)"); overlay = Overlay.ROOMS },
+                                )
+                            }
+                            Overlay.ROOMS -> com.ltots.app.ui.components.SwipeBackPage("ROOMS", keepOffset = true, onBack = { overlay = null }) {
+                                com.ltots.app.ui.screens.RoomsScreen(onBack = { CrashReport.step("close ROOMS (back)"); overlay = null })
                             }
                             Overlay.EQ -> com.ltots.app.ui.components.SwipeBackPage("EQ", keepOffset = true, onBack = { overlay = null }) {
                                 EqScreen(player, onBack = { CrashReport.step("close EQ (back)"); overlay = null })
@@ -375,10 +381,11 @@ fun AppRoot() {
                                         player, artwork,
                                         onOpenEq = { CrashReport.step("open EQ"); overlay = Overlay.EQ },
                                         onOpenSound = { CrashReport.step("open SOUND"); overlay = Overlay.SOUND },
+                                        onOpenRooms = { CrashReport.step("open ROOMS (from Playing)"); overlay = Overlay.ROOMS },
                                         showHistory = historyOpen, onShowHistory = { historyOpen = it },
                                     )
                                     Tab.DOWNLOADS -> DownloadsScreen(player, onOpenPlayer = { goTo(Tab.PLAYER, "from Get") })
-                                    Tab.PROFILE -> ProfileTab(artwork, lookOpen) { look ->
+                                    Tab.PROFILE -> ProfileTab(artwork, lookOpen, onOpenRooms = { CrashReport.step("open ROOMS (from Profile)"); overlay = Overlay.ROOMS }) { look ->
                                         CrashReport.step(if (look) "Profile tab → Look" else "Profile tab → Profile")
                                         lookOpen = look
                                     }
@@ -416,6 +423,8 @@ fun AppRoot() {
         }
         // Sign-in pages (song-finder sites, YouTube Music) open over everything.
         com.ltots.app.ui.components.SignInOverlay()
+        // Rooms: the code to compare when two phones meet for the first time.
+        com.ltots.app.ui.screens.RoomPairingDialog()
     }
 }
 
@@ -459,11 +468,13 @@ private fun TabPages(
 
 /** The Profile tab: the profiles and app settings, or Look, with a switch between them at the top. */
 @Composable
-private fun ProfileTab(artwork: android.graphics.Bitmap?, showLook: Boolean, onShowLook: (Boolean) -> Unit) {
+private fun ProfileTab(artwork: android.graphics.Bitmap?, showLook: Boolean, onOpenRooms: () -> Unit = {}, onShowLook: (Boolean) -> Unit) {
     val switch: @Composable () -> Unit = {
         Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Pill("Profile", !showLook, { if (showLook) onShowLook(false) })
             Pill("Look", showLook, { if (!showLook) onShowLook(true) })
+            // Rooms: playing across your phones (it opens over the tabs, like Sound).
+            Pill("Rooms", false, onOpenRooms)
         }
     }
     val holder = rememberSaveableStateHolder()

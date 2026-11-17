@@ -14,6 +14,30 @@ newer APK updates the app and keeps your settings.
 
 ## What's in phase 1
 
+- **Rooms** (Profile > Rooms, or Sound from the output chip) – your phones playing as one, over
+  the Wi-Fi. One phone is the **main**: it plays the queue with your EQ, pitch and speed, and its
+  finished sound goes to the room instead of its own speaker; every phone (the main too) plays it
+  against one shared clock. Phones find each other by themselves; the first time two meet, both
+  show the same 4-digit code to confirm. **Make this main** on any phone moves the queue, position
+  and the songs' EQ across at an agreed moment, so the music doesn't stop (the songs stay on the
+  old main and are read over the Wi-Fi as they play).
+  - **Earbuds** – keep the WF-1000XM6 connected to two phones (multipoint). The phone playing to
+    them watches its link: the signal strength over Bluetooth LE where the phone allows it, its
+    Bluetooth stream stalling, the earbuds dropping. When it clearly weakens for more than a
+    moment, the other phone takes over at the same point in the song (and keeps them for at least
+    8 s, so walking past a doorway doesn't flip them back and forth). **Play to earbuds from here**
+    switches by hand.
+  - **Speakers** – every phone plays to its own speaker (the S24 Ultra can feed two with Dual
+    Audio). Each phone reads from its AudioTrack's timestamps when its sound actually comes out
+    (Bluetooth delay included) and stays on the timeline: big errors are skipped or held at once,
+    small ones and the slow drift between phones' clocks are steered out by playing a few ppm
+    faster or slower through Android's own resampler (no clicks). **Calibrate with this phone's
+    mic** plays a short whistle through each speaker in turn, finds each one in the recording to a
+    fraction of a millisecond and lines them up where you stand — that's what cancels the
+    difference between an older and a newer JBL. A delay slider per phone fine-tunes by ear.
+  - The clock: each phone pings the main over UDP; only the fastest round trips are trusted and a
+    line fitted through them gives offset and drift (well under a millisecond on home Wi-Fi). The
+    music goes over TCP as 24-bit PCM, about half a second ahead of being heard.
 - **Rolls** (top of Home) – mixes dealt fresh from the songs on your phone: *A bit of everything*,
   two-genre clashes (*Rock × Jazz*), *Never played*, *Favourites remixed* (yours, cut with genres
   your favourites don't cover), a decade roll and *One song each*. Every roll is dealt one genre
