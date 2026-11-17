@@ -67,6 +67,32 @@ object Rooms {
         val adjustMs: Double,
         val plays: Boolean,
         val clockReady: Boolean,
+        /** Its output's own delay (Bluetooth), ms. */
+        val latencyMs: Double?,
+        /** How early the music reaches it before it must be written (negative: too late), ms. */
+        val marginMs: Double?,
+        /** Reached over Tailscale rather than the local Wi-Fi. */
+        val tailscale: Boolean,
+        /** Every output the phone has now, and the ones chosen (empty: its usual one). */
+        val outputs: List<OutputChoice> = emptyList(),
+        val selected: List<String> = emptyList(),
+        val sinks: List<OutputState> = emptyList(),
+    )
+
+    /** An output a phone has (its speaker, a Bluetooth device…). */
+    data class OutputChoice(val key: String, val name: String, val kind: String)
+
+    /** One output a phone plays to, and how it's doing. */
+    data class OutputState(
+        val key: String,
+        val name: String,
+        val rendering: Boolean,
+        val syncMs: Double,
+        val latencyMs: Double,
+        /** Android sent it where asked (false: this phone can't play there together with the rest). */
+        val routedOk: Boolean,
+        val routedTo: String,
+        val adjustMs: Double,
     )
 
     data class NearbyPhone(val id: String, val name: String, val isMain: Boolean, val trusted: Boolean)
@@ -89,6 +115,12 @@ object Rooms {
         val calibrating: Boolean = false,
         val lastSwitch: String = "",
         val handingOver: Boolean = false,
+        /** How far ahead the music is sent (ms): grows by itself when a phone needs it. */
+        val delayMs: Long = 0,
+        /** This phone's addresses (label to address), for connecting over Tailscale by hand. */
+        val myAddresses: List<Pair<String, String>> = emptyList(),
+        val port: Int = 0,
+        val connectError: String = "",
     )
 
     data class PairPrompt(val peerName: String, val code: String, internal val answer: CompletableFuture<Boolean>)
@@ -226,7 +258,8 @@ object Rooms {
 
     private fun openServer() {
         if (server != null) return
-        val s = ServerSocket(0)
+        // The usual port first, so it can be typed in for Tailscale; any free one otherwise.
+        val s = runCatching { ServerSocket(RoomLink.PORT) }.getOrElse { ServerSocket(0) }
         server = s
         serverPort = s.localPort
         Thread({
@@ -286,27 +319,85 @@ object Rooms {
 
     private fun accept(sock: java.net.Socket) {
         try {
-            val hello = RoomLink.handshake(sock, me, myRoleName(), serverPort, ::ask) ?: run { sock.close(); return }
+            val hello = RoomLink.handshake(sock, me, myRoleName(), serverPort, ::ask, myAddrs = myAddrs()) ?: run { sock.close(); return }
             linked(sock, hello)
         } catch (e: Throwable) {
             runCatching { sock.close() }
         }
     }
 
-    /** Opens a link to a phone found on the Wi-Fi. */
-    private fun dial(n: Nearby) {
-        if (!connecting.add(n.id)) return
+    private fun myAddrs(): List<String> = RoomLink.myAddresses().map { it.second }
+
+    /** Opens a link to a phone (found on the Wi-Fi, remembered, or typed in). */
+    private fun dial(n: Nearby, wantRole: String? = null, onFail: ((String) -> Unit)? = null) {
+        val key = n.id.ifBlank { "${n.host}:${n.port}" }
+        if (!connecting.add(key)) return
         Thread({
             try {
                 val sock = RoomLink.connect(n.host, n.port)
-                val hello = RoomLink.handshake(sock, me, myRoleName(), serverPort, ::ask)
-                if (hello == null) sock.close() else linked(sock, hello)
-            } catch (_: Throwable) {
+                val hello = RoomLink.handshake(sock, me, myRoleName(), serverPort, ::ask, wantRole, myAddrs())
+                if (hello == null) {
+                    sock.close()
+                    onFail?.invoke("That phone isn't ${if (wantRole == "main") "running a room" else "in Rooms"} right now, or the code wasn't confirmed.")
+                } else linked(sock, hello)
+            } catch (e: Throwable) {
+                onFail?.invoke("Couldn't reach ${n.host}:${n.port} (${e.message ?: e.javaClass.simpleName}).")
             } finally {
-                connecting.remove(n.id)
+                connecting.remove(key)
             }
         }, "LToTS-room-dial").apply { isDaemon = true; start() }
     }
+
+    /** Where a known phone was last reached (Wi-Fi and Tailscale addresses), newest first. */
+    private fun knownHosts(id: String): List<Pair<String, Int>> = runCatching {
+        val a = JSONArray(prefs.getString("hosts_$id", "[]"))
+        (0 until a.length()).map { a.getString(it) }.mapNotNull { hp ->
+            val host = hp.substringBeforeLast(':')
+            val port = hp.substringAfterLast(':').toIntOrNull() ?: return@mapNotNull null
+            host to port
+        }
+    }.getOrDefault(emptyList())
+
+    private fun remember(link: RoomLink) {
+        val port = link.hello.port.takeIf { it > 0 } ?: RoomLink.PORT
+        val hosts = (listOf(link.remoteHost) + link.hello.addrs).filter { it.isNotBlank() }.map { "$it:$port" }
+        val merged = (hosts + knownHosts(link.id).map { "${it.first}:${it.second}" }).distinct().take(6)
+        prefs.edit().putString("hosts_${link.id}", JSONArray(merged).toString()).apply()
+    }
+
+    @Volatile private var redialAt = 0
+
+    /**
+     * Without a main: try the remembered addresses of the phones this one knows, one at a time.
+     * This is how rooms find each other over Tailscale, where there's no discovery.
+     */
+    private fun redialKnown() {
+        val all = me.trustedPeers().flatMap { p -> knownHosts(p.id).map { p.id to it } }
+        if (all.isEmpty()) return
+        val (id, hp) = all[redialAt++ % all.size]
+        if (links.containsKey(id)) return
+        dial(Nearby(id, "", hp.first, hp.second, true, System.currentTimeMillis()), wantRole = "main")
+    }
+
+    /** Connect by address: a Tailscale IP or name (100.x.y.z, phone.tailnet.ts.net), optional :port. */
+    fun connectByAddress(text: String) {
+        val t = text.trim().removePrefix("http://").removePrefix("https://")
+        if (t.isBlank()) return
+        val host: String
+        val port: Int
+        if (t.startsWith("[")) { // [IPv6]:port
+            host = t.substringAfter('[').substringBefore(']')
+            port = t.substringAfter("]:", "").toIntOrNull() ?: RoomLink.PORT
+        } else if (t.count { it == ':' } == 1) {
+            host = t.substringBefore(':'); port = t.substringAfter(':').toIntOrNull() ?: RoomLink.PORT
+        } else {
+            host = t; port = RoomLink.PORT
+        }
+        _ui.value = _ui.value.copy(connectError = "")
+        dial(Nearby("", "", host, port, false, System.currentTimeMillis())) { msg -> connectError = msg; publish() }
+    }
+
+    @Volatile private var connectError = ""
 
     private fun linked(sock: java.net.Socket, hello: Hello) {
         val ok = when (role) {
@@ -318,6 +409,8 @@ object Rooms {
         val link = RoomLink(sock, hello, ::onFrame, ::onClosed)
         links.put(hello.peer.id, link)?.close()
         link.start()
+        connectError = ""
+        remember(link)
         if (role == Role.MAIN) welcome(link)
         else if (mainId == null || nextMain?.first == hello.peer.id) {
             if (mainId == null) mainId = hello.peer.id
@@ -418,6 +511,7 @@ object Rooms {
             RoomWire.CAL_PLAN -> onCalPlan(f.json())
             RoomWire.CAL_RESULT -> if (role == Role.MAIN) onCalResult(f.json())
             RoomWire.ADJUST -> adjust(f.json())
+            RoomWire.OUTPUTS -> f.json().optJSONArray("keys")?.let { k -> setOutputs((0 until k.length()).map { k.getString(it) }) }
             RoomWire.MAIN_REQUEST -> if (role == Role.MAIN) handOver(link.id)
             RoomWire.MAIN_HANDOFF -> takeOver(link, f.json())
             RoomWire.NEW_MAIN -> onNewMain(f.json())
@@ -455,7 +549,56 @@ object Rooms {
         publish()
     }
 
-    private fun delayFor(m: Mode): Long = if (m == Mode.SPEAKERS) 550_000_000L else 400_000_000L
+    /**
+     * Where the delay starts: what the room needed last time in this mode (it learns), or a
+     * safe start that covers Bluetooth's own delay.
+     */
+    private fun delayFor(m: Mode): Long =
+        prefs.getLong("delay_${m.name}", if (m == Mode.SPEAKERS) 800_000_000L else 700_000_000L).coerceIn(MIN_DELAY, MAX_DELAY)
+
+    private var delayRaisedAtMs = 0L
+    private var roomySinceMs = 0L
+
+    /**
+     * Keeps the delay just big enough for the slowest phone: each one reports how early the
+     * music reaches it compared to when it must write it ([RoomRenderer.minMarginNs]). Too little
+     * (Bluetooth earbuds take ~0.3 s, Tailscale adds its own) and the music arrives late on that
+     * phone: sound, nothing, sound, nothing. So it goes up at once; it comes down slowly when
+     * there's plenty to spare (a shorter delay makes pause and skip answer sooner).
+     */
+    private fun tuneDelay(nowMs: Long) {
+        val who = (listOf(me.id) + links.keys).filter { shouldHear(it) }
+        val margins = who.mapNotNull { id -> reports[id]?.takeIf { it.has("margin") }?.optDouble("margin") }
+        if (margins.isEmpty()) return
+        val worst = margins.min()
+        val cur = RoomStream.delayNs
+        // After a raise the music already on its way still has the old margin: wait for it.
+        if (nowMs - delayRaisedAtMs < cur / 1_000_000L + 2_000) return
+        if (worst < 80.0) {
+            val next = (cur + ((150.0 - worst) * 1e6).toLong()).roundUpTo(50_000_000L).coerceAtMost(MAX_DELAY)
+            if (next > cur) {
+                RoomStream.extendDelay(next)
+                delayRaisedAtMs = nowMs
+                roomySinceMs = 0
+                prefs.edit().putLong("delay_${mode.name}", next).apply()
+            }
+        } else if (worst > 450.0) {
+            if (roomySinceMs == 0L) roomySinceMs = nowMs
+            if (nowMs - roomySinceMs > 30_000) {
+                val next = (cur - ((worst - 250.0) * 1e6).toLong()).roundUpTo(50_000_000L).coerceAtLeast(MIN_DELAY)
+                if (next < cur) {
+                    RoomStream.delayNs = next
+                    prefs.edit().putLong("delay_${mode.name}", next).apply()
+                }
+                roomySinceMs = 0
+            }
+        } else roomySinceMs = 0
+    }
+
+    private fun Long.roundUpTo(step: Long): Long = ((this + step - 1) / step) * step
+
+    private const val MIN_DELAY = 300_000_000L
+    private const val MAX_DELAY = 3_000_000_000L
 
     /** Where the main's music goes: this phone's renderer and every phone that should hear it. */
     private val stream = object : RoomStream.Listener {
@@ -510,6 +653,7 @@ object Rooms {
                 changed = true
             }
         }
+        tuneDelay(nowMs)
         if (changed || tick % 4 == 0) {
             val st = state()
             for (l in links.values) l.sendJson(RoomWire.STATE, st)
@@ -536,6 +680,7 @@ object Rooms {
                 JSONObject(r.toString()).put("id", id)
                     .put("name", if (id == me.id) me.name else links[id]?.peer?.name ?: r.optString("name"))
                     .put("plays", plays(id))
+                    .put("ts", links[id]?.let { RoomLink.isTailscale(it.remoteHost) } ?: false)
             )
         }
         return JSONObject()
@@ -565,7 +710,13 @@ object Rooms {
             "mode" -> setModeHere(runCatching { Mode.valueOf(o.optString("mode")) }.getOrDefault(mode))
             "earbuds_target" -> prefs.edit().putString("earbuds", o.optString("address")).putString("earbudsName", o.optString("name")).apply()
             "plays" -> prefs.edit().putBoolean("plays_${o.optString("node")}", o.optBoolean("on", true)).apply()
-            "adjust" -> sendAdjust(o.optString("node"), JSONObject().put("set", o.optDouble("ms")))
+            "adjust" -> sendAdjust(o.optString("node"), JSONObject().put("set", o.optDouble("ms")).put("out", o.optString("out")))
+            "outputs" -> {
+                val node = o.optString("node", from)
+                val keys = o.optJSONArray("keys") ?: JSONArray()
+                if (node == me.id) setOutputs((0 until keys.length()).map { keys.getString(it) })
+                else links[node]?.sendJson(RoomWire.OUTPUTS, JSONObject().put("keys", keys))
+            }
             "calibrate" -> startCalibration(o.optString("node", from))
         }
         val st = state()
@@ -593,6 +744,7 @@ object Rooms {
         lastState = st
         mode = runCatching { Mode.valueOf(st.optString("mode")) }.getOrDefault(mode)
         val target = st.optString("earbuds").takeIf { it.isNotBlank() }
+        earbuds?.targetName = st.optString("earbudsName").takeIf { it.isNotBlank() }
         earbuds?.target = target
         val myMember = st.optJSONArray("members")?.let { arr -> (0 until arr.length()).map { arr.getJSONObject(it) }.firstOrNull { it.optString("id") == me.id } }
         val plays = myMember?.optBoolean("plays", true) ?: true
@@ -601,24 +753,65 @@ object Rooms {
             Mode.SPEAKERS -> plays
             Mode.EARBUDS -> active == me.id
         }
-        renderer.preferredDevice = if (mode == Mode.EARBUDS) earbuds?.audioDevice() else null
-        renderer.adjustNs = (adjustMs() * 1e6).roundToLong()
+        refreshTargets()
         if (role == Role.NODE) publish()
     }
 
-    private fun adjustKey(): String = "adjust_" + (earbuds?.outputName() ?: "")
+    // ------------------------------------------------------------------------------------------
+    // Where this phone plays: its outputs
 
-    private fun adjustMs(): Double = if (mode == Mode.SPEAKERS) prefs.getFloat(adjustKey(), 0f).toDouble() else 0.0
+    /** The outputs chosen on this phone (empty: its usual one). */
+    private fun chosenOutputs(): List<String> = runCatching {
+        val a = JSONArray(prefs.getString("outputs", "[]"))
+        (0 until a.length()).map { a.getString(it) }
+    }.getOrDefault(emptyList())
+
+    /** The key a sink's delay adjustment is kept under (the usual output: per device name). */
+    private fun adjustPref(out: String): String =
+        if (out == AUTO) "adjust_" + (earbuds?.outputName() ?: "") else "adjust_$out"
+
+    private fun adjustMs(out: String): Double = prefs.getFloat(adjustPref(out), 0f).toDouble()
+
+    /**
+     * Turns the room's mode and this phone's choice into the outputs to play to. Earbuds mode:
+     * the earbuds only. Speakers mode: every chosen output that's there now — the speaker, a
+     * Bluetooth speaker, USB… each in sync on its own — or the phone's usual one.
+     */
+    private fun refreshTargets() {
+        val e = earbuds ?: return
+        val targets = if (mode == Mode.EARBUDS) {
+            val d = e.audioDevice()
+            if (d == null) emptyList()
+            else listOf(RoomRenderer.Target("earbuds", d.productName?.toString() ?: "Earbuds", d, 0L))
+        } else {
+            val have = e.outputs().associateBy { it.key }
+            val chosen = chosenOutputs().mapNotNull { have[it] }
+            if (chosen.isEmpty()) listOf(RoomRenderer.Target(AUTO, e.outputName(), null, (adjustMs(AUTO) * 1e6).roundToLong()))
+            else chosen.map { RoomRenderer.Target(it.key, it.name, it.device, (adjustMs(it.key) * 1e6).roundToLong()) }
+        }
+        renderer.setTargets(targets)
+    }
+
+    private fun setOutputs(keys: List<String>) {
+        prefs.edit().putString("outputs", JSONArray(keys.distinct()).toString()).apply()
+        refreshTargets()
+        publish()
+    }
 
     private fun adjust(o: JSONObject) {
-        val cur = prefs.getFloat(adjustKey(), 0f).toDouble()
-        val next = when {
-            o.has("set") -> o.getDouble("set")
-            o.has("delta") -> cur + o.getDouble("delta")
-            else -> cur
-        }.coerceIn(-1000.0, 1000.0)
-        prefs.edit().putFloat(adjustKey(), next.toFloat()).apply()
-        renderer.adjustNs = (adjustMs() * 1e6).roundToLong()
+        // Which output: the one named, or every output this phone plays to.
+        val outs = o.optString("out").takeIf { it.isNotBlank() }?.let { listOf(it) }
+            ?: renderer.sinks().map { it.key }.ifEmpty { listOf(AUTO) }
+        for (out in outs) {
+            val cur = adjustMs(out)
+            val next = when {
+                o.has("set") -> o.getDouble("set")
+                o.has("delta") -> cur + o.getDouble("delta")
+                else -> cur
+            }.coerceIn(-1000.0, 1000.0)
+            prefs.edit().putFloat(adjustPref(out), next.toFloat()).apply()
+        }
+        refreshTargets()
         publish()
     }
 
@@ -626,21 +819,31 @@ object Rooms {
         val e = earbuds
         val o = JSONObject()
             .put("id", me.id).put("name", me.name)
-            .put("output", e?.outputName() ?: "")
+            .put("output", renderer.sinks().map { it.name }.ifEmpty { listOf(e?.outputName() ?: "") }.joinToString(" + "))
             .put("earbuds", e?.connected == true)
             .put("stall", if (renderer.rendering) renderer.stall else 0.0)
             .put("sync", renderer.syncErrorNs / 1e6)
             .put("rendering", renderer.rendering)
-            .put("adj", prefs.getFloat(adjustKey(), 0f).toDouble())
+            .put("adj", adjustMs(AUTO))
+            // Every output this phone has, the ones chosen, and how each one is doing.
+            .put("outs", JSONArray().apply { e?.outputs()?.forEach { put(JSONObject().put("k", it.key).put("n", it.name).put("t", it.kind)) } })
+            .put("sel", JSONArray(chosenOutputs()))
+            .put("sinks", JSONArray().apply {
+                renderer.sinks().forEach { k ->
+                    put(
+                        JSONObject().put("k", k.key).put("n", k.name).put("r", k.rendering)
+                            .put("sync", k.syncErrorNs / 1e6).put("lat", k.latencyNs / 1e6)
+                            .put("ok", k.routedOk).put("to", k.routedName).put("adj", k.adjustNs / 1e6)
+                    )
+                }
+            })
             .put("clock", GroupClock.ready)
             .put("rssiSrc", e?.rssiSource ?: "")
             .put("a2dp", JSONArray().apply { e?.connectedDevices?.forEach { (n, a) -> put(JSONObject().put("n", n).put("a", a)) } })
         e?.rssi?.let { o.put("rssi", it) }
-        // While this phone should be playing to the earbuds but they don't receive it, it's
-        // as good as a stalled link.
-        if (renderer.rendering && mode == Mode.EARBUDS && e != null && e.connected && !e.streaming()) {
-            o.put("stall", maxOf(o.getDouble("stall"), 0.6))
-        }
+        renderer.minMarginNs()?.let { o.put("margin", it / 1e6) }
+        o.put("lat", (if (renderer.rendering) renderer.outputLatencyNs else renderer.lastLatencyNs) / 1e6)
+        mainId?.let { links[it] }?.let { o.put("ts", RoomLink.isTailscale(it.remoteHost)) }
         return o
     }
 
@@ -648,6 +851,8 @@ object Rooms {
         val main = mainId?.let { links[it] }
         if (main == null) {
             if (tick % 8 == 0) autoJoin()
+            // Tailscale (no discovery there): the addresses phones were reached at before.
+            if (tick % 12 == 6) redialKnown()
             if (tick % 4 == 0) publish()
             return
         }
@@ -682,7 +887,11 @@ object Rooms {
     fun earbudsHere(node: String) = sendToMain(JSONObject().put("cmd", "earbuds_here").put("node", node))
     fun setEarbuds(name: String, address: String) = sendToMain(JSONObject().put("cmd", "earbuds_target").put("name", name).put("address", address))
     fun setPlays(node: String, on: Boolean) = sendToMain(JSONObject().put("cmd", "plays").put("node", node).put("on", on))
-    fun setAdjust(node: String, ms: Double) = sendToMain(JSONObject().put("cmd", "adjust").put("node", node).put("ms", ms))
+    fun setAdjust(node: String, ms: Double, out: String = "") =
+        sendToMain(JSONObject().put("cmd", "adjust").put("node", node).put("ms", ms).put("out", out))
+    /** Which outputs [node] plays to (empty: its usual one). */
+    fun setOutputs(node: String, keys: List<String>) =
+        sendToMain(JSONObject().put("cmd", "outputs").put("node", node).put("keys", JSONArray(keys)))
     fun calibrate() = sendToMain(JSONObject().put("cmd", "calibrate").put("node", me.id))
 
     /** Make this phone the main. */
@@ -772,15 +981,21 @@ object Rooms {
     private fun startCalibration(listener: String) {
         if (mode != Mode.SPEAKERS) { calStatus = "Calibration is for Speakers mode."; return }
         val nodes = (listOf(me.id) + links.keys).filter { plays(it) && (it == me.id || reports[it]?.optBoolean("clock") == true) }
-        if (nodes.isEmpty()) { calStatus = "No phone is playing to a speaker."; return }
+        // Every output of every playing phone chirps on its own: each is lined up separately.
+        val outs = nodes.flatMap { n ->
+            val sinks = reports[n]?.optJSONArray("sinks")
+            val keys = sinks?.let { a -> (0 until a.length()).map { a.getJSONObject(it).optString("k") } }.orEmpty()
+            keys.ifEmpty { listOf(AUTO) }.map { n to it }
+        }
+        if (outs.isEmpty()) { calStatus = "No phone is playing to a speaker."; return }
         RoomPlayer.pauseForCalibration()
         val id = ++calPlanId
         val start = GroupClock.now() + 2_200_000_000L
         val slots = JSONArray()
         var t = start
         repeat(ROUNDS) {
-            for (n in nodes) {
-                slots.put(JSONObject().put("node", n).put("at", t))
+            for ((n, out) in outs) {
+                slots.put(JSONObject().put("node", n).put("out", out).put("at", t))
                 t += SLOT_NS
             }
         }
@@ -804,7 +1019,7 @@ object Rooms {
         for (i in 0 until slots.length()) {
             val s = slots.getJSONObject(i)
             last = maxOf(last, s.getLong("at"))
-            if (s.getString("node") == me.id) renderer.chirpAt(s.getLong("at"))
+            if (s.getString("node") == me.id) renderer.chirpAt(s.getLong("at"), s.optString("out").ifBlank { null })
         }
         // Only the phones that chirp keep their output running for it.
         if ((0 until slots.length()).any { slots.getJSONObject(it).getString("node") == me.id }) {
@@ -866,7 +1081,7 @@ object Rooms {
                 val hit = Chirp.find(data.copyOf(got), chirp, expected - win, expected + win) ?: continue
                 if (hit.clarity < 6.0) continue
                 val heardAt = groupAt(hit.index)
-                byNode.getOrPut(s.getString("node")) { ArrayList() }.add(heardAt - at)
+                byNode.getOrPut(s.getString("node") + "|" + s.optString("out", AUTO)) { ArrayList() }.add(heardAt - at)
             }
             for ((node, list) in byNode) {
                 list.sort()
@@ -892,17 +1107,30 @@ object Rooms {
         // Everyone lines up with the middle one: the smallest total change.
         val ref = heard.values.sorted()[heard.size / 2]
         val parts = ArrayList<String>()
-        for ((node, err) in heard) {
+        for ((nodeOut, err) in heard) {
+            val node = nodeOut.substringBefore('|')
+            val out = nodeOut.substringAfter('|', AUTO)
             val delta = -(err - ref)
-            if (kotlin.math.abs(delta) >= 0.3) sendAdjust(node, JSONObject().put("delta", delta))
-            parts += "${nameOf(node)} ${"%+.0f".format(delta)} ms"
+            if (kotlin.math.abs(delta) >= 0.3) sendAdjust(node, JSONObject().put("delta", delta).put("out", out))
+            parts += "${nameOf(node)}${outName(node, out)} ${"%+.0f".format(delta)} ms"
         }
-        val missed = (listOf(me.id) + links.keys).filter { plays(it) && it !in heard }
+        val missed = (listOf(me.id) + links.keys).filter { n -> plays(n) && heard.keys.none { it.startsWith("$n|") } }
         calStatus = "Lined up: " + parts.joinToString(", ") +
             (if (missed.isNotEmpty()) ". Not heard: " + missed.joinToString(", ") { nameOf(it) } else "")
     }
 
     private fun nameOf(id: String) = if (id == me.id) me.name else links[id]?.peer?.name ?: "Phone"
+
+    /** " (JBL Go 4)" when that phone plays to more than one output, else nothing. */
+    private fun outName(node: String, out: String): String {
+        val sinks = reports[node]?.optJSONArray("sinks") ?: return ""
+        if (sinks.length() < 2) return ""
+        val name = (0 until sinks.length()).map { sinks.getJSONObject(it) }.firstOrNull { it.optString("k") == out }?.optString("n")
+        return if (name.isNullOrBlank()) "" else " ($name)"
+    }
+
+    /** The phone's usual output (no output chosen). */
+    private const val AUTO = "auto"
 
     private const val ROUNDS = 3
     private const val SLOT_NS = 700_000_000L
@@ -934,6 +1162,21 @@ object Rooms {
                 adjustMs = m.optDouble("adj", 0.0),
                 plays = m.optBoolean("plays", true),
                 clockReady = m.optBoolean("clock"),
+                latencyMs = if (m.has("lat")) m.optDouble("lat") else null,
+                marginMs = if (m.has("margin")) m.optDouble("margin") else null,
+                tailscale = m.optBoolean("ts"),
+                outputs = m.optJSONArray("outs")?.let { a ->
+                    (0 until a.length()).map { a.getJSONObject(it) }.map { OutputChoice(it.optString("k"), it.optString("n"), it.optString("t")) }
+                }.orEmpty(),
+                selected = m.optJSONArray("sel")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty(),
+                sinks = m.optJSONArray("sinks")?.let { a ->
+                    (0 until a.length()).map { a.getJSONObject(it) }.map {
+                        OutputState(
+                            it.optString("k"), it.optString("n"), it.optBoolean("r"), it.optDouble("sync"), it.optDouble("lat"),
+                            it.optBoolean("ok", true), it.optString("to"), it.optDouble("adj"),
+                        )
+                    }
+                }.orEmpty(),
             )
         }
         val nearby = discovery?.list().orEmpty()
@@ -969,6 +1212,10 @@ object Rooms {
             calibrating = (st?.optString("cal") ?: "").startsWith("Calibrating"),
             lastSwitch = st?.optString("reason") ?: "",
             handingOver = _ui.value.handingOver && role == Role.NODE,
+            delayMs = st?.optLong("delay") ?: 0,
+            myAddresses = if (role == Role.OFF) emptyList() else RoomLink.myAddresses(),
+            port = serverPort,
+            connectError = connectError,
         )
         RoomService.update(app, _ui.value)
     }

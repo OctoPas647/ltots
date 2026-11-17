@@ -40,6 +40,8 @@ object RoomWire {
     const val CAL_RESULT = 42
     /** Main → one node: change your latency adjustment by this much / to this value. */
     const val ADJUST = 43
+    /** Main → one node: play to these outputs (empty: the phone's usual one). */
+    const val OUTPUTS = 44
     /** Node → main: "make me the main". */
     const val MAIN_REQUEST = 50
     /** Old main → new main: everything needed to carry on playing. */

@@ -35,9 +35,31 @@ newer APK updates the app and keeps your settings.
     mic** plays a short whistle through each speaker in turn, finds each one in the recording to a
     fraction of a millisecond and lines them up where you stand — that's what cancels the
     difference between an older and a newer JBL. A delay slider per phone fine-tunes by ear.
+  - **Any outputs a phone has** (Speakers mode, under each phone: *Plays to*) – *Automatic* (the
+    phone's usual output) or any mix of its speaker, wired / USB headphones, HDMI and each
+    connected Bluetooth device. Each chosen output gets its own player, kept in sync on its own,
+    with its own delay slider and its own whistle in the calibration. Several at once work as far
+    as the phone allows (speaker + Bluetooth and USB + Bluetooth usually do; two Bluetooth
+    devices only on phones like Samsung's with Dual Audio); when Android sends an output
+    somewhere else, the room says so under it.
+  - **The delay looks after itself** – the music is sent ahead by enough for the slowest phone's
+    network plus its output (Bluetooth earbuds take about a third of a second). Every phone reports
+    how early the music reaches it before it has to be written; when that gets tight the room sends
+    further ahead at once, and creeps back down when there's plenty to spare. What it learns is
+    kept per mode. The main also tops the stream up every ~0.1 s, so the lead never sags: that was
+    behind the music cutting in and out on the WF-1000XM6.
+  - **Tailscale** – phones on Tailscale (or any network where they can't find each other by
+    themselves) connect by address: Rooms > *Connect by address*, type the other phone's
+    100.x.y.z or MagicDNS name once (port 47430). Phones remember where they reached each other
+    and reconnect by themselves, over Wi-Fi or Tailscale. The room's screen shows which phones
+    are on Tailscale; the clock sync and the delay adjust to its longer round trips.
   - The clock: each phone pings the main over UDP; only the fastest round trips are trusted and a
     line fitted through them gives offset and drift (well under a millisecond on home Wi-Fi). The
-    music goes over TCP as 24-bit PCM, about half a second ahead of being heard.
+    music goes over TCP as 24-bit PCM.
+  - Steadier with Bluetooth: an output's timing readings go through a median (Bluetooth reports
+    in jumps), only an error over 25 ms lasting more than half a second makes it skip or hold,
+    and the stall check that hands the earbuds over looks at 2 s windows after the stream has
+    settled, so it no longer flips between phones on a hiccup.
 - **Rolls** (top of Home) – mixes dealt fresh from the songs on your phone: *A bit of everything*,
   two-genre clashes (*Rock × Jazz*), *Never played*, *Favourites remixed* (yours, cut with genres
   your favourites don't cover), a decade roll and *One song each*. Every roll is dealt one genre

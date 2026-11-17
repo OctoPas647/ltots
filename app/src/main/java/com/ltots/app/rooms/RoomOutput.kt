@@ -34,8 +34,21 @@ object RoomStream {
     /** True while the music goes to the room instead of this phone's own output. */
     @Volatile var active: Boolean = false
 
-    /** How far ahead of being heard the music is sent (ns). */
-    @Volatile var delayNs: Long = 450_000_000L
+    /**
+     * How far ahead of being heard the music is sent (ns): enough for the slowest phone's
+     * network (Wi-Fi or Tailscale) plus its output (Bluetooth can add a third of a second).
+     * The room raises it by itself when a phone reports music arriving too late ([extendDelay]).
+     */
+    @Volatile var delayNs: Long = 700_000_000L
+
+    /**
+     * A phone needs more time: send further ahead from now on. ExoPlayer tops the output up
+     * every ~0.1 s, so within a moment every piece of music leaves this phone the new delay
+     * before it's due (no pause needed: the timeline itself doesn't move).
+     */
+    fun extendDelay(newDelayNs: Long) {
+        if (newDelayNs > delayNs) delayNs = newDelayNs
+    }
 
     /** The first play after a handoff starts at exactly this group time. */
     @Volatile var pendingAnchorNs: Long = 0L
@@ -65,6 +78,13 @@ object RoomStream {
 /**
  * An [AudioOutput] that sends to the room. Its clock is the room's: a frame counts as played
  * once its group time has come.
+ *
+ * The timeline is set when playback starts (a start frame and the group time it's heard at).
+ *
+ * It always keeps [RoomStream.delayNs] (+ a little) of music sent ahead, and tells ExoPlayer
+ * its buffer is short ([REPORTED_BUFFER_NS]) so ExoPlayer tops it up every ~0.1 s: the music
+ * then always reaches the other phones the full delay before it's due, never in bursts that
+ * leave a phone waiting.
  */
 @UnstableApi
 internal class RoomAudioOutput(config: AudioOutputProvider.OutputConfig) : AudioOutput {
@@ -75,17 +95,18 @@ internal class RoomAudioOutput(config: AudioOutputProvider.OutputConfig) : Audio
     private val sessionId = config.audioSessionId
     private val listeners = CopyOnWriteArraySet<AudioOutput.Listener>()
 
-    /** Room for 4 s of music (it's never more than delay + 0.6 s ahead). */
-    private val capacity = rate * 4
+    /** Room for 5 s of music (the most delay the room ever asks for is 3 s). */
+    private val capacity = rate * 5
     private val ring = FloatArray(capacity * channels)
+
+    private class Seg(val frame: Long, val ns: Long)
 
     private val lock = Object()
     private var written = 0L
     private var sent = 0L
     private var playing = false
     private var anchored = false
-    private var anchorFrame = 0L
-    private var anchorNs = 0L
+    private val segs = ArrayList<Seg>()
     private var pausedHeard = 0L
     private var epoch = RoomStream.newEpoch()
     private var everSent = false
@@ -97,11 +118,22 @@ internal class RoomAudioOutput(config: AudioOutputProvider.OutputConfig) : Audio
 
     private fun frameNs(frames: Long): Long = frames * 1_000_000_000L / rate
 
+    /** Group time at which frame [f] is heard. */
+    private fun timeOf(f: Long): Long {
+        var s = segs[0]
+        for (x in segs) if (x.frame <= f) s = x
+        return s.ns + frameNs(f - s.frame)
+    }
+
     /** Frames heard by group time [now]. */
     private fun heard(now: Long): Long {
-        if (!anchored) return pausedHeard
-        if (now <= anchorNs) return anchorFrame
-        return min(written, anchorFrame + (now - anchorNs) * rate / 1_000_000_000L)
+        if (!anchored || segs.isEmpty()) return pausedHeard
+        var i = 0
+        while (i + 1 < segs.size && segs[i + 1].ns <= now) i++
+        val s = segs[i]
+        if (now <= s.ns) return s.frame
+        val end = if (i + 1 < segs.size) segs[i + 1].frame else written
+        return min(end, s.frame + (now - s.ns) * rate / 1_000_000_000L)
     }
 
     override fun play() {
@@ -115,16 +147,18 @@ internal class RoomAudioOutput(config: AudioOutputProvider.OutputConfig) : Audio
 
     /** Puts the not-yet-heard music on the timeline, starting at the right moment. */
     private fun anchor(now: Long) {
-        anchorFrame = pausedHeard
-        sent = anchorFrame
+        val first = pausedHeard
+        sent = first
         val handoff = RoomStream.pendingAnchorNs
         val cont = RoomStream.continueAtNs
-        anchorNs = when {
+        val at = when {
             handoff > now + MIN_LEAD_NS -> { RoomStream.pendingAnchorNs = 0L; handoff }
             cont > now + MIN_LEAD_NS && !everAnchored -> cont
             else -> now + RoomStream.delayNs
         }
         RoomStream.continueAtNs = 0L
+        segs.clear()
+        segs += Seg(first, at)
         anchored = true
         everAnchored = true
         epoch = RoomStream.newEpoch()
@@ -145,9 +179,8 @@ internal class RoomAudioOutput(config: AudioOutputProvider.OutputConfig) : Audio
     override fun write(buffer: ByteBuffer, encodedAccessUnitCount: Int, presentationTimeUs: Long): Boolean {
         synchronized(lock) {
             val now = GroupClock.now()
-            val heardNow = heard(now)
-            val ahead = written - heardNow
-            val limit = ((RoomStream.delayNs + AHEAD_NS) * rate / 1_000_000_000L).coerceAtMost(capacity.toLong() - 1)
+            val ahead = written - heard(now)
+            val limit = ((RoomStream.delayNs + HEADROOM_NS) * rate / 1_000_000_000L).coerceAtMost(capacity.toLong() - 1)
             val room = (limit - ahead).coerceAtLeast(0)
             val available = buffer.remaining() / bytesPerFrame
             val n = min(available.toLong(), room).toInt()
@@ -173,7 +206,7 @@ internal class RoomAudioOutput(config: AudioOutputProvider.OutputConfig) : Audio
         if (!anchored) return
         val now = GroupClock.now()
         // ExoPlayer fell behind (a stream buffering): the timeline waits for it.
-        if (sent < written && anchorNs + frameNs(sent - anchorFrame) < now + MIN_LEAD_NS) {
+        if (sent < written && timeOf(sent) < now + MIN_LEAD_NS) {
             pausedHeard = sent
             val old = epoch
             anchor(now)
@@ -182,8 +215,10 @@ internal class RoomAudioOutput(config: AudioOutputProvider.OutputConfig) : Audio
         }
         val chunk = rate / 50 // 20 ms pieces
         while (sent < written) {
-            val n = min(chunk.toLong(), written - sent).toInt()
-            val at = anchorNs + frameNs(sent - anchorFrame)
+            // Never across a segment boundary (the times jump there).
+            val nextSeg = segs.firstOrNull { it.frame > sent }?.frame ?: Long.MAX_VALUE
+            val n = min(min(chunk.toLong(), written - sent), nextSeg - sent).toInt()
+            val at = timeOf(sent)
             if (at >= RoomStream.stopAtNs) { sent = written; break }
             val samples = FloatArray(n * channels)
             for (f in 0 until n) {
@@ -199,7 +234,7 @@ internal class RoomAudioOutput(config: AudioOutputProvider.OutputConfig) : Audio
         }
         if (!advancingReported) {
             advancingReported = true
-            val startsInMs = (anchorNs - now) / 1_000_000L
+            val startsInMs = (segs[0].ns - now) / 1_000_000L
             listeners.forEach { it.onPositionAdvancing(System.currentTimeMillis() + max(0L, startsInMs)) }
         }
     }
@@ -208,6 +243,7 @@ internal class RoomAudioOutput(config: AudioOutputProvider.OutputConfig) : Audio
         synchronized(lock) {
             if (everSent) RoomStream.listener?.onCut(epoch, GroupClock.now())
             written = 0; sent = 0; pausedHeard = 0; anchored = false; stopped = false
+            segs.clear()
             epoch = RoomStream.newEpoch()
         }
     }
@@ -217,7 +253,7 @@ internal class RoomAudioOutput(config: AudioOutputProvider.OutputConfig) : Audio
             // No more music for this output: everything written counts as handed over, so
             // ExoPlayer moves on at once and the next song can carry straight on from here.
             stopped = true
-            if (anchored) RoomStream.continueAtNs = anchorNs + frameNs(written - anchorFrame)
+            if (anchored) RoomStream.continueAtNs = timeOf(written)
         }
     }
 
@@ -239,9 +275,9 @@ internal class RoomAudioOutput(config: AudioOutputProvider.OutputConfig) : Audio
 
     override fun setVolume(volume: Float) { this.volume = volume }
     override fun isOffloadedPlayback(): Boolean = false
-    override fun getAudioSessionId(): Int = sessionId.takeIf { it != C.AUDIO_SESSION_ID_UNSET } ?: C.AUDIO_SESSION_ID_UNSET
+    override fun getAudioSessionId(): Int = sessionId
     override fun getSampleRate(): Int = rate
-    override fun getBufferSizeInFrames(): Long = ((RoomStream.delayNs + AHEAD_NS) * rate / 1_000_000_000L)
+    override fun getBufferSizeInFrames(): Long = REPORTED_BUFFER_NS * rate / 1_000_000_000L
     override fun getPlaybackParameters(): PlaybackParameters = params
     override fun isStalled(): Boolean = false
     override fun addListener(listener: AudioOutput.Listener) { listeners.add(listener) }
@@ -253,10 +289,15 @@ internal class RoomAudioOutput(config: AudioOutputProvider.OutputConfig) : Audio
     override fun setAuxEffectSendLevel(level: Float) {}
     override fun setPreferredDevice(preferredDevice: AudioDeviceInfo?) {}
 
-    private companion object {
+    internal companion object {
         /** A frame is sent at least this long before it's heard, or the timeline waits. */
         const val MIN_LEAD_NS = 150_000_000L
-        /** How much further ahead than [RoomStream.delayNs] ExoPlayer may write. */
-        const val AHEAD_NS = 600_000_000L
+        /** How much more than [RoomStream.delayNs] may be sent ahead. */
+        const val HEADROOM_NS = 250_000_000L
+        /**
+         * The buffer size ExoPlayer is told: it sleeps for half of it between top-ups, so the
+         * lead never sags more than ~0.1 s below delay + headroom.
+         */
+        const val REPORTED_BUFFER_NS = 200_000_000L
     }
 }

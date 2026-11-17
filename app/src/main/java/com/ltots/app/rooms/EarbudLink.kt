@@ -45,6 +45,9 @@ class EarbudLink(context: Context) {
             if (field != v) { field = v; resetRssi() }
         }
 
+    /** Their name, to recognise them also when Android lists them by another address (LE Audio). */
+    @Volatile var targetName: String? = null
+
     /** The earbuds are connected to this phone for music. */
     @Volatile var connected: Boolean = false; private set
     /** Signal strength (dBm) if measured in the last few seconds. */
@@ -104,8 +107,11 @@ class EarbudLink(context: Context) {
         val devices = a2dp?.connectedDevices.orEmpty()
         connectedDevices = devices.map { (runCatching { it.name }.getOrNull() ?: it.address) to it.address }
         val t = target
-        val dev = devices.firstOrNull { it.address.equals(t, ignoreCase = true) }
-        connected = dev != null
+        var dev = devices.firstOrNull { it.address.equals(t, ignoreCase = true) }
+        // Over LE Audio the earbuds aren't on the A2DP list: they're an audio output instead.
+        val asOutput = audioDevice()
+        if (dev == null && asOutput != null && t != null) dev = runCatching { adapter?.getRemoteDevice(t.uppercase()) }.getOrNull()
+        connected = devices.any { it.address.equals(t, ignoreCase = true) } || asOutput != null
         if (dev == null) {
             closeGatt()
             stopScan()
@@ -211,11 +217,37 @@ class EarbudLink(context: Context) {
     /** The earbuds as an audio output, to send the music to them specifically. */
     fun audioDevice(): AudioDeviceInfo? {
         val t = target ?: return null
+        val name = targetName
         val am = app.getSystemService(AudioManager::class.java) ?: return null
-        return am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull {
-            (it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || it.type == AudioDeviceInfo.TYPE_BLE_HEADSET) &&
-                it.address.equals(t, ignoreCase = true)
+        val bt = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).filter {
+            it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || it.type == AudioDeviceInfo.TYPE_BLE_HEADSET
         }
+        return bt.firstOrNull { it.address.equals(t, ignoreCase = true) }
+            ?: bt.firstOrNull { !name.isNullOrBlank() && it.productName?.toString().equals(name, ignoreCase = true) }
+    }
+
+    /** One output this phone could play to. */
+    data class Output(val key: String, val name: String, val kind: String, val device: AudioDeviceInfo)
+
+    /**
+     * Every output this phone has right now: its speaker, wired or USB headphones, each
+     * Bluetooth device, HDMI. The key stays the same while the device stays the same (a
+     * Bluetooth device by its address), so a choice is remembered across reconnects.
+     */
+    fun outputs(): List<Output> {
+        val am = app.getSystemService(AudioManager::class.java) ?: return emptyList()
+        return am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).mapNotNull { d ->
+            val name = d.productName?.toString()?.takeIf { it.isNotBlank() }
+            when (d.type) {
+                AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> Output("speaker", "Phone speaker", "speaker", d)
+                AudioDeviceInfo.TYPE_WIRED_HEADPHONES, AudioDeviceInfo.TYPE_WIRED_HEADSET -> Output("wired", name ?: "Wired headphones", "wired", d)
+                AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_USB_DEVICE -> Output("usb", name ?: "USB audio", "usb", d)
+                AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> Output("bt:${d.address.lowercase()}", name ?: "Bluetooth", "bluetooth", d)
+                AudioDeviceInfo.TYPE_BLE_HEADSET, AudioDeviceInfo.TYPE_BLE_SPEAKER -> Output("le:${(name ?: d.address).lowercase()}", name ?: "Bluetooth LE", "bluetooth", d)
+                AudioDeviceInfo.TYPE_HDMI -> Output("hdmi", name ?: "HDMI", "hdmi", d)
+                else -> null
+            }
+        }.distinctBy { it.key }
     }
 
     /** What this phone plays through now (for the room's list). */

@@ -23,6 +23,8 @@ import kotlin.math.roundToLong
 class SyncController(
     /** Errors beyond this are fixed by skipping / holding. */
     private val jumpNs: Long = 12_000_000L,
+    /** A big error has to last this long before it's jumped on. */
+    private val jumpHoldNs: Long = 300_000_000L,
     /** Never steer harder than this (0.2 %: inaudible). */
     private val maxPpm: Double = 2000.0,
     private val kp: Double = 120.0, // ppm per ms of error
@@ -63,7 +65,7 @@ class SyncController(
         if (abs(smoothed) > jumpNs) {
             // Only a lasting big error jumps (one wild Bluetooth timestamp doesn't).
             if (bigSince < 0) bigSince = nowNs
-            if (nowNs - bigSince >= 300_000_000L) return jump(smoothed.roundToLong())
+            if (nowNs - bigSince >= jumpHoldNs) return jump(smoothed.roundToLong())
         } else bigSince = -1L
 
         val ms = smoothed / 1e6

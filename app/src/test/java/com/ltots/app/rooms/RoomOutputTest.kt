@@ -86,8 +86,8 @@ class RoomOutputTest {
             out.write(b, 1, 0)
             accepted += (4800 - b.remaining() / 8)
         }
-        // 0.3 s delay + 0.6 s: about 43,200 frames, not the 96,000 offered.
-        assertTrue("accepted $accepted", accepted in 40_000..46_000)
+        // 0.3 s delay + 0.25 s headroom: about 26,400 frames, not the 96,000 offered.
+        assertTrue("accepted $accepted", accepted in 25_000..28_000)
         val b = frames(4800)
         assertFalse(out.write(b, 1, 0))
     }
@@ -137,5 +137,40 @@ class RoomOutputTest {
         out.play()
         assertEquals(at, chunks.first().groupNs)
         assertEquals(0L, RoomStream.pendingAnchorNs)
+    }
+
+    /**
+     * ExoPlayer topping up every 0.1 s (what the short reported buffer makes it do): every piece
+     * of music leaves at least the full delay before it's due — never in bursts that leave a
+     * phone with Bluetooth's 0.3 s waiting (the "music, nothing, music" bug).
+     */
+    @Test fun everyPieceLeavesAtLeastTheDelayAhead() {
+        val leads = ArrayList<Long>()
+        RoomStream.listener = object : RoomStream.Listener {
+            override fun onChunk(chunk: AudioChunk, packet: ByteArray) { leads += chunk.groupNs - GroupClock.now() }
+            override fun onCut(epoch: Int, atNs: Long) {}
+        }
+        val out = output()
+        assertEquals(200_000L * 48, out.bufferSizeInFrames * 1000)
+        out.play()
+        val end = System.nanoTime() + 1_500_000_000L
+        while (System.nanoTime() < end) {
+            out.write(frames(48000), 1, 0)
+            Thread.sleep(100)
+        }
+        val min = leads.minOrNull()!!
+        assertTrue("tightest lead ${min / 1e6} ms", min >= RoomStream.delayNs - 15_000_000L)
+    }
+
+    @Test fun moreDelayMeansMoreSentAhead() {
+        val out = output()
+        out.play()
+        RoomStream.extendDelay(900_000_000L)
+        var accepted = 0
+        repeat(30) { val b = frames(4800); out.write(b, 1, 0); accepted += (4800 - b.remaining() / 8) }
+        // 0.9 s + 0.25 s.
+        assertTrue("accepted $accepted", accepted in 54_000..56_500)
+        RoomStream.extendDelay(500_000_000L) // never lowers
+        assertEquals(900_000_000L, RoomStream.delayNs)
     }
 }

@@ -129,6 +129,10 @@ fun RoomsScreen(onBack: () -> Unit) {
             Spacer(Modifier.height(12.dp))
             NearbyCard(ui)
         }
+        if (ui.role != Rooms.Role.OFF) {
+            Spacer(Modifier.height(12.dp))
+            AddressCard(ui)
+        }
 
         Spacer(Modifier.height(14.dp))
         Text(
@@ -207,8 +211,9 @@ private fun ModeCard(ui: Rooms.Ui) {
                 Rooms.setMode(if (i == 0) Rooms.Mode.EARBUDS else Rooms.Mode.SPEAKERS)
             }
             Text(
-                if (ui.mode == Rooms.Mode.EARBUDS) "One phone at a time sends to your earbuds: the one with the better link."
-                else "Every phone plays to its own speaker, in sync.",
+                (if (ui.mode == Rooms.Mode.EARBUDS) "One phone at a time sends to your earbuds: the one with the better link."
+                else "Every phone plays to its own speaker, in sync.") +
+                    (if (ui.delayMs > 0) " The music is sent ${ui.delayMs} ms ahead, enough for the slowest phone's network and Bluetooth; it adjusts by itself." else ""),
                 color = pal.textDim, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp),
             )
         }
@@ -316,6 +321,9 @@ private fun MemberRow(ui: Rooms.Ui, m: Rooms.Member) {
                 )
                 val parts = ArrayList<String>()
                 parts += m.output.ifBlank { "—" }
+                if (m.tailscale) parts += "via Tailscale"
+                m.latencyMs?.takeIf { it > 0 }?.let { parts += "output ${"%.0f".format(Locale.ROOT, it)} ms" }
+                m.marginMs?.let { if (it < 0) parts += "music late by ${"%.0f".format(Locale.ROOT, -it)} ms" }
                 parts += when {
                     !m.clockReady -> "syncing clock"
                     m.rendering -> "playing" + (m.syncMs?.let { " · ${"%+.1f".format(Locale.ROOT, it)} ms" } ?: "")
@@ -340,14 +348,55 @@ private fun MemberRow(ui: Rooms.Ui, m: Rooms.Member) {
         if (ui.mode == Rooms.Mode.SPEAKERS) {
             Column(Modifier.padding(start = 32.dp)) {
                 SwitchRow("Plays", m.plays, { Rooms.setPlays(m.id, it) })
-                var adj by remember(m.id, m.adjustMs) { mutableFloatStateOf(m.adjustMs.toFloat()) }
-                LabeledSlider(
-                    "Delay", adj, { adj = it }, -300f..300f,
-                    "${"%+.0f".format(Locale.ROOT, adj)} ms",
-                    onReset = { adj = 0f; Rooms.setAdjust(m.id, 0.0) }, isDefault = kotlin.math.abs(adj) < 0.5f,
-                    onChangeFinished = { Rooms.setAdjust(m.id, adj.toDouble()) },
+                if (m.plays) OutputsPicker(m)
+            }
+        }
+    }
+}
+
+/**
+ * Which outputs a phone plays to in Speakers mode: its usual one, or any it has — its speaker,
+ * wired or USB, each Bluetooth device — several at once where the phone allows it, each lined
+ * up on its own with its own delay slider.
+ */
+@UnstableApi
+@Composable
+private fun OutputsPicker(m: Rooms.Member) {
+    val pal = LocalPalette.current
+    val warn = Color(0xFFFFC14D)
+    if (m.outputs.isNotEmpty()) {
+        Text("Plays to", color = pal.textFaint, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp, bottom = 6.dp))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Pill("Automatic", m.selected.isEmpty(), { Rooms.setOutputs(m.id, emptyList()) })
+            m.outputs.forEach { o ->
+                val on = o.key in m.selected
+                Pill(o.name, on, {
+                    Rooms.setOutputs(m.id, if (on) m.selected - o.key else m.selected + o.key)
+                })
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+    }
+    m.sinks.forEach { k ->
+        Column(Modifier.padding(top = 6.dp)) {
+            Text(
+                k.name + if (k.rendering) " · ${"%.0f".format(Locale.ROOT, k.latencyMs)} ms output · ${"%+.1f".format(Locale.ROOT, k.syncMs)} ms" else " · ready",
+                color = pal.textDim, style = MaterialTheme.typography.bodySmall,
+            )
+            if (!k.routedOk) {
+                Text(
+                    "This phone can't play to ${k.name} together with its other outputs" +
+                        (if (k.routedTo.isNotBlank()) " (Android sent it to ${k.routedTo})" else "") + ". Pick fewer outputs on this phone.",
+                    color = warn, style = MaterialTheme.typography.bodySmall,
                 )
             }
+            var adj by remember(m.id, k.key, k.adjustMs) { mutableFloatStateOf(k.adjustMs.toFloat()) }
+            LabeledSlider(
+                "Delay", adj, { adj = it }, -300f..300f,
+                "${"%+.0f".format(Locale.ROOT, adj)} ms",
+                onReset = { adj = 0f; Rooms.setAdjust(m.id, 0.0, k.key) }, isDefault = kotlin.math.abs(adj) < 0.5f,
+                onChangeFinished = { Rooms.setAdjust(m.id, adj.toDouble(), k.key) },
+            )
         }
     }
 }
@@ -397,4 +446,44 @@ fun RoomPairingDialog() {
         confirmButton = { TextButton({ Rooms.answerPairing(true) }) { Text("They match") } },
         dismissButton = { TextButton({ Rooms.answerPairing(false) }) { Text("Cancel") } },
     )
+}
+
+/** Connecting over Tailscale (or any network where phones can't find each other by themselves). */
+@UnstableApi
+@Composable
+private fun AddressCard(ui: Rooms.Ui) {
+    val pal = LocalPalette.current
+    var text by remember { mutableStateOf("") }
+    GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.06f) {
+        Column(Modifier.padding(16.dp)) {
+            SectionTitle("Connect by address")
+            val mine = ui.myAddresses.joinToString("\n") { (label, addr) ->
+                "$label: $addr" + if (ui.port != 0 && ui.port != com.ltots.app.rooms.RoomLink.PORT) ":${ui.port}" else ""
+            }
+            Text(
+                "Over Tailscale the phones can't find each other by themselves: type the other phone's Tailscale address " +
+                    "(100.x.y.z or its MagicDNS name) here once. After that they reconnect by themselves." +
+                    if (mine.isNotBlank()) "\n\nThis phone:\n$mine" else "",
+                color = pal.textDim, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 10.dp),
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                androidx.compose.material3.OutlinedTextField(
+                    text, { text = it }, Modifier.weight(1f),
+                    singleLine = true,
+                    placeholder = { Text("100.x.y.z", color = pal.textFaint) },
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = pal.text),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
+                        imeAction = androidx.compose.ui.text.input.ImeAction.Go,
+                    ),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onGo = { Rooms.connectByAddress(text) }),
+                )
+                Spacer(Modifier.width(8.dp))
+                Pill("Connect", false, { Rooms.connectByAddress(text) }, enabled = text.isNotBlank())
+            }
+            if (ui.connectError.isNotBlank()) {
+                Text(ui.connectError, color = Color(0xFFFFC14D), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
+            }
+        }
+    }
 }

@@ -20,8 +20,8 @@ import java.util.concurrent.LinkedBlockingDeque
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Who's on the other end of a link, after the handshake. */
-class Hello(val peer: Peer, val role: String, val port: Int)
+/** Who's on the other end of a link, after the handshake (and where else it can be reached). */
+class Hello(val peer: Peer, val role: String, val port: Int, val addrs: List<String> = emptyList())
 
 /**
  * One phone-to-phone connection, after the handshake: a reader thread handing frames to the
@@ -125,6 +125,10 @@ class RoomLink(
             myRole: String,
             myPort: Int,
             ask: (peerName: String, code: String) -> Boolean,
+            /** Give up at once (no code, no proof) unless the other phone has this role. */
+            wantRole: String? = null,
+            /** This phone's addresses (Wi-Fi, Tailscale) for the other to remember. */
+            myAddrs: List<String> = emptyList(),
         ): Hello? {
             socket.tcpNoDelay = true
             socket.keepAlive = true
@@ -136,10 +140,12 @@ class RoomLink(
                 out, RoomWire.HELLO,
                 JSONObject().put("v", RoomWire.VERSION).put("id", me.id).put("name", me.name)
                     .put("pub", RoomCrypto.b64(me.publicKey)).put("nonce", RoomCrypto.b64(myNonce))
-                    .put("role", myRole).put("port", myPort),
+                    .put("role", myRole).put("port", myPort)
+                    .put("addrs", org.json.JSONArray(myAddrs)),
             )
             val h = RoomWire.read(input)?.takeIf { it.type == RoomWire.HELLO }?.json() ?: return null
             if (h.optInt("v") != RoomWire.VERSION) return null
+            if (wantRole != null && h.optString("role") != wantRole) return null
             val pub = RoomCrypto.unb64(h.getString("pub"))
             val peerId = h.getString("id")
             if (RoomCrypto.idOf(pub) != peerId || peerId == me.id) return null
@@ -168,12 +174,46 @@ class RoomLink(
             val expected = RoomCrypto.authMac(shared, peerId, myNonce, theirNonce)
             if (!java.security.MessageDigest.isEqual(expected, RoomCrypto.unb64(a.getString("mac")))) return null
             if (!me.isTrusted(peerId, pub)) me.trust(peer)
-            return Hello(peer, h.optString("role", "node"), h.optInt("port", 0))
+            val addrs = h.optJSONArray("addrs")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty()
+            return Hello(peer, h.optString("role", "node"), h.optInt("port", 0), addrs)
         }
 
         fun connect(host: String, port: Int): Socket = Socket().apply {
             connect(InetSocketAddress(host, port), 5_000)
         }
+
+        /** The port every phone tries first, so it can be typed in (Tailscale has no discovery). */
+        const val PORT = 47430
+
+        /**
+         * This phone's addresses other phones can reach: Wi-Fi / Ethernet and Tailscale
+         * (100.64.0.0/10, and its fd7a:115c:a1e0:: IPv6 range). Labelled for the screen.
+         */
+        fun myAddresses(): List<Pair<String, String>> = runCatching {
+            java.net.NetworkInterface.getNetworkInterfaces().toList()
+                .filter { it.isUp && !it.isLoopback }
+                .flatMap { nif ->
+                    nif.inetAddresses.toList().mapNotNull { a ->
+                        val host = a.hostAddress?.substringBefore('%') ?: return@mapNotNull null
+                        when {
+                            isTailscale(a) -> "Tailscale" to host
+                            a is java.net.Inet4Address && a.isSiteLocalAddress -> "Wi-Fi" to host
+                            else -> null
+                        }
+                    }
+                }
+                .distinctBy { it.second }
+                .sortedBy { if (it.first == "Wi-Fi") 0 else 1 }
+        }.getOrDefault(emptyList())
+
+        fun isTailscale(a: InetAddress): Boolean {
+            val b = a.address
+            return if (a is java.net.Inet4Address) (b[0].toInt() and 0xFF) == 100 && (b[1].toInt() and 0xC0) == 64
+            else b.size == 16 && (b[0].toInt() and 0xFF) == 0xfd && (b[1].toInt() and 0xFF) == 0x7a &&
+                (b[2].toInt() and 0xFF) == 0x11 && (b[3].toInt() and 0xFF) == 0x5c
+        }
+
+        fun isTailscale(host: String): Boolean = runCatching { isTailscale(InetAddress.getByName(host)) }.getOrDefault(false)
     }
 }
 
