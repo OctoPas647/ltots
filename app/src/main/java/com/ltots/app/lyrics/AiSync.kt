@@ -65,13 +65,46 @@ object AiSync {
     private fun dir(context: Context) = File(context.filesDir, "ltots/ai")
     private fun modelDir(context: Context) = File(dir(context), MODEL)
 
+    /** Written while the recognizer runs on a song; still there at the next start = it crashed on that song. */
+    private fun listeningMarker(context: Context) = File(context.filesDir, "ltots/ai-listening")
+    /** Songs the recognizer crashed on: never tried again (a native crash takes the whole app down). */
+    private fun skipFile(context: Context) = File(context.filesDir, "ltots/ai-skip.txt")
+    private fun wordsCache(context: Context) = File(dir(context), "words.txt")
+    private val skipped = HashSet<Long>()
+    @Volatile private var words: Set<String>? = null
+
     fun init(context: Context) {
         _modelReady.value = File(modelDir(context), "conf").exists() || File(modelDir(context), "am").exists()
+        runCatching {
+            synchronized(skipped) { skipped += skipFile(context).takeIf { it.isFile }?.readLines()?.mapNotNull { it.trim().toLongOrNull() }.orEmpty() }
+            val marker = listeningMarker(context)
+            marker.takeIf { it.isFile }?.readText()?.trim()?.toLongOrNull()?.let { id ->
+                synchronized(skipped) { skipped += id }
+                skipFile(context).appendText("$id\n")
+            }
+            marker.delete()
+        }
+    }
+
+    private fun isSkipped(trackId: Long) = synchronized(skipped) { trackId in skipped }
+
+    /** The lyric words the model knows (a grammar of unknown words crashes Vosk); empty when too few to bother. */
+    private fun knownVocabulary(context: Context, plain: String): List<String> {
+        val known = words ?: ModelWords.load(modelDir(context), wordsCache(context))?.also { words = it } ?: return emptyList()
+        return ModelWords.knownOnly(LyricAlign.words(plain), known)
+    }
+
+    /** Runs [listen] with the crash marker set for [trackId]. */
+    private suspend fun <T> guarded(context: Context, trackId: Long, block: suspend () -> T): T {
+        val marker = listeningMarker(context)
+        runCatching { marker.parentFile?.mkdirs(); marker.writeText(trackId.toString()) }
+        try { return block() } finally { marker.delete() }
     }
 
     /** Removes the speech model (frees its space); it can be downloaded again. */
     fun removeModel(context: Context) {
         dir(context).deleteRecursively()
+        words = null
         _modelReady.value = false
     }
 
@@ -141,11 +174,13 @@ object AiSync {
      */
     suspend fun sync(context: Context, key: String, trackId: Long, doc: LyricsDoc, durationMs: Long): List<LyricLine>? = lock.withLock {
         val plain = doc.plain?.takeIf { it.isNotBlank() } ?: return null
-        if (!_modelReady.value) return null
+        if (!_modelReady.value || isSkipped(trackId)) return null
+        val vocab = withContext(Dispatchers.IO) { knownVocabulary(context, plain) }
+        if (vocab.isEmpty()) return null
         val uri = ContentUris.withAppendedId(MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL), trackId)
         _status.value = Status.Listening(key, 0f)
         try {
-            val heard = withContext(Dispatchers.Default) { listen(context, uri, plain, durationMs) { p -> _status.value = Status.Listening(key, p) } }
+            val heard = guarded(context, trackId) { withContext(Dispatchers.Default) { listen(context, uri, vocab, durationMs) { p -> _status.value = Status.Listening(key, p) } } }
             val result = LyricAlign.align(plain, heard, durationMs) ?: return null
             Lyrics.saveAiSynced(key, doc, result.lines)
             result.lines
@@ -160,18 +195,21 @@ object AiSync {
      * match uses this to check its own timing.
      */
     suspend fun hear(context: Context, trackId: Long, plain: String, durationMs: Long): LyricAlign.Result? = lock.withLock {
-        if (!_modelReady.value || plain.isBlank()) return null
+        if (!_modelReady.value || plain.isBlank() || isSkipped(trackId)) return null
+        val vocab = withContext(Dispatchers.IO) { knownVocabulary(context, plain) }
+        if (vocab.isEmpty()) return null
         val uri = ContentUris.withAppendedId(MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL), trackId)
-        val heard = withContext(Dispatchers.Default) { listen(context, uri, plain, durationMs) { } }
+        val heard = guarded(context, trackId) { withContext(Dispatchers.Default) { listen(context, uri, vocab, durationMs) { } } }
         LyricAlign.align(plain, heard, durationMs)
     }
 
     /** Runs the recognizer over the whole song; the words it heard, in time order. */
-    private suspend fun listen(context: Context, uri: Uri, plain: String, durationMs: Long, onProgress: (Float) -> Unit): List<HeardWord> {
+    private suspend fun listen(context: Context, uri: Uri, vocab: List<String>, durationMs: Long, onProgress: (Float) -> Unit): List<HeardWord> {
         org.vosk.LibVosk.setLogLevel(org.vosk.LogLevel.WARNINGS)
         val model = org.vosk.Model(modelDir(context).absolutePath)
-        // Only the lyrics' words (plus "unknown" for everything else): far fewer ways to mishear.
-        val grammar = JSONArray().apply { LyricAlign.vocabulary(plain).forEach { put(it) }; put("[unk]") }.toString()
+        // Only the lyrics' words the model knows (plus "unknown" for everything else): far fewer
+        // ways to mishear, and no unknown words (they leave Vosk a broken grammar that crashes it).
+        val grammar = JSONArray().apply { vocab.forEach { put(it) }; put("[unk]") }.toString()
         val rec = org.vosk.Recognizer(model, RATE.toFloat(), grammar)
         val heard = ArrayList<HeardWord>()
         fun collect(json: String) {
