@@ -24,6 +24,8 @@ object CrashLog {
         FREEZE("Freeze → closed", "LToTS froze and Android closed it", true),
         FREEZE_RECOVERED("Freeze", "LToTS froze for a moment", false),
         KILLED("Stopped by Android", "Android stopped LToTS", false),
+        /** Not a freeze: the screen was free, but Android held back LToTS's ordinary work (see Watchdog). */
+        STALL("Held back", "Android held back LToTS's work", false),
         ;
 
         companion object {

@@ -47,6 +47,11 @@ object NetImages {
     private const val DISK_MAX = 120L * 1024 * 1024
     @Volatile private var diskDir: java.io.File? = null
 
+    /** LToTS went to the background: covers in memory go (they're on disk, back in a moment). */
+    fun trim(all: Boolean) {
+        if (all) cache.evictAll() else cache.trimToSize(cache.maxSize() / 8)
+    }
+
     /** Called once at start-up: where the downloaded covers are kept. */
     fun init(context: android.content.Context) {
         diskDir = java.io.File(context.cacheDir, "covers").apply { mkdirs() }

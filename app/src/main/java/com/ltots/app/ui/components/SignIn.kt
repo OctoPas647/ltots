@@ -63,6 +63,8 @@ sealed interface SignInTarget {
     val label: String
     data class Site(val platform: Platform) : SignInTarget { override val label get() = platform.label }
     data object YouTubeMusic : SignInTarget { override val label get() = "YouTube Music" }
+    /** Spotify, Deezer, SoundCloud or Apple Music, for recommendations and listening numbers. */
+    data class Music(val service: com.ltots.app.elsewhere.Service) : SignInTarget { override val label get() = service.label }
 }
 
 /**
@@ -107,6 +109,7 @@ fun SignInPage(target: SignInTarget, onClose: () -> Unit, onSignedIn: () -> Unit
     fun signedInNow(): Boolean = when (target) {
         is SignInTarget.Site -> Platforms.browserSignedIn(target.platform)
         SignInTarget.YouTubeMusic -> YtmAccount.browserSignedIn()
+        is SignInTarget.Music -> com.ltots.app.accounts.Accounts.browserSignedIn(target.service)
     }
 
     fun finish(manual: Boolean) {
@@ -114,6 +117,7 @@ fun SignInPage(target: SignInTarget, onClose: () -> Unit, onSignedIn: () -> Unit
         val ok = when (target) {
             is SignInTarget.Site -> Platforms.saveSignIn(context, target.platform)
             SignInTarget.YouTubeMusic -> YtmAccount.saveFromBrowser()
+            is SignInTarget.Music -> com.ltots.app.accounts.Accounts.saveFromBrowser(target.service)
         }
         if (ok) {
             finishing = true
@@ -150,6 +154,7 @@ fun SignInPage(target: SignInTarget, onClose: () -> Unit, onSignedIn: () -> Unit
                 Text(
                     note ?: when (target) {
                         SignInTarget.YouTubeMusic -> "For recommendations from your YouTube Music. It closes by itself once you're in."
+                        is SignInTarget.Music -> "For picks from your ${target.label} and to count what you play there. It closes by itself once you're in."
                         else -> "Sign in as usual — it closes by itself once you're in."
                     },
                     color = pal.textDim, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
@@ -189,6 +194,7 @@ fun SignInPage(target: SignInTarget, onClose: () -> Unit, onSignedIn: () -> Unit
                         when (target) {
                             SignInTarget.YouTubeMusic -> YtmAccount.LOGIN_URL
                             is SignInTarget.Site -> target.platform.loginUrl ?: "https://${target.platform.hosts.first()}"
+                            is SignInTarget.Music -> com.ltots.app.accounts.Accounts.loginUrl(target.service)
                         }
                     )
                     requestFocus()
@@ -201,29 +207,15 @@ fun SignInPage(target: SignInTarget, onClose: () -> Unit, onSignedIn: () -> Unit
 }
 
 /**
- * Accounts: YouTube Music (recommendations on Home) and the sites the song finder can sign in
- * to, with sign in / sign out buttons.
+ * The sites the song finder can sign in to, with sign in / sign out buttons (the music
+ * services are in [com.ltots.app.ui.screens.MusicAccounts]).
  */
 @Composable
 fun FinderAccounts() {
     val context = LocalContext.current
     val pal = LocalPalette.current
     var version by remember { mutableIntStateOf(0) }
-    LaunchedEffect(Unit) { YtmAccount.load() }
-    val ytm by YtmAccount.account.collectAsState()
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("YouTube Music", color = pal.text)
-                Text(
-                    ytm?.let { "Signed in as ${it.name} · Home uses your YouTube Music" } ?: "Sign in so Home recommends from your YouTube Music too",
-                    color = pal.textFaint, style = MaterialTheme.typography.labelSmall,
-                )
-            }
-            if (ytm != null) Pill("Sign out", false, { YtmAccount.signOut(); com.ltots.app.recs.Recommender.invalidate() })
-            else Pill("Sign in", false, { SignInHost.open(SignInTarget.YouTubeMusic) { com.ltots.app.recs.Recommender.invalidate() } })
-        }
-        Spacer(Modifier.height(4.dp))
         Text(
             "Some sites only show posts to signed-in people. Sign in here once and the song finder can open them. Your password goes only to the site.",
             color = pal.textDim, style = MaterialTheme.typography.bodySmall,

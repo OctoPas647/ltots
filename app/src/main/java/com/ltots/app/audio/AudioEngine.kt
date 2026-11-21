@@ -260,6 +260,7 @@ object AudioEngine : SoundSource {
                 // Nothing is heard while paused, so modes can switch right away.
                 if (!isPlaying) latchLean()
                 PowerStats.onPlaying(isPlaying)
+                com.ltots.app.data.StatsThread.setPlaying(isPlaying)
                 com.ltots.app.data.StatsThread.post {
                     com.ltots.app.data.PlayStats.onPlaying(isPlaying)
                     com.ltots.app.data.ListenHistory.onPlaying(isPlaying)

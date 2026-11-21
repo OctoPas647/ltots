@@ -168,6 +168,8 @@ dependencies {
     // Background jobs that wait for the right moment (charging / online): waveform indexing and
     // lyrics lookup for the whole library.
     implementation("androidx.work:work-runtime-ktx:2.11.2")
+    // Account sign-ins (Spotify, Apple Music, SoundCloud): a script that runs before the site's own.
+    implementation("androidx.webkit:webkit:1.14.0")
     // On-device speech recognition that times plain lyrics (offline; the model is downloaded on request).
     implementation("com.alphacephei:vosk-android:0.3.75")
     implementation("com.google.guava:guava:33.7.2-android")

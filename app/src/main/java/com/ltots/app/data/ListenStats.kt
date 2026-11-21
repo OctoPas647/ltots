@@ -126,8 +126,14 @@ object ListenStats {
         if (timer) s.timer++
         if (!imported) countRun(y, k, cal.get(Calendar.DAY_OF_YEAR))
         if (s.album.isBlank() && album.isNotBlank()) s.album = album
-        addTime(y, s, cal, ms)
-        changed(cal.get(Calendar.YEAR))
+        if (imported) {
+            addTime(y, s, cal, ms)
+            changed(cal.get(Calendar.YEAR))
+        } else {
+            // Heard just now: the time so far belongs to the minutes before [at].
+            changed(cal.get(Calendar.YEAR))
+            spread(title, artist, album, ms, at)
+        }
     }
 
     /** One more play of [k] in a row (or the start of a new run); the year keeps its longest. */
@@ -149,15 +155,40 @@ object ListenStats {
         changed(cal.get(Calendar.YEAR))
     }
 
-    /** More of a song already counted was heard. */
+    /** More of a song already counted was heard, ending at [at]. */
     @Synchronized
     fun addTime(title: String, artist: String, ms: Long, at: Long = System.currentTimeMillis()) {
         if (ms <= 0 || title.isBlank()) return
         ensureLoaded()
-        val (y, cal) = yearOf(at)
-        val s = y.songs[key(title, artist)] ?: return
-        addTime(y, s, cal, ms)
-        changed(cal.get(Calendar.YEAR))
+        spread(title, artist, "", ms, at)
+    }
+
+    /**
+     * Adds [ms] of listening that ended at [endAt], split at every hour boundary so each part
+     * lands in the hour, day, month and year it was really heard (a long mix playing across
+     * midnight — or New Year — used to count entirely for the moment it stopped). A part in a
+     * year the song has no play in yet gets the song with no play, only time.
+     */
+    private fun spread(title: String, artist: String, album: String, ms: Long, endAt: Long) {
+        if (ms <= 0) return
+        val k = key(title, artist)
+        var end = endAt
+        var left = ms
+        val years = HashSet<Int>()
+        while (left > 0) {
+            val cal = Calendar.getInstance().apply { timeInMillis = end - 1 }
+            val hourStart = (cal.clone() as Calendar).apply {
+                set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+            }.timeInMillis
+            val part = minOf(left, end - hourStart).coerceAtLeast(1L)
+            val (y, c) = yearOf(end - 1)
+            val s = y.songs.getOrPut(k) { Song(title, artist.takeIf { it != Track.UNKNOWN } ?: "", album) }
+            addTime(y, s, c, part)
+            years += c.get(Calendar.YEAR)
+            left -= part
+            end -= part
+        }
+        years.forEach { changed(it) }
     }
 
     private fun addTime(y: Year, s: Song, cal: Calendar, ms: Long) {

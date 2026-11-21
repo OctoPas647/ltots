@@ -237,6 +237,9 @@ fun HomeScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenGet: () -> Unit
 
     com.ltots.app.ui.components.SwipeBackPage("Radio", enabled = radio != null, onBack = { radio = null }) {
     Box(Modifier.fillMaxSize()) {
+        val keepAliveNeeded by com.ltots.app.playback.KeepAlive.needsSetup.collectAsState()
+        val elsewhereNow by com.ltots.app.elsewhere.OtherApps.nowPlaying.collectAsState()
+        val elsewherePrompt by com.ltots.app.elsewhere.OtherApps.promptFor.collectAsState()
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = topInset() + 10.dp, bottom = bottomChrome() + if (preview.active) 76.dp else 0.dp)) {
             // Greeting, refresh, account
             item("head") {
@@ -261,6 +264,12 @@ fun HomeScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenGet: () -> Unit
                     AccountButton(account) {
                         if (account == null) SignInHost.open(SignInTarget.YouTubeMusic) { Recommender.invalidate(); scope.launch { Recommender.load(context, force = true) } }
                     }
+                }
+            }
+
+            if (mood == null && radio == null && (elsewhereNow?.playing == true && com.ltots.app.elsewhere.OtherApps.offerContinue(context) || elsewherePrompt != null)) item("elsewhere") {
+                GlassPanel(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), tintBoost = 0.08f) {
+                    ElsewhereBanner(Modifier.padding(14.dp), onOpenPlayer = onOpenPlayer)
                 }
             }
 
@@ -312,6 +321,12 @@ fun HomeScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenGet: () -> Unit
             if (mood == null && radio == null) item("listening") {
                 @Suppress("UNUSED_EXPRESSION") statsVersion
                 com.ltots.app.ui.screens.ListeningCard(onOpenStats = { showStats = true }, onOpenWrapped = { wrappedYear = it })
+            }
+
+            if (keepAliveNeeded && mood == null && radio == null) item("keepalive") {
+                GlassPanel(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), tintBoost = 0.05f) {
+                    KeepAliveCard(Modifier.padding(14.dp))
+                }
             }
 
             if (account == null && mood == null && radio == null) item("signin") {

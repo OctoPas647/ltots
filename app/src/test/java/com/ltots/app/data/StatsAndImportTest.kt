@@ -39,11 +39,29 @@ class StatsAndImportTest {
         assertEquals("The Weeknd", s.artists.first().name)
         assertEquals(2, s.artists.first().songs)
         assertEquals(3, s.activeDays)
-        assertEquals(415_000L, s.hours[8] + s.hours[9] - 60_000L)
+        // Time heard ends at the moment it's added: a play added at 9:00 was heard before 9.
+        assertEquals(415_000L, s.hours[7] + s.hours[8] - 60_000L)
         // A play in another year is that year's.
         ListenStats.addPlay("Levitating", "Dua Lipa", "", 60_000, at(2025, 11, 31, 23))
         assertEquals(4, ListenStats.summary(2026).plays)
         assertEquals(5, ListenStats.summary(null).plays)
+    }
+
+    @Test fun listeningAcrossMidnightAndNewYearLandsWhereItWasHeard() {
+        // A 90-minute mix that started at 23:00 on New Year's Eve and was added at 00:30.
+        val end = at(2027, 0, 1, 0) + 30 * 60_000L
+        ListenStats.addPlay("Long Mix", "DJ", "", 3_000, at(2026, 11, 31, 23) + 3_000)
+        ListenStats.addTime("Long Mix", "DJ", 90 * 60_000L - 3_000, end)
+        val y26 = ListenStats.summary(2026)
+        val y27 = ListenStats.summary(2027)
+        assertEquals(60 * 60_000L, y26.totalMs)
+        assertEquals(30 * 60_000L, y27.totalMs)
+        assertEquals(60 * 60_000L, y26.hours[23])
+        assertEquals(30 * 60_000L, y27.hours[0])
+        // One play, counted in the year it started; the new year has the time but no play.
+        assertEquals(1, y26.plays)
+        assertEquals(0, y27.plays)
+        assertEquals(90 * 60_000L, ListenStats.summary(null).totalMs)
     }
 
     @Test fun spotifyExportsBothKinds() {

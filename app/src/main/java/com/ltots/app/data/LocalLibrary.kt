@@ -241,6 +241,11 @@ object LocalLibrary {
     }
     private val noArt = HashSet<Long>()
 
+    /** LToTS went to the background: keep only a few covers in memory (the playing one is drawn by the notification from its own copy). */
+    fun trimArt(all: Boolean) {
+        if (all) artCache.evictAll() else artCache.trimToSize(artCache.maxSize() / 8)
+    }
+
     /**
      * Album art for a track, cached per size: list rows keep small thumbnails (little memory,
      * quick to draw) and the player gets a sharp large one, instead of whichever size happened

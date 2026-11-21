@@ -48,6 +48,9 @@ object ExitScanner {
             ) continue
             val text = runCatching { report(context, info, kind, if (info === newest) lastTrail else null) }.getOrNull() ?: continue
             val file = runCatching { CrashLog.save(context, kind, text, info.timestamp) }.getOrNull() ?: continue
+            if (kind == CrashLog.Kind.KILLED && cleaner(info)) {
+                runCatching { com.ltots.app.playback.KeepAlive.onKilledByCleaner(context, info.timestamp) }
+            }
             out += Found(file, kind, CrashLog.entry(file)?.summary ?: kind.title)
         }
         return out
@@ -77,6 +80,12 @@ object ExitScanner {
             else -> null // EXIT_SELF (a normal close), PACKAGE_UPDATED (an update), USER_STOPPED…
         }
     }
+
+    /** Stopped by the phone's battery manager or cleaner, not by the person. */
+    private fun cleaner(info: ApplicationExitInfo): Boolean =
+        com.ltots.app.playback.KeepAlive.isCleaner(info.description) ||
+            info.reason == ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE ||
+            (info.reason == ApplicationExitInfo.REASON_USER_REQUESTED && com.ltots.app.playback.KeepAlive.isXiaomi && info.description.isNullOrBlank().not())
 
     private fun reasonName(r: Int): String = when (r) {
         ApplicationExitInfo.REASON_ANR -> "ANR (not responding)"
@@ -165,6 +174,10 @@ object ExitScanner {
             if (!summary.isNullOrBlank()) appendLine("Doing: $summary")
             appendLine("Found by: Android's exit record (read when LToTS next started)")
             appendLine()
+            if (kind == CrashLog.Kind.KILLED && cleaner(info)) {
+                append(com.ltots.app.playback.KeepAlive.adviceText())
+                appendLine()
+            }
             if (details.isNotBlank()) {
                 appendLine(details.trimEnd())
                 appendLine()

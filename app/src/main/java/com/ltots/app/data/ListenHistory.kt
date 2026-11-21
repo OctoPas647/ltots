@@ -51,7 +51,17 @@ object ListenHistory {
     // The song now loaded in the player.
     private var current: Listen? = null
     private var logged = false
+    /** When the current stretch of playing began ([SystemClock.elapsedRealtime]; 0: not playing). */
     private var playingSince = 0L
+    /** When the history file was last rewritten for the song playing (ticks rewrite it at most once a minute). */
+    private var publishedAt = 0L
+
+    /**
+     * Durations come from the monotonic clock: setting the phone's time, a time-zone change or a
+     * network time correction no longer adds or removes hours of listening. Deep sleep counts
+     * (music plays on through it with the audio chip), which is why it's elapsedRealtime, not uptime.
+     */
+    private fun clock() = android.os.SystemClock.elapsedRealtime()
 
     private fun file() = Store.userFile("history.json")
 
@@ -74,37 +84,47 @@ object ListenHistory {
     @Synchronized
     fun onSong(key: String?, trackId: Long, title: String, artist: String, album: String, durationMs: Long, playing: Boolean) {
         ensureLoaded()
-        settle()
+        settle(final = true)
         // The song being left was started and dropped within its first seconds: a skip.
         current?.let { prev -> if (logged && prev.skipped) runCatching { ListenStats.addSkip(prev.title, prev.artist, prev.at) } }
         current = key?.let { Listen(it, trackId, title, artist.takeIf { a -> a != Track.UNKNOWN } ?: "", album, durationMs, System.currentTimeMillis()) }
         logged = false
-        playingSince = if (playing && current != null) System.currentTimeMillis() else 0L
+        publishedAt = 0L
+        playingSince = if (playing && current != null) clock() else 0L
     }
 
     @Synchronized
     fun onPlaying(playing: Boolean) {
         ensureLoaded()
-        settle()
-        playingSince = if (playing && current != null) System.currentTimeMillis() else 0L
+        settle(final = !playing)
+        playingSince = if (playing && current != null) clock() else 0L
     }
 
-    /** Called now and then while playing, so a song gets logged without waiting for a pause. */
+    /**
+     * Called every few seconds while playing — by the stats thread's own timer, screen on or
+     * off (it used to come only from the Playing tab, so with the screen off a song counted only
+     * once it ended or paused, and Android closing LToTS mid-song lost it and everything heard
+     * since the last pause). Now the time heard is added as it goes: at most one tick's worth is
+     * lost, and each stretch lands in the hour it was really played.
+     */
     @Synchronized
     fun tick() {
-        // Only until the song is logged; after that, pauses and song changes update it.
-        if (playingSince > 0 && !logged) { settle(); playingSince = System.currentTimeMillis() }
+        if (playingSince <= 0L || current == null) return
+        settle(final = false)
+        playingSince = clock()
     }
 
     /** Adds the time played since the last event; logs the song once it has played a moment. */
-    private fun settle() {
+    private fun settle(final: Boolean) {
         val c = current ?: return
-        val added = if (playingSince > 0) System.currentTimeMillis() - playingSince else 0L
+        // A stretch longer than a day can only be a missed pause (the clock can't run backwards).
+        val added = if (playingSince > 0) (clock() - playingSince).coerceIn(0L, 24 * 3600_000L) else 0L
         if (playingSince > 0) current = c.copy(listenedMs = c.listenedMs + added)
         playingSince = 0L
         val now = current ?: return
         if (!logged && now.listenedMs >= LOG_AFTER_MS) {
             logged = true
+            publishedAt = clock()
             publish(listOf(now) + _items.value)
             // The all-time numbers (Home's stats and Wrapped): one play, and the time so far.
             runCatching {
@@ -115,9 +135,13 @@ object ListenHistory {
             }
         } else if (logged) {
             runCatching { ListenStats.addTime(now.title, now.artist, added) }
-            // Update the listened time of the entry already logged (always the newest one).
-            val list = _items.value
-            if (list.isNotEmpty() && list[0].key == now.key && list[0].at == now.at) publish(listOf(now) + list.drop(1))
+            // Update the listened time of the entry already logged (always the newest one) — at a
+            // pause or song change, and at most once a minute in between (the file can be big).
+            if (final || clock() - publishedAt >= 60_000L) {
+                publishedAt = clock()
+                val list = _items.value
+                if (list.isNotEmpty() && list[0].key == now.key && list[0].at == now.at) publish(listOf(now) + list.drop(1))
+            }
         }
     }
 

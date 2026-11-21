@@ -17,6 +17,7 @@ class LToTSApp : Application(), androidx.work.Configuration.Provider {
         if (CrashReport.isCrashProcess(this)) return
         CrashReport.install(this)
         Store.init(this)
+        runCatching { com.ltots.app.playback.KeepAlive.init(this) }
         // Screen on/off and charging, for everything that saves battery with the screen off.
         runCatching { com.ltots.app.playback.ScreenState.init(this) }
         com.ltots.app.ui.components.NetImages.init(this)
@@ -44,6 +45,23 @@ class LToTSApp : Application(), androidx.work.Configuration.Provider {
                 runCatching { com.ltots.app.data.ListenHistory.ensureLoaded() }
                 com.ltots.app.data.ListenStats.warm()
             }, "ltots-warm").apply { priority = Thread.MIN_PRIORITY; isDaemon = true }.start()
+        }
+    }
+
+    /**
+     * Android asks for memory back. Once LToTS is out of sight its picture caches go: on HyperOS
+     * the lock-screen cleaner ("LockScreenClean") picks the apps holding the most memory first,
+     * and LToTS used to sit at ~500 MB in the background with the screen locked.
+     */
+    @Suppress("DEPRECATION")
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (CrashReport.isCrashProcess(this)) return
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
+            val all = level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND
+            runCatching { com.ltots.app.ui.components.NetImages.trim(all) }
+            runCatching { com.ltots.app.data.LocalLibrary.trimArt(all) }
+            CrashReport.step("memory trimmed (level $level)")
         }
     }
 }

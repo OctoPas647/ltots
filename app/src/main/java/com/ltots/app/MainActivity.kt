@@ -5,6 +5,8 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -86,6 +88,7 @@ class MainActivity : ComponentActivity() {
     // The home-screen icon swaps colour only while LToTS is in the background.
     override fun onStart() {
         super.onStart()
+        setDrawingHeld(false)
         CrashReport.inFront = true
         com.ltots.app.ui.IconColor.onForeground(true)
         // Screen-off sound modes give way to full quality while LToTS is open.
@@ -96,8 +99,28 @@ class MainActivity : ComponentActivity() {
         super.onStop()
         CrashReport.inFront = false
         if (!isChangingConfigurations) {
+            setDrawingHeld(true)
             com.ltots.app.ui.IconColor.onForeground(false)
             runCatching { com.ltots.app.audio.AudioEngine.setAppInFront(false) }
+        }
+    }
+
+    /**
+     * While LToTS is hidden, its screen asks for no frames. Anything that changes on it (the
+     * seek bar, the visualizer, a cover loading) used to ask Android to redraw the hidden
+     * window; that puts a "sync barrier" in the main thread's queue until the next frame, and
+     * HyperOS gives a hidden app no frames — so every ordinary message waited behind it, the
+     * player's own included (songs stopped moving on, the media notification stopped updating,
+     * and LToTS looked frozen to its own freeze watch for minutes). An invisible view never asks
+     * to be redrawn; the screen is drawn fresh the moment LToTS is visible again.
+     */
+    private fun setDrawingHeld(held: Boolean) {
+        runCatching {
+            val content = findViewById<android.view.ViewGroup>(android.R.id.content) ?: return
+            val compose = content.getChildAt(0) as? android.view.ViewGroup ?: return
+            val target = compose.getChildAt(0) ?: compose
+            val v = if (held) android.view.View.INVISIBLE else android.view.View.VISIBLE
+            if (target.visibility != v) target.visibility = v
         }
     }
 
@@ -127,6 +150,16 @@ class MainActivity : ComponentActivity() {
             else intent.getStringExtra(android.content.Intent.EXTRA_TEXT)?.let { Inbox.sharedText.value = it }
         }
         intent.getStringExtra(EXTRA_TAB)?.let { Inbox.openTab.value = it }
+        // "Continue in LToTS" (notification): take over the song another app is playing.
+        if (intent.getBooleanExtra(com.ltots.app.elsewhere.OtherApps.EXTRA_CONTINUE, false)) {
+            intent.removeExtra(com.ltots.app.elsewhere.OtherApps.EXTRA_CONTINUE)
+            val app = applicationContext
+            lifecycleScope.launch {
+                if (com.ltots.app.elsewhere.OtherApps.continueHere(app) == com.ltots.app.elsewhere.OtherApps.Outcome.PLAYING) {
+                    Inbox.openTab.value = "PLAYER"
+                }
+            }
+        }
     }
 
     // Android shows the bars again after dialogs, the notification shade or switching apps;

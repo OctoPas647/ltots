@@ -499,10 +499,27 @@ private fun AppSettingsCard() {
 
             AiLyricsSetting()
 
-            SectionTitle("Accounts · YouTube Music & song finder")
+            SectionTitle("Accounts · your music")
+            MusicAccounts()
+            Spacer(Modifier.height(14.dp))
+            OtherAppsSettings()
+            Spacer(Modifier.height(10.dp))
+            SectionTitle("Accounts · song finder sites")
             com.ltots.app.ui.components.FinderAccounts()
             Spacer(Modifier.height(10.dp))
 
+            KeepAliveSettings()
+            Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Feature tour", color = pal.text)
+                    Text("The cards from the first start, and every tip again.", color = pal.textFaint, style = MaterialTheme.typography.labelSmall)
+                }
+                val ctx = androidx.compose.ui.platform.LocalContext.current
+                Pill("Show again", false, {
+                    ctx.getSharedPreferences("intro", android.content.Context.MODE_PRIVATE).edit().remove("tips").apply()
+                    com.ltots.app.ui.Intro.replay(ctx)
+                })
+            }
             ScreenOnSettings()
             ScreenOffSettings()
             SleepTimerSettings()

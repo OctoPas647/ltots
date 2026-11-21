@@ -42,19 +42,27 @@ object PlayStats {
         ensureLoaded()
         settle()
         current = key; this.durationMs = durationMs; listenedMs = 0; counted = false
-        playingSince = if (playing) System.currentTimeMillis() else 0L
+        playingSince = if (playing) android.os.SystemClock.elapsedRealtime() else 0L
+    }
+
+    /** Every few seconds while playing (the stats thread's timer): a play counts after 30 s, not only at the song's end. */
+    @Synchronized
+    fun tick() {
+        if (playingSince <= 0L || counted) return
+        settle()
+        playingSince = android.os.SystemClock.elapsedRealtime()
     }
 
     @Synchronized
     fun onPlaying(playing: Boolean) {
         ensureLoaded()
         settle()
-        playingSince = if (playing) System.currentTimeMillis() else 0L
+        playingSince = if (playing) android.os.SystemClock.elapsedRealtime() else 0L
     }
 
     /** Adds the time listened since the last event, and counts the play once it's long enough. */
     private fun settle() {
-        if (playingSince > 0) listenedMs += System.currentTimeMillis() - playingSince
+        if (playingSince > 0) listenedMs += (android.os.SystemClock.elapsedRealtime() - playingSince).coerceAtLeast(0L)
         playingSince = 0L
         val key = current ?: return
         val needed = if (durationMs in 1 until 2 * LISTEN_MS) durationMs / 2 else LISTEN_MS

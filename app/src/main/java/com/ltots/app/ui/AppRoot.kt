@@ -421,6 +421,8 @@ fun AppRoot() {
             }
           }
         }
+        // The feature tour (first start) and one-time tips on each tab.
+        IntroHost(tab, overlayOpen = overlay != null || historyOpen) { t -> overlay = null; goTo(t, "intro") }
         // Sign-in pages (song-finder sites, YouTube Music) open over everything.
         com.ltots.app.ui.components.SignInOverlay()
         // Rooms: the code to compare when two phones meet for the first time.

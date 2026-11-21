@@ -68,11 +68,19 @@ object AccountTaste {
     private suspend fun build(context: Context): Signals = coroutineScope {
         val yt = if (YtmAccount.signedIn) async { runCatching { youTubeMusic() }.getOrNull() } else null
         val ig = if (Platforms.isSignedIn(context, Platform.INSTAGRAM)) async { runCatching { instagram(context) }.getOrDefault(emptyList()) } else null
+        // Spotify, Apple Music, SoundCloud, Deezer, Last.fm (Profile > Accounts).
+        val acc = async { runCatching { com.ltots.app.accounts.Accounts.readAll(context) }.getOrNull() }
         val finds = FinderFinds.all().mapIndexed { i, f -> TasteSong(f.title, f.artist, f.videoId, 0.7 * kotlin.math.exp(-i / 30.0), "finder") }
+        // Songs heard in other apps on this phone (Profile > Other music apps), most recent first.
+        val elsewhere = com.ltots.app.elsewhere.OtherApps.plays.value.take(200)
+            .mapIndexed { i, p -> TasteSong(p.title, p.artist, null, 0.8 * kotlin.math.exp(-i / 40.0), "elsewhere") }
         val y = yt?.await()
+        val a = acc.await()
+        val artists = HashMap(y?.artists.orEmpty())
+        a?.artists?.forEach { (name, w) -> artists[name] = maxOf(artists[name] ?: 0.0, w) }
         Signals(
-            songs = (y?.songs.orEmpty()) + (ig?.await().orEmpty()) + finds,
-            artists = y?.artists.orEmpty(),
+            songs = (y?.songs.orEmpty()) + (ig?.await().orEmpty()) + finds + a?.songs.orEmpty() + elsewhere,
+            artists = artists,
             likedIds = y?.likedIds.orEmpty(),
             builtAt = System.currentTimeMillis(),
             ytSigned = YtmAccount.signedIn,
