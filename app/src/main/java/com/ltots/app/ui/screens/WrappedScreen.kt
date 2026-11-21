@@ -81,6 +81,10 @@ import com.ltots.app.ui.theme.LocalPalette
 import com.ltots.app.ytm.YtmAccount
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.material.icons.rounded.Share
 import java.util.Calendar
 import java.util.Locale
 
@@ -159,8 +163,14 @@ fun StatsDialog(onDismiss: () -> Unit, onOpenWrapped: (Int) -> Unit) {
                         Stat("Songs", num(s.songs.size.toLong()), Modifier.weight(1f))
                     }
                     if (year != null) Pill("▶ Play your $year Wrapped", true, { onOpenWrapped(year!!) }, Modifier.padding(top = 12.dp))
-                    if (s.importedShare > 0.005) Text("${(s.importedShare * 100).toInt()}% of these plays were imported from other apps.",
+                    if (s.importedShare > 0.005) Text("${(s.importedShare * 100).toInt()}% of these plays came from other apps (heard there, or imported).",
                         color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
+                    // Heard in other apps on this phone (Profile > Other music apps).
+                    val away = remember(year, s) { runCatching { com.ltots.app.elsewhere.OtherApps.totals(year) }.getOrDefault(emptyList()) }
+                    if (away.isNotEmpty()) Text(
+                        "In other apps: " + away.take(4).joinToString(" · ") { (app, ms) -> "$app ${minutes(ms)} min" },
+                        color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp),
+                    )
 
                     SectionTitle("Top songs", Modifier.padding(top = 18.dp))
                     s.songs.take(25).forEachIndexed { i, t ->
@@ -310,12 +320,18 @@ fun WrappedDialog(year: Int, onDismiss: () -> Unit) {
             library.count { ListenStats.key(it.title, it.artist) !in ever }
         }
         val slides = remember(s, app.wrappedTone, app.sleepRule, app.wrappedSlides, unplayed) {
-            wrappedSlides(s, app.wrappedSlides, com.ltots.app.data.WrappedStats.lines(s, app.wrappedTone, app.sleepRule, unplayed, library.size))
+            val elsewhere = runCatching { com.ltots.app.elsewhere.OtherApps.totals(year) }.getOrDefault(emptyList())
+            wrappedSlides(s, app.wrappedSlides, com.ltots.app.data.WrappedStats.lines(s, app.wrappedTone, app.sleepRule, unplayed, library.size, elsewhere))
         }
         var at by remember { mutableIntStateOf(0) }
         var progress by remember { mutableStateOf(0f) }
+        // The slide as a picture, for Share.
+        val shot = androidx.compose.ui.graphics.rememberGraphicsLayer()
+        val scope = androidx.compose.runtime.rememberCoroutineScope()
+        var paused by remember { mutableStateOf(false) }
         BackHandler { onDismiss() }
-        LaunchedEffect(at) {
+        LaunchedEffect(at, paused) {
+            if (paused) return@LaunchedEffect
             progress = 0f
             val steps = 60
             repeat(steps) { delay(SLIDE_MS / steps); progress = (it + 1f) / steps }
@@ -324,6 +340,7 @@ fun WrappedDialog(year: Int, onDismiss: () -> Unit) {
         val hues = listOf(pal.accent, Color(0xFF6A3DFF), Color(0xFFFF4D8D), Color(0xFF00C8FF), Color(0xFFFFB020), Color(0xFF2BD67B), pal.accent)
         Box(
             Modifier.fillMaxSize()
+                .drawWithContent { shot.record { this@drawWithContent.drawContent() }; drawLayer(shot) }
                 .background(Brush.verticalGradient(listOf(hues[at % hues.size].copy(alpha = 0.85f), Color(0xFF07060C))))
                 .pointerInput(slides.size) {
                     detectTapGestures { o ->
@@ -343,6 +360,14 @@ fun WrappedDialog(year: Int, onDismiss: () -> Unit) {
                 }
                 Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("LToTS Wrapped $year", color = Color.White.copy(alpha = 0.8f), style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
+                    IconButton(onClick = {
+                        paused = true
+                        scope.launch {
+                            val ok = runCatching { shareSlide(context, shot.toImageBitmap(), year) }.getOrDefault(false)
+                            if (!ok) Toast.makeText(context, "Couldn't save the picture", Toast.LENGTH_SHORT).show()
+                            paused = false
+                        }
+                    }) { Icon(Icons.Rounded.Share, "Share this slide", tint = Color.White) }
                     IconButton(onClick = onDismiss) { Icon(Icons.Rounded.Close, "Close", tint = Color.White) }
                 }
                 AnimatedContent(at, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "wrapped", modifier = Modifier.weight(1f)) { i ->
@@ -350,7 +375,12 @@ fun WrappedDialog(year: Int, onDismiss: () -> Unit) {
                         WrappedSlide(slides[i], library)
                     }
                 }
-                if (at == slides.lastIndex) Pill("Share a screenshot of this · Close", true, onDismiss, Modifier.align(Alignment.CenterHorizontally))
+                if (at == slides.lastIndex) Row(Modifier.align(Alignment.CenterHorizontally), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Pill("Share", true, {
+                        scope.launch { runCatching { shareSlide(context, shot.toImageBitmap(), year) } }
+                    })
+                    Pill("Close", false, onDismiss)
+                }
             }
         }
         LaunchedEffect(Unit) { if (s.plays == 0) Toast.makeText(context, "Nothing played in $year yet", Toast.LENGTH_SHORT).show() }
@@ -364,6 +394,8 @@ private sealed interface Slide {
     data class TopSong(val s: com.ltots.app.data.SongStat) : Slide
     data class List5(val title: String, val rows: List<Pair<String, String>>) : Slide
     data class Summary(val s: StatsSummary) : Slide
+    /** A bar chart: the year by month, or the day by hour. */
+    data class Bars(val small: String, val big: String, val labels: List<String>, val values: LongArray, val sub: String) : Slide
 }
 
 private fun wrappedSlides(s: StatsSummary, which: com.ltots.app.data.WrappedSlides, lines: List<com.ltots.app.data.WrappedLine>): List<Slide> {
@@ -389,8 +421,21 @@ private fun wrappedSlides(s: StatsSummary, which: com.ltots.app.data.WrappedSlid
     if (which == com.ltots.app.data.WrappedSlides.BOTH) out += stats
     val peakHour = s.hours.indices.maxBy { s.hours[it] }
     val peakMonth = s.months.indices.maxBy { s.months[it] }
-    out += Slide.Big("You listen most at", hourName(peakHour),
-        "Your biggest month was ${monthName(peakMonth)}" + (s.topDay?.let { (m, d, ms) -> ", and your biggest day ${monthName(m)} $d (${minutes(ms)} minutes)." } ?: "."))
+    out += Slide.Bars(
+        "Your year, month by month", monthName(peakMonth),
+        listOf("J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"), s.months,
+        "was your biggest month" + (s.topDay?.let { (m, d, ms) -> " — and ${monthName(m)} $d your biggest day, ${minutes(ms)} minutes." } ?: "."),
+    )
+    out += Slide.Bars(
+        "You listen most at", hourName(peakHour),
+        (0 until 24).map { if (it % 6 == 0) "$it" else "" }, s.hours,
+        when (peakHour) {
+            in 5..10 -> "A morning listener."
+            in 11..16 -> "Music through the day."
+            in 17..21 -> "Evenings are for music."
+            else -> "Late nights, mostly."
+        },
+    )
     out += Slide.Summary(s)
     return out
 }
@@ -423,6 +468,27 @@ private fun androidx.compose.foundation.layout.ColumnScope.WrappedSlide(slide: S
                     }
                 }
             }
+        }
+        is Slide.Bars -> {
+            Text(slide.small, color = Color.White.copy(alpha = 0.85f), fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+            Text(slide.big, color = Color.White, fontSize = 44.sp, lineHeight = 48.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(vertical = 10.dp))
+            val max = (slide.values.maxOrNull() ?: 0L).coerceAtLeast(1L)
+            val peak = slide.values.indices.maxByOrNull { slide.values[it] } ?: -1
+            Row(Modifier.fillMaxWidth().height(160.dp).padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.Bottom) {
+                slide.values.forEachIndexed { i, v ->
+                    Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.Bottom, horizontalAlignment = Alignment.CenterHorizontally) {
+                        Box(
+                            Modifier.fillMaxWidth().fillMaxHeight((v.toFloat() / max).coerceIn(0.02f, 1f))
+                                .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
+                                .background(Color.White.copy(alpha = if (i == peak) 1f else 0.45f)),
+                        )
+                    }
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                slide.labels.forEach { l -> Text(l, color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp, modifier = Modifier.weight(1f), maxLines = 1) }
+            }
+            Text(slide.sub, color = Color.White.copy(alpha = 0.85f), fontSize = 17.sp, modifier = Modifier.padding(top = 12.dp))
         }
         is Slide.Summary -> {
             val s = slide.s
@@ -482,4 +548,30 @@ private fun WrappedStyle() {
     com.ltots.app.ui.components.SegmentedToggle(
         com.ltots.app.data.WrappedSlides.entries.map { it.label }, app.wrappedSlides.ordinal, Modifier.padding(vertical = 8.dp),
     ) { i -> com.ltots.app.audio.AudioEngine.updateSettings { it.copy(wrappedSlides = com.ltots.app.data.WrappedSlides.entries[i]) } }
+}
+
+/**
+ * Saves the slide on screen as a picture (Pictures/LToTS) and opens Android's share sheet with
+ * it — for a story, a chat, anywhere. Returns false when it couldn't be saved.
+ */
+private suspend fun shareSlide(context: android.content.Context, image: androidx.compose.ui.graphics.ImageBitmap, year: Int): Boolean {
+    val uri = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val bmp = image.asAndroidBitmap()
+        val values = android.content.ContentValues().apply {
+            put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, "LToTS Wrapped $year ${System.currentTimeMillis() / 1000}.png")
+            put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/png")
+            put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/LToTS")
+        }
+        val r = context.contentResolver
+        val u = r.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return@withContext null
+        r.openOutputStream(u)?.use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) } ?: return@withContext null
+        u
+    } ?: return false
+    val send = android.content.Intent(android.content.Intent.ACTION_SEND)
+        .setType("image/png")
+        .putExtra(android.content.Intent.EXTRA_STREAM, uri)
+        .putExtra(android.content.Intent.EXTRA_TEXT, "My $year in music — LToTS Wrapped")
+        .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    context.startActivity(android.content.Intent.createChooser(send, "Share your Wrapped").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+    return true
 }

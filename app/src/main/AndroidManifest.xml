@@ -333,6 +333,10 @@
             </intent-filter>
         </activity-alias>
 
+        <!-- Chromecast / Google TV: Google's default media receiver (Sound > Cast). -->
+        <meta-data
+            android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"
+            android:value="com.ltots.app.cast.CastOptionsProvider" />
         <!-- Other music apps (Profile > Other music apps): only to see what they play, through their
              media sessions; no notification is read. Off until the person allows notification access. -->
         <service

@@ -64,9 +64,56 @@ object WrappedStats {
      * @param neverPlayed songs on the phone that have never been played at all, out of [librarySize]
      *   (both 0 when the library isn't known).
      */
-    fun lines(s: StatsSummary, tone: WrappedTone, rule: SleepRule, neverPlayed: Int = 0, librarySize: Int = 0): List<WrappedLine> {
+    fun lines(
+        s: StatsSummary, tone: WrappedTone, rule: SleepRule, neverPlayed: Int = 0, librarySize: Int = 0,
+        /** Listening heard in other apps this year, per app (see OtherApps), biggest first. */
+        elsewhere: List<Pair<String, Long>> = emptyList(),
+    ): List<WrappedLine> {
         val out = ArrayList<WrappedLine>()
         val top = s.songs.firstOrNull()
+
+        // Where you listened: LToTS against the other apps it saw playing.
+        val away = elsewhere.sumOf { it.second }
+        if (away >= 5 * 60_000L && s.totalMs > away) {
+            val here = s.totalMs - away
+            val herePct = (here * 100 / s.totalMs).toInt()
+            val rest = elsewhere.take(3).joinToString(", ") { (app, ms) -> "$app ${(ms * 100 / s.totalMs).coerceAtLeast(1)}%" }
+            out += WrappedLine("where", "Where you listened", "$herePct% in LToTS", pick(tone,
+                "The rest: $rest.",
+                "The rest went to $rest. We noticed.",
+                "$rest. We saw every one of those minutes.",
+            ))
+        }
+
+        // Loyalty: how much of everything was one artist.
+        val artist = s.artists.firstOrNull()
+        if (artist != null && s.totalMs > 0) {
+            val pct = (artist.ms * 100 / s.totalMs).toInt()
+            if (pct >= 15 && s.artists.size >= 3) out += WrappedLine("loyal", "Loyalty", "$pct%", pick(tone,
+                "of all your listening was ${artist.name}.",
+                "of everything you played was ${artist.name}. Other artists exist, apparently.",
+                "${artist.name}. $pct%. At this point it's a relationship.",
+            ))
+        }
+
+        // Days in a row with music.
+        s.dayStreak?.takeIf { it.first >= 5 }?.let { (days, m, d) ->
+            out += WrappedLine("days", "Never a day without", "$days days in a row", pick(tone,
+                "of music, up to ${MONTHS[m.coerceIn(0, 11)]} $d.",
+                "with music every single day, until ${MONTHS[m.coerceIn(0, 11)]} $d. Then something happened.",
+                "straight, ending ${MONTHS[m.coerceIn(0, 11)]} $d. Silence scares you, doesn't it.",
+            ))
+        }
+
+        // The explorer: how wide the year went.
+        if (s.songs.size >= 25 && s.artists.size >= 5) {
+            val once = s.songs.count { it.plays == 1 }
+            out += WrappedLine("explore", "The explorer", "${s.songs.size} songs", pick(tone,
+                "by ${s.artists.size} artists. $once of them you played just once.",
+                "by ${s.artists.size} artists — and $once got exactly one chance.",
+                "by ${s.artists.size} artists. $once heard once and dropped. Ruthless.",
+            ))
+        }
 
         // The opportunity cost: the top song's time, as a share of learning a language.
         if (top != null && top.ms >= 10 * 60_000L) {

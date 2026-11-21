@@ -101,8 +101,7 @@ fun rememberPlayerUi(controller: MediaController?): PlayerUi {
         while (true) {
             awaitOnScreen(lifecycle)
             ui.controller?.let { ui.positionMs = it.currentPosition; ui.bufferedFraction = it.bufferedPercentage / 100f }
-            // The song that's playing shows up in the history after a moment, not only at its end.
-            if (ui.isPlaying) com.ltots.app.data.StatsThread.post { com.ltots.app.data.ListenHistory.tick() }
+            // (The history and listening time are kept up to date by the stats thread's own timer.)
             delay(if (ui.isPlaying) 250 else 700)
         }
     }

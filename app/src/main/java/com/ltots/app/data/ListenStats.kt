@@ -53,6 +53,8 @@ data class StatsSummary(
     val importedShare: Double,
     /** The longest back-to-back run of one song. */
     val streak: Streak? = null,
+    /** The most days in a row with music (one year only): (days, month 0..11 and day it ended). */
+    val dayStreak: Triple<Int, Int, Int>? = null,
 ) {
     val minutes: Long get() = totalMs / 60_000
 }
@@ -188,7 +190,7 @@ object ListenStats {
             left -= part
             end -= part
         }
-        years.forEach { changed(it) }
+        years.forEach { changed(it, quiet = true) }
     }
 
     private fun addTime(y: Year, s: Song, cal: Calendar, ms: Long) {
@@ -204,10 +206,23 @@ object ListenStats {
         return years.getOrPut(cal.get(Calendar.YEAR)) { Year() } to cal
     }
 
-    private fun changed(year: Int) {
+    private var lastQuietBump = 0L
+    /** Changes with every change of the numbers (the summaries' cache key); [version] is what screens follow. */
+    private var dataVersion = 0
+
+    /**
+     * Saves [year]. [quiet]: only more time on a song already counted (every few seconds while
+     * music plays) — screens are told at most once a minute, not every time.
+     */
+    private fun changed(year: Int, quiet: Boolean = false) {
         val y = years[year] ?: return
         Store.writeLater(file(year)) { synchronized(this) { write(y).toString() } }
-        _version.value++
+        dataVersion++
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (!quiet || now - lastQuietBump >= 60_000L) {
+            lastQuietBump = now
+            _version.value++
+        }
     }
 
     /** Years with any listening, newest first. */
@@ -220,14 +235,27 @@ object ListenStats {
         ensureLoaded()
         // Home, the listening card and Wrapped all ask for this, on the screen's own thread, each
         // time anything is played: worked out once per change, not once per asker.
-        summaries[year]?.takeIf { it.first == _version.value }?.let { return it.second }
-        return summarize(year).also { summaries[year] = _version.value to it }
+        summaries[year]?.takeIf { it.first == dataVersion }?.let { return it.second }
+        return summarize(year).also { summaries[year] = dataVersion to it }
     }
 
     private val summaries = HashMap<Int?, Pair<Int, StatsSummary>>()
 
     /** Reads the saved numbers ahead of the first screen that shows them (call off the main thread). */
     fun warm() { runCatching { summary(null) } }
+
+    /** The longest run of consecutive days with any listening, and the day it ended. */
+    internal fun longestRun(year: Int, days: Map<Int, Long>): Triple<Int, Int, Int>? {
+        val on = days.filter { it.value > 0 }.keys.sorted()
+        if (on.isEmpty()) return null
+        var best = 1; var bestEnd = on[0]; var run = 1
+        for (i in 1 until on.size) {
+            run = if (on[i] == on[i - 1] + 1) run + 1 else 1
+            if (run > best) { best = run; bestEnd = on[i] }
+        }
+        val c = Calendar.getInstance().apply { clear(); set(Calendar.YEAR, year); set(Calendar.DAY_OF_YEAR, bestEnd) }
+        return Triple(best, c.get(Calendar.MONTH), c.get(Calendar.DAY_OF_MONTH))
+    }
 
     private fun summarize(year: Int?): StatsSummary {
         val ys = if (year == null) years.values.toList() else listOfNotNull(years[year])
@@ -268,6 +296,7 @@ object ListenStats {
                 val c = Calendar.getInstance().apply { set(Calendar.YEAR, yr); set(Calendar.DAY_OF_YEAR, y.streakDay.coerceAtLeast(1)) }
                 Streak(s.title, s.artist, y.streakCount, c.get(Calendar.MONTH), c.get(Calendar.DAY_OF_MONTH))
             },
+            dayStreak = if (year == null) null else years[year]?.let { y -> longestRun(year, y.days) },
         )
     }
 
@@ -360,7 +389,7 @@ object ListenStats {
 
     /** After switching user: their own numbers. */
     @Synchronized
-    fun reload() { loadedFrom = null; ensureLoaded(); _version.value++ }
+    fun reload() { loadedFrom = null; ensureLoaded(); dataVersion++; _version.value++ }
 
     // ---- file --------------------------------------------------------------------------------
 

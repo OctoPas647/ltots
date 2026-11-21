@@ -43,6 +43,8 @@ class MainActivity : ComponentActivity() {
             }.onFailure { CrashReport.handled("Rooms.init", it) }
         }, "LToTS-rooms-start").apply { isDaemon = true }.start()
         handleIntent(intent)
+        // A Cast session still running from before picks up where it is.
+        runCatching { com.ltots.app.cast.Cast.init(this) }
         applySystemBars()
         com.ltots.app.ui.Smoothness.init()
         setContent {

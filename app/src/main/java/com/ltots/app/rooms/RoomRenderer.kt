@@ -52,6 +52,22 @@ class RoomRenderer(private val tag: String = "room") {
 
     /** Whether this phone should be heard now (Speakers mode, or the earbuds are on it). */
     @Volatile var wantPlay: Boolean = false
+
+    /**
+     * Earbuds moving to another phone: this one keeps playing (in sync, so nothing doubles) until
+     * this group time, fading out over the last [LINGER_FADE_NS]. Multipoint earbuds take a
+     * moment to switch to the phone that just started; cutting this one off at once left a gap
+     * (or a click) right then.
+     */
+    @Volatile var lingerUntilNs: Long = 0L
+
+    companion object {
+        /** How long the phone giving the earbuds away keeps playing. */
+        const val LINGER_NS = 1_200_000_000L
+        const val LINGER_FADE_NS = 450_000_000L
+        /** The phone taking over starts this softly, so its first sound doesn't click. */
+        const val FADE_IN_NS = 120_000_000L
+    }
     /** Keep the outputs running (with silence) until this group time: calibration. */
     @Volatile var keepAliveUntilNs: Long = 0L
 
@@ -228,6 +244,10 @@ class RoomRenderer(private val tag: String = "room") {
         private var dither: RateDither? = null
         private var lastCtlNs = 0L
         private var idleSinceNs = -1L
+        // The handover fades (see lingerUntilNs).
+        private var gainNow = 1f
+        private var fadeInLeftNs = 0L
+        private var lastGain = 1f
         private var wasWanted = false
         private val ts = AudioTimestamp()
         private var lastTsFrame = -1L
@@ -258,14 +278,17 @@ class RoomRenderer(private val tag: String = "room") {
             val now = GroupClock.now()
             val format = housekeep(now)
             val keepAlive = now < keepAliveUntilNs
-            val want = (wantPlay && format != null) || keepAlive
+            val lingering = !wantPlay && now < lingerUntilNs
+            val want = ((wantPlay || lingering) && format != null) || keepAlive
+            // Fading out while lingering; 1 otherwise.
+            gainNow = if (lingering) ((lingerUntilNs - now).toDouble() / LINGER_FADE_NS).coerceIn(0.0, 1.0).toFloat() else 1f
             if (!want || !GroupClock.ready) {
                 // Nothing to play: let the output go after a moment (so Bluetooth can sleep, and
                 // the earbuds can follow the other phone).
                 if (track != null) {
                     if (idleSinceNs < 0) idleSinceNs = now
                     val idleFor = now - idleSinceNs
-                    if (!wantPlay || idleFor > 1_500_000_000L) releaseTrack()
+                    if ((!wantPlay && now >= lingerUntilNs) || idleFor > 1_500_000_000L) releaseTrack()
                     else writeSilence(trackRate / 100)
                 }
                 rendering = false
@@ -276,7 +299,7 @@ class RoomRenderer(private val tag: String = "room") {
             }
             idleSinceNs = -1L
             // Coming back from a pause: line up afresh rather than steering from the old position.
-            if (!wasWanted) { aligned = false; wasWanted = true }
+            if (!wasWanted) { aligned = false; wasWanted = true; fadeInLeftNs = FADE_IN_NS }
             val rate = format?.first ?: trackRate.takeIf { it > 0 } ?: 48000
             val ch = format?.second ?: trackChannels.takeIf { it > 0 } ?: 2
             if (track == null || rate != trackRate || ch != trackChannels || restartRequested) openTrack(rate, ch)
@@ -448,6 +471,25 @@ class RoomRenderer(private val tag: String = "room") {
         }
 
         /** [frames] frames of music (or silence where none arrived) at [cursorNs], plus the chirp. */
+        /** The handover fades: in for the phone taking the earbuds, out for the one giving them. */
+        private fun applyGain(frames: Int, ch: Int, frameNs: Double) {
+            val out = gainNow
+            if (fadeInLeftNs <= 0L && out >= 1f) { lastGain = 1f; return }
+            val blockNs = (frames * frameNs).toLong()
+            val inFrom = if (fadeInLeftNs > 0) 1f - fadeInLeftNs.toFloat() / FADE_IN_NS else 1f
+            val inTo = if (fadeInLeftNs > 0) 1f - (fadeInLeftNs - blockNs).coerceAtLeast(0L).toFloat() / FADE_IN_NS else 1f
+            fadeInLeftNs = (fadeInLeftNs - blockNs).coerceAtLeast(0L)
+            // From the gain the last block ended on, so a change never steps.
+            val from = lastGain
+            val to = (inTo * out).coerceIn(0f, 1f)
+            val start = minOf(from, inFrom * out)
+            for (i in 0 until frames) {
+                val g = start + (to - start) * (i + 1) / frames
+                for (k in 0 until ch) buf[i * ch + k] *= g
+            }
+            lastGain = to
+        }
+
         private fun writeContent(t: AudioTrack, frames: Int, rate: Int, ch: Int) {
             val n = frames * ch
             if (buf.size < n) buf = FloatArray(n)
@@ -486,6 +528,7 @@ class RoomRenderer(private val tag: String = "room") {
                     }
                 }
             }
+            applyGain(frames, ch, frameNs)
             val wrote = t.write(buf, 0, n, AudioTrack.WRITE_BLOCKING)
             if (wrote > 0) written += wrote / ch
             cursorNs = end

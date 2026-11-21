@@ -14,6 +14,56 @@ newer APK updates the app and keeps your settings.
 
 ## What's in phase 1
 
+- **Other music apps** (Profile > Other music apps; Android calls it notification access, and
+  LToTS reads no notifications — only what's playing) – LToTS sees what Spotify, YouTube Music,
+  Deezer, SoundCloud, Apple Music, TIDAL, Amazon Music and any other music player play:
+  - a song heard there for 30 s (or half of it) **counts** in your listening time, Home's stats
+    and Wrapped, with the time added as it plays; Wrapped says **where you listened**;
+  - **Continue here**: when the song is on your phone, Home (or a quiet notification while LToTS
+    is closed) offers to carry it on in LToTS from the same second, with your EQ — LToTS starts
+    it and the other app pauses. Not on the phone? **Get it & continue** downloads it and takes
+    over as soon as it's there;
+  - playing in an app whose account isn't connected brings a one-time **Connect your …**.
+- **Accounts** (Profile > Accounts · your music) – YouTube Music, **Spotify**, **Apple Music**,
+  **SoundCloud** and **Deezer** (signed in on their own site inside LToTS; the password only goes
+  to them) and **Last.fm** (just your username). Their top songs and artists, likes and recent
+  plays feed Home's picks, and their recent plays count in your stats — never twice for a song
+  LToTS already counted. They're read the way the services' own websites read them, so a site
+  change can pause one; nothing else breaks.
+- **Feature tour** – a few swipeable cards on first start (sound, picks and connecting your
+  accounts, other apps, getting songs, lyrics, Rooms, Wrapped, keeping music playing on HyperOS,
+  looks), each able to act right there, then a one-time tip the first time each tab is opened.
+  If you've already listened 2 hours or used LToTS on 3 days, there's no tour — only tips for
+  what's new. Profile > App settings > Feature tour shows it all again.
+- **Keep playing in the background** (Profile > App settings) – HyperOS's lock-screen cleaner
+  ("LockScreenClean") force-stops background apps a while after the phone locks. LToTS now
+  recognises that in Android's exit record, says so in the report, and shows the three switches
+  that stop it (Autostart, Battery saver: No restrictions, lock in Recents) with a button for
+  each. It also drops its picture caches when it goes to the background (the cleaner picks the
+  apps holding the most memory first).
+- **No more false freezes** – while LToTS was hidden, the screen kept asking for frames HyperOS
+  doesn't give hidden apps, and every ordinary message — the player's own included — waited
+  behind that request (songs stopped moving on, and the freeze watch reported minutes-long
+  "freezes"). A hidden LToTS now asks for no frames. The freeze watch asks the main thread in a
+  way that passes such a wait, ignores Android pausing the whole app, and reports a held-back
+  queue separately ("Held back", with the queue) instead of as a freeze.
+- **Listening time you can trust** – counted every 20 s while music plays, screen on or off
+  (it used to be added only at a pause or the end of a song, so a phone that closed LToTS lost
+  it); measured on the phone's steady clock (a time-zone or clock change no longer adds or
+  removes hours); split at every hour, so a mix playing past midnight or into the new year
+  counts where it was heard; a play counts after 30 s without waiting for the song to end.
+- **Wrapped, more of it** – new stat screens (*Where you listened*, *Loyalty*, *Never a day
+  without* — your longest run of days with music — and *The explorer*), your year month by
+  month and your day hour by hour as charts, and **Share** on every slide (saved to
+  Pictures/LToTS and opened in the share sheet).
+- **Cast & outputs** (Sound page) – **Switch output** opens Android's own output picker;
+  **Cast to a speaker or TV** sends the queue to a Chromecast / Google TV from the same second
+  (songs with a pre-rendered copy take your EQ along), and **Stop casting** brings it back to
+  the phone where the speaker had got to.
+- **Rooms, smoother hand-over** – when the earbuds move to the other phone, this one keeps
+  playing in sync for a moment and fades out while the earbuds switch, and the new one fades in:
+  no gap, no click. A **Set up in 4 steps** checklist at the top of Rooms ticks itself off until
+  the second phone is in.
 - **Rooms** (Profile > Rooms, or Sound from the output chip) – your phones playing as one, over
   the Wi-Fi. One phone is the **main**: it plays the queue with your EQ, pitch and speed, and its
   finished sound goes to the room instead of its own speaker; every phone (the main too) plays it

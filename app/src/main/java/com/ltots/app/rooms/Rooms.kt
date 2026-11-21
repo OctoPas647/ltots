@@ -752,10 +752,18 @@ object Rooms {
         val myMember = st.optJSONArray("members")?.let { arr -> (0 until arr.length()).map { arr.getJSONObject(it) }.firstOrNull { it.optString("id") == me.id } }
         val plays = myMember?.optBoolean("plays", true) ?: true
         val active = st.optString("active")
-        renderer.wantPlay = when (mode) {
+        val want = when (mode) {
             Mode.SPEAKERS -> plays
             Mode.EARBUDS -> active == me.id
         }
+        // The earbuds move to another phone: keep playing a moment (in sync, fading out) while
+        // they switch over, so there's no gap — see RoomRenderer.lingerUntilNs.
+        if (mode == Mode.EARBUDS && renderer.wantPlay && !want && active.isNotBlank()) {
+            renderer.lingerUntilNs = GroupClock.now() + RoomRenderer.LINGER_NS
+            com.ltots.app.CrashReport.step("earbuds → ${active.take(6)}: fading out here")
+        }
+        if (want) renderer.lingerUntilNs = 0L
+        renderer.wantPlay = want
         refreshTargets()
         if (role == Role.NODE) publish()
     }

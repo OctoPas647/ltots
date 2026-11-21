@@ -111,6 +111,29 @@ class OverhaulTest {
     private fun summary(songs: List<SongStat>, streak: Streak? = null) =
         StatsSummary(2026, songs.sumOf { it.ms }, songs.sumOf { it.plays }, songs, emptyList(), LongArray(12), LongArray(24), 10, null, 0.0, streak)
 
+    @Test fun newWrappedLines() {
+        val songs = (1..30).map { i -> SongStat("k$i", "Song $i", "Artist ${i % 6}", "", if (i <= 10) 1 else 5, (if (i == 1) 20L else 1L) * 3_600_000L) }
+        val artists = songs.groupBy { it.artist }.map { (a, g) -> ArtistStat(a, g.sumOf { it.plays }, g.sumOf { it.ms }, g.size) }.sortedByDescending { it.ms }
+        val s = StatsSummary(2026, songs.sumOf { it.ms }, songs.sumOf { it.plays }, songs, artists, LongArray(12), LongArray(24), 40, null, 0.0,
+            dayStreak = Triple(21, 9, 30))
+        val lines = WrappedStats.lines(s, WrappedTone.MILD, SleepRule.NIGHT, elsewhere = listOf("Spotify" to 10 * 3_600_000L, "YouTube Music" to 3_600_000L))
+            .associateBy { it.id }
+        // 49 h in all, 11 h of it elsewhere: 77% in LToTS.
+        assertEquals("77% in LToTS", lines.getValue("where").big)
+        assertTrue(lines.getValue("where").sub.contains("Spotify 20%"))
+        assertTrue(lines.getValue("loyal").sub.contains("Artist 1"))
+        assertEquals("21 days in a row", lines.getValue("days").big)
+        assertTrue(lines.getValue("days").sub.contains("October 30"))
+        assertEquals("30 songs", lines.getValue("explore").big)
+        assertTrue(lines.getValue("explore").sub.contains("10 of them you played just once"))
+    }
+
+    @Test fun longestRunOfDays() {
+        // Days 10..14 and 40..46 of 2026: 7 in a row, ending on day 46 (February 15).
+        val days = ((10..14) + (40..46)).associateWith { 60_000L } + (20 to 0L)
+        assertEquals(Triple(7, 1, 15), ListenStats.longestRun(2026, days))
+    }
+
     @Test fun wrappedLinesSayWhatTheNumbersSay() {
         val top = SongStat("a", "Top Song", "A", "", 300, 45 * 3_600_000L, skips = 1, night = 6)
         val second = SongStat("b", "Second Song", "B", "", 200, 45 * 3_600_000L - 9 * 60_000L, skips = 12)

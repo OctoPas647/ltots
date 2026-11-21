@@ -85,6 +85,32 @@ fun SoundScreen(onBack: () -> Unit, onOpenRooms: () -> Unit = {}) {
                 if (device.tip.isNotBlank()) {
                     Text(device.tip, color = pal.textDim, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 10.dp))
                 }
+                // Elsewhere: Android's own output picker, and Chromecast / Google TV.
+                val casting by com.ltots.app.cast.Cast.state.collectAsState()
+                val castReady by com.ltots.app.cast.Cast.available.collectAsState()
+                androidx.compose.runtime.LaunchedEffect(Unit) { com.ltots.app.cast.Cast.init(context) }
+                casting?.let { c ->
+                    Text(
+                        "Casting to ${c.device}" + (c.title.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""),
+                        color = pal.accent, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(top = 10.dp),
+                    )
+                }
+                Row(Modifier.padding(top = 10.dp), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+                    Pill("Switch output", false, { com.ltots.app.cast.OutputSwitcher.show(context) })
+                    if (casting != null) {
+                        Pill(if (casting?.playing == true) "Pause" else "Play", false, { com.ltots.app.cast.Cast.togglePlay() })
+                        Pill("Stop casting", true, { com.ltots.app.cast.Cast.stop() })
+                    } else Pill(
+                        if (castReady == false) "Cast (needs Google Play services)" else "Cast to a speaker or TV", false,
+                        { com.ltots.app.cast.Cast.choose(context) }, enabled = castReady == true,
+                    )
+                }
+                if (casting != null) Text(
+                    "The queue plays on the speaker from where you were; stop casting and it carries on here from where the speaker got to. " +
+                        "Songs with a pre-rendered copy (Screen off > Pre-render) take your EQ along; the rest play as they are.",
+                    color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp),
+                )
                 if (device.kind == OutputDevice.Kind.BLUETOOTH_CLASSIC || device.kind == OutputDevice.Kind.BLUETOOTH_LE) {
                     Spacer(Modifier.height(10.dp))
                     Pill("Open Developer options", false, {

@@ -170,6 +170,10 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.11.2")
     // Account sign-ins (Spotify, Apple Music, SoundCloud): a script that runs before the site's own.
     implementation("androidx.webkit:webkit:1.14.0")
+    // Chromecast / Google TV (Sound > Cast): the Cast SDK and the device picker.
+    implementation("com.google.android.gms:play-services-cast-framework:22.0.0")
+    implementation("androidx.mediarouter:mediarouter:1.7.0")
+    implementation("androidx.appcompat:appcompat:1.7.0")
     // On-device speech recognition that times plain lyrics (offline; the model is downloaded on request).
     implementation("com.alphacephei:vosk-android:0.3.75")
     implementation("com.google.guava:guava:33.7.2-android")

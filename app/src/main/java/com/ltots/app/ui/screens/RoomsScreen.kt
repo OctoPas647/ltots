@@ -102,6 +102,12 @@ fun RoomsScreen(onBack: () -> Unit) {
         }
         Spacer(Modifier.height(14.dp))
 
+        // Until a second phone is in: where you are in setting it up, step by step.
+        if (ui.members.size < 2) {
+            SetupGuide(ui)
+            Spacer(Modifier.height(12.dp))
+        }
+
         if (ui.role == Rooms.Role.OFF) {
             OffCard(
                 available = ui.available,
@@ -141,6 +147,51 @@ fun RoomsScreen(onBack: () -> Unit) {
             color = pal.textFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 4.dp),
         )
         Spacer(Modifier.height(bottomChrome()))
+    }
+}
+
+/**
+ * Setting up a room, as a checklist that ticks itself: what's done on this phone, what to do on
+ * the other one, and the code to confirm. Shown until a second phone is in the room.
+ */
+@Composable
+private fun SetupGuide(ui: Rooms.Ui) {
+    val pal = LocalPalette.current
+    val here = ui.role != Rooms.Role.OFF || ui.available
+    val seen = ui.nearby.isNotEmpty() || ui.members.size > 1
+    val linked = ui.members.size > 1
+    val steps = listOf(
+        Triple("Rooms on, on this phone", "Start a room here (this phone plays your queue), or Join rooms on this Wi-Fi.", here),
+        Triple(
+            "Open LToTS on the other phone",
+            "Profile > Rooms > Join rooms on this Wi-Fi. Both phones on the same Wi-Fi — or Tailscale: Connect by address below.",
+            seen,
+        ),
+        Triple("Confirm the same 4-digit code on both", "Only the first time two phones meet.", linked),
+        if (ui.mode == Rooms.Mode.EARBUDS) Triple(
+            "Earbuds connected to both phones",
+            "Turn on multipoint (\"connect to 2 devices\") in your earbuds' app, then pair them with each phone.",
+            linked && ui.earbudsAddress.isNotBlank(),
+        ) else Triple("Calibrate", "Speakers: tap Calibrate with this phone's mic, standing where you listen.", false),
+    )
+    GlassPanel(Modifier.fillMaxWidth(), tintBoost = 0.06f) {
+        Column(Modifier.padding(16.dp)) {
+            SectionTitle("Set up in 4 steps")
+            val next = steps.indexOfFirst { !it.third }
+            steps.forEachIndexed { i, (title, how, done) ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.Top) {
+                    Text(
+                        if (done) "✓" else "${i + 1}",
+                        color = if (done || i == next) pal.accent else pal.textFaint,
+                        fontWeight = FontWeight.Bold, modifier = Modifier.width(26.dp),
+                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(title, color = if (i == next) pal.text else pal.textDim, fontWeight = if (i == next) FontWeight.SemiBold else FontWeight.Normal)
+                        if (!done) Text(how, color = pal.textFaint, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
     }
 }
 
