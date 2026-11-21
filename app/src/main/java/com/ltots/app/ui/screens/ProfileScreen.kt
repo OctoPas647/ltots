@@ -159,6 +159,8 @@ fun ProfileScreen(top: @Composable () -> Unit = {}) {
         )
         Spacer(Modifier.height(12.dp))
         AppSettingsCard()
+        Spacer(Modifier.height(12.dp))
+        CrashReportsCard()
 
         Spacer(Modifier.height(12.dp))
         Text(
@@ -463,7 +465,7 @@ private fun AppSettingsCard() {
             SwitchRow(
                 "Icon follows the song colour", iconFollows, { on -> com.ltots.app.ui.IconColor.setEnabled(on) },
                 sub = "The home-screen icon takes the same colour as the app (from the song's cover), in 20 shades. " +
-                    "It changes after you leave LToTS. Off keeps the original icon.",
+                    "It changes after you leave LToTS, while the music is paused (changing it mid-song makes some phones close the app). Off keeps the original icon.",
             )
             SwitchRow(
                 "Hide navigation bar", cfg.hideNavBar, { on -> set { it.copy(hideNavBar = on) } },

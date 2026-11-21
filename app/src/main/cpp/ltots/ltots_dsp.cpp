@@ -365,6 +365,9 @@ extern "C" {
 JNIEXPORT void JNICALL Java_com_ltots_app_audio_NativeDsp_cascade(
         JNIEnv* env, jclass, jdoubleArray jx, jint frames, jint ch, jdouble gain,
         jdoubleArray jk, jdoubleArray jst, jint nsec) {
+    if (frames <= 0 || ch <= 0 || nsec < 0) return;
+    if (env->GetArrayLength(jx) < (jsize)((size_t)frames * ch) || env->GetArrayLength(jk) < nsec * 5 ||
+        env->GetArrayLength(jst) < nsec * 2 * ch) return;
     double* x = (double*)env->GetPrimitiveArrayCritical(jx, nullptr);
     double* k = (double*)env->GetPrimitiveArrayCritical(jk, nullptr);
     double* st = (double*)env->GetPrimitiveArrayCritical(jst, nullptr);
@@ -388,15 +391,21 @@ JNIEXPORT jlong JNICALL Java_com_ltots_app_audio_NativeDsp_resamplerCreate(JNIEn
 }
 
 JNIEXPORT void JNICALL Java_com_ltots_app_audio_NativeDsp_resamplerDestroy(JNIEnv*, jclass, jlong h) {
+    if (h == 0) return;
     delete (Resampler*)(intptr_t)h;
 }
 
 JNIEXPORT void JNICALL Java_com_ltots_app_audio_NativeDsp_resamplerReset(JNIEnv*, jclass, jlong h) {
+    if (h == 0) return;
     ((Resampler*)(intptr_t)h)->reset();
 }
 
 JNIEXPORT jint JNICALL Java_com_ltots_app_audio_NativeDsp_resamplerProcess(
         JNIEnv* env, jclass, jlong h, jfloatArray jin, jint frames, jfloatArray jout, jint outCap, jboolean last) {
+    // A released (or never made) resampler: nothing out, rather than a crash in native code.
+    if (h == 0 || frames < 0 || outCap <= 0) return 0;
+    if (env->GetArrayLength(jin) < (jsize)((size_t)frames * ((Resampler*)(intptr_t)h)->ch)) return 0;
+    if (env->GetArrayLength(jout) < (jsize)((size_t)outCap * ((Resampler*)(intptr_t)h)->ch)) return 0;
     auto* r = (Resampler*)(intptr_t)h;
     float* in = (float*)env->GetPrimitiveArrayCritical(jin, nullptr);
     float* out = (float*)env->GetPrimitiveArrayCritical(jout, nullptr);
@@ -440,13 +449,16 @@ JNIEXPORT jlong JNICALL Java_com_ltots_app_audio_NativeDsp_fftCreate(JNIEnv*, jc
 }
 
 JNIEXPORT void JNICALL Java_com_ltots_app_audio_NativeDsp_fftDestroy(JNIEnv*, jclass, jlong h) {
+    if (h == 0) return;
     delete (FftPlan*)(intptr_t)h;
 }
 
 // Float, power of two, in place (the same convention as the Kotlin Fft class).
 JNIEXPORT void JNICALL Java_com_ltots_app_audio_NativeDsp_fftFloat(JNIEnv* env, jclass, jlong h, jfloatArray jre, jfloatArray jim) {
     if (beatsSuspendedHere()) { throwSuspended(env); return; }
+    if (h == 0) return;
     auto* P = (FftPlan*)(intptr_t)h;
+    if (env->GetArrayLength(jre) < P->n || env->GetArrayLength(jim) < P->n) return;
     float* re = (float*)env->GetPrimitiveArrayCritical(jre, nullptr);
     float* im = (float*)env->GetPrimitiveArrayCritical(jim, nullptr);
     if (re && im && P->pow2) fftPow2(P, re, im);
@@ -459,8 +471,12 @@ JNIEXPORT void JNICALL Java_com_ltots_app_audio_NativeDsp_fftFloat(JNIEnv* env, 
 JNIEXPORT void JNICALL Java_com_ltots_app_audio_NativeDsp_spectrum(
         JNIEnv* env, jclass, jlong h, jfloatArray jring, jint mask, jlong start, jfloatArray jwin,
         jfloatArray jmags, jint binFrom, jint binTo, jfloat norm) {
+    if (h == 0) return;
     auto* P = (FftPlan*)(intptr_t)h;
     if (!P->pow2) return;
+    // Never read or write past the arrays (a wrong size would be a native crash, no report).
+    if (binFrom < 0 || binTo > env->GetArrayLength(jmags) || binFrom > binTo) return;
+    if (env->GetArrayLength(jwin) < P->n || env->GetArrayLength(jring) <= mask) return;
     if (g_suspend.load(std::memory_order_relaxed) & SUSPEND_VISUALS) {
         // Screen off: no window, no FFT, no square roots. The bars read silence and fall.
         g_skipped.fetch_add(1, std::memory_order_relaxed);
@@ -492,8 +508,10 @@ JNIEXPORT void JNICALL Java_com_ltots_app_audio_NativeDsp_spectrum(
 // Double, sizes of 2s and 3s, forward, in place (the same convention as MixedFft.forward).
 JNIEXPORT void JNICALL Java_com_ltots_app_audio_NativeDsp_fftDouble(JNIEnv* env, jclass, jlong h, jdoubleArray jre, jdoubleArray jim) {
     if (beatsSuspendedHere()) { throwSuspended(env); return; }
+    if (h == 0) return;
     auto* P = (FftPlan*)(intptr_t)h;
     if (P->factors.empty()) return;
+    if (env->GetArrayLength(jre) < P->n || env->GetArrayLength(jim) < P->n) return;
     double* re = (double*)env->GetPrimitiveArrayCritical(jre, nullptr);
     double* im = (double*)env->GetPrimitiveArrayCritical(jim, nullptr);
     if (re && im) {

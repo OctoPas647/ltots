@@ -38,7 +38,15 @@ class DownloadService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        ServiceCompat.startForeground(this, ID, build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        // Android can refuse (started from the background, or the daily time allowance for
+        // data-sync services is used up on Android 15+): refused here used to crash the app.
+        val ok = runCatching { ServiceCompat.startForeground(this, ID, build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC) }
+            .onFailure { com.ltots.app.CrashReport.handled("DownloadService.startForeground", it) }
+            .isSuccess
+        if (!ok) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         scope.coroutineContext[kotlinx.coroutines.Job]?.children?.forEach { it.cancel() }
         scope.launch {
             var idle = 0
@@ -54,6 +62,15 @@ class DownloadService : Service() {
             }
         }
         return START_NOT_STICKY
+    }
+
+    /**
+     * Android 15+: a data-sync service may run 6 hours a day; when that runs out it must stop
+     * within seconds or Android ends the app. Downloads carry on the next time the app is open.
+     */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        com.ltots.app.CrashReport.step("downloads: Android's time limit for background downloads reached")
+        runCatching { finish() }.onFailure { stopSelf() }
     }
 
     private fun finish() {

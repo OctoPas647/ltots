@@ -134,7 +134,7 @@ object Rooms {
     private lateinit var me: RoomIdentity
     private lateinit var prefs: SharedPreferences
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private var initialized = false
+    @Volatile private var initialized = false
 
     @Volatile private var role = Role.OFF
     @Volatile private var mode = Mode.EARBUDS
@@ -169,6 +169,9 @@ object Rooms {
     // ------------------------------------------------------------------------------------------
     // Setup
 
+    // Synchronized and volatile: the screen (now off the main thread) and the room's service can
+    // both start Rooms at the same moment.
+    @Synchronized
     fun init(context: Context) {
         if (initialized) return
         initialized = true
@@ -1140,6 +1143,7 @@ object Rooms {
 
     private fun publish() {
         if (!initialized) return
+        CrashReport.note("room", role.name)
         val st = lastState
         val trusted = me.trustedPeers().map { it.id }.toSet()
         val members = ArrayList<Member>()

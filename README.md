@@ -110,6 +110,23 @@ newer APK updates the app and keeps your settings.
 - **Sturdier** – an error in background work (saving settings with the storage full, indexing,
   lyrics, downloads) used to close the whole app, music included; now only that job stops and
   the error is kept for the next crash report.
+- **Crash reports, everywhere** (Profile > Crash reports) – every way LToTS can end is recorded,
+  not only a crash while it's open: a crash on any thread (a notification when it happens in the
+  background, since Android won't let a hidden app open a screen); a **native crash** (EQ,
+  pitch/speed, download engine), a **freeze** Android closed and Android **stopping LToTS while it
+  played** (low memory, battery manager, task killer) — read from Android's own exit records the
+  next time LToTS starts, with the native backtrace or the frozen thread's stack; and **freezes
+  that recover**, caught by a watch on the main thread. Each report says what was playing, screen
+  on/off, the room and the last 30 steps. They're listed in Profile (tap to read, copy, share,
+  delete) and saved as text files in **Download/LToTS/Crash reports**.
+- **Crash fixes** – the history and play statistics are no longer updated on the main thread
+  (with a big imported history that froze Home on opening, and the player while songs changed);
+  Home's "most played" shelves are worked out in the background; the icon colour no longer
+  switches while music plays (switching launcher entries makes some phones, HyperOS included,
+  end the app — the music stopped and LToTS vanished); Rooms start off the main thread and their
+  service is never stopped before it's in the foreground (that crashed the app); downloads stop
+  cleanly when Android refuses or times out their service; the native DSP checks every handle
+  and array size.
 - **Home** (first tab, where the app opens) – recommendations, a mix of YouTube Music's and
   Spotify's home screens: a greeting and a grid of things to jump back into (from your phone, they
   play at once), YouTube Music's mood chips (Energize, Relax, Workout…) and **Quick picks** (pages

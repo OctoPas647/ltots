@@ -121,7 +121,9 @@ fun HomeScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenGet: () -> Unit
     val preview by SongPreview.state.collectAsState()
     val history by ListenHistory.items.collectAsState()
     LaunchedEffect(Unit) {
-        YtmAccount.load(); ListenHistory.ensureLoaded()
+        YtmAccount.load()
+        // The history file can be big: read off the main thread (it froze the first screen).
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { ListenHistory.ensureLoaded() }
         // Download buttons are on this page: get the download engine ready ahead of the first tap,
         // but only once the page has settled (unpacking it right at start-up held up the first
         // screens; a tap before then readies it by itself).
@@ -206,17 +208,27 @@ fun HomeScreen(player: PlayerUi, onOpenPlayer: () -> Unit, onOpenGet: () -> Unit
     )
 
     // Songs you've played most of all (all time, imports included), from the phone.
-    val most = remember(statsVersion, library) {
-        val byKey = library.associateBy { com.ltots.app.data.ListenStats.key(it.title, it.artist) }
-        com.ltots.app.data.ListenStats.summary(null).songs.mapNotNull { s -> byKey[s.key]?.let { it to s } }.take(15)
+    // Worked out off the main thread: the all-time numbers can be large (imported histories) and
+    // their lock may be held by an update in progress — on the main thread that froze Home.
+    val most by produceState(emptyList<Pair<Track, com.ltots.app.data.SongStat>>(), statsVersion, library) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            runCatching {
+                val byKey = library.associateBy { com.ltots.app.data.ListenStats.key(it.title, it.artist) }
+                com.ltots.app.data.ListenStats.summary(null).songs.mapNotNull { s -> byKey[s.key]?.let { it to s } }.take(15)
+            }.getOrDefault(emptyList())
+        }
     }
 
     // Loved once, not played for two months.
-    val forgotten = remember(statsVersion, playable, history) {
-        val since = System.currentTimeMillis() - 60L * 24 * 3600_000L
-        val recent = history.filter { it.at >= since }.mapTo(HashSet()) { it.key }
-        val byKey = playable.associateBy { com.ltots.app.data.ListenStats.key(it.title, it.artist) }
-        com.ltots.app.data.ListenStats.summary(null).songs.take(200).mapNotNull { byKey[it.key] }.filter { it.profileKey !in recent }.take(15)
+    val forgotten by produceState(emptyList<Track>(), statsVersion, playable, history) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            runCatching {
+                val since = System.currentTimeMillis() - 60L * 24 * 3600_000L
+                val recent = history.filter { it.at >= since }.mapTo(HashSet()) { it.key }
+                val byKey = playable.associateBy { com.ltots.app.data.ListenStats.key(it.title, it.artist) }
+                com.ltots.app.data.ListenStats.summary(null).songs.take(200).mapNotNull { byKey[it.key] }.filter { it.profileKey !in recent }.take(15)
+            }.getOrDefault(emptyList())
+        }
     }
     val fromLibrary = remember(playable) {
         playable.shuffled(kotlin.random.Random(Calendar.getInstance().get(Calendar.DAY_OF_YEAR))).take(14)

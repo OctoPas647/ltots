@@ -35,13 +35,13 @@ class CrashReportTest {
         CrashReport.note("overlay", "EQ")
         CrashReport.step("tab HOME → LIBRARY")
         CrashReport.handled("test", IllegalArgumentException("odd value"))
-        repeat(30) { CrashReport.step("step $it") }
+        repeat(40) { CrashReport.step("step $it") }
         val text = CrashReport.report(ctx, Thread.currentThread(), IllegalStateException("boom"))
         assertTrue(text, "tab: LIBRARY" in text && "overlay: EQ" in text)
-        // Only the last 20 steps are kept.
-        assertTrue(text, "step 29" in text && "step 10" in text && "step 9\n" !in text)
+        // Only the last 30 steps are kept.
+        assertTrue(text, "step 39" in text && "step 10" in text && "step 9\n" !in text)
         // The stack trace still follows.
-        assertTrue(text, text.indexOf("UI at the time") < text.indexOf("IllegalStateException: boom"))
+        assertTrue(text, text.indexOf("UI at the time") < text.indexOf("java.lang.IllegalStateException: boom"))
         CrashReport.clearUi()
         val bare = CrashReport.report(ctx, Thread.currentThread(), IllegalStateException("boom"))
         assertTrue(bare, "UI at the time" !in bare)

@@ -48,6 +48,7 @@ object ScreenState {
         val app = context.applicationContext
         _screenOn.value = runCatching { app.getSystemService(PowerManager::class.java).isInteractive }.getOrDefault(true)
         _charging.value = runCatching { app.getSystemService(BatteryManager::class.java).isCharging }.getOrDefault(false)
+        com.ltots.app.CrashReport.note("screen", if (_screenOn.value) "on" else "off")
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(c: Context?, i: Intent?) {
                 when (i?.action) {
@@ -80,6 +81,8 @@ object ScreenState {
         if (_screenOn.value == on) return
         if (on) com.ltots.app.data.Awake.mark()
         _screenOn.value = on
+        com.ltots.app.CrashReport.note("screen", if (on) "on" else "off")
+        com.ltots.app.CrashReport.step("screen ${if (on) "on" else "off"}")
         notifyListeners()
     }
 

@@ -31,11 +31,15 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         PlayerConnection.connect(this)
-        // Rooms: a phone left waiting for rooms carries on doing so.
-        runCatching {
-            com.ltots.app.rooms.Rooms.init(this)
-            if (com.ltots.app.rooms.Rooms.wantsAvailable()) com.ltots.app.rooms.Rooms.setAvailable(this, true)
-        }.onFailure { CrashReport.handled("Rooms.init", it) }
+        // Rooms: a phone left waiting for rooms carries on doing so. Off the main thread: it opens
+        // sockets, reads keys and starts network discovery, which must never hold up the screen.
+        val appCtx = applicationContext
+        Thread({
+            runCatching {
+                com.ltots.app.rooms.Rooms.init(appCtx)
+                if (com.ltots.app.rooms.Rooms.wantsAvailable()) com.ltots.app.rooms.Rooms.setAvailable(appCtx, true)
+            }.onFailure { CrashReport.handled("Rooms.init", it) }
+        }, "LToTS-rooms-start").apply { isDaemon = true }.start()
         handleIntent(intent)
         applySystemBars()
         com.ltots.app.ui.Smoothness.init()
@@ -60,6 +64,15 @@ class MainActivity : ComponentActivity() {
             androidx.compose.runtime.SideEffect { com.ltots.app.ui.Springs.firmness = app.motion.firmness }
             LToTSTheme { AppRoot() }
         }
+        // LToTS crashed (or froze, or crashed in native code) since you last looked: the report
+        // opens first. It's also under Profile › Crash reports.
+        if (savedInstanceState == null) {
+            runCatching {
+                com.ltots.app.crash.CrashLog.takeUnseen(this)?.let { f ->
+                    startActivity(com.ltots.app.crash.CrashNotify.openIntent(this, f, clearTask = false))
+                }
+            }
+        }
     }
 
     override fun dispatchTouchEvent(ev: android.view.MotionEvent?): Boolean {
@@ -73,6 +86,7 @@ class MainActivity : ComponentActivity() {
     // The home-screen icon swaps colour only while LToTS is in the background.
     override fun onStart() {
         super.onStart()
+        CrashReport.inFront = true
         com.ltots.app.ui.IconColor.onForeground(true)
         // Screen-off sound modes give way to full quality while LToTS is open.
         runCatching { com.ltots.app.audio.AudioEngine.setAppInFront(true) }
@@ -80,6 +94,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
+        CrashReport.inFront = false
         if (!isChangingConfigurations) {
             com.ltots.app.ui.IconColor.onForeground(false)
             runCatching { com.ltots.app.audio.AudioEngine.setAppInFront(false) }

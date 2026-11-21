@@ -239,22 +239,31 @@ object AudioEngine : SoundSource {
                 snapshotUpcoming()
                 prepareBeats()
                 maybePreRender()
-                com.ltots.app.data.PlayStats.onSong(mediaItem?.mediaId?.takeIf { it.isNotBlank() }, mediaItem?.mediaMetadata?.durationMs ?: 0L, p.isPlaying)
+                // Read here (the player's thread), recorded on the stats thread (files and locks).
+                val key = mediaItem?.mediaId?.takeIf { it.isNotBlank() }
                 val md = mediaItem?.mediaMetadata
-                com.ltots.app.data.ListenHistory.onSong(
-                    mediaItem?.mediaId?.takeIf { it.isNotBlank() },
-                    md?.extras?.getLong("trackId", -1L) ?: -1L,
-                    md?.title?.toString() ?: "", md?.artist?.toString() ?: "", md?.albumTitle?.toString() ?: "",
-                    md?.durationMs ?: 0L, p.isPlaying,
-                )
+                val trackId = md?.extras?.getLong("trackId", -1L) ?: -1L
+                val title = md?.title?.toString() ?: ""
+                val artist = md?.artist?.toString() ?: ""
+                val album = md?.albumTitle?.toString() ?: ""
+                val duration = md?.durationMs ?: 0L
+                val playing = p.isPlaying
+                com.ltots.app.data.StatsThread.post {
+                    com.ltots.app.data.PlayStats.onSong(key, duration, playing)
+                    com.ltots.app.data.ListenHistory.onSong(key, trackId, title, artist, album, duration, playing)
+                }
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 _isPlaying.value = isPlaying
+                com.ltots.app.CrashReport.note("playing", isPlaying.toString())
+                com.ltots.app.CrashReport.step(if (isPlaying) "playing" else "paused")
                 // Nothing is heard while paused, so modes can switch right away.
                 if (!isPlaying) latchLean()
                 PowerStats.onPlaying(isPlaying)
-                com.ltots.app.data.PlayStats.onPlaying(isPlaying)
-                com.ltots.app.data.ListenHistory.onPlaying(isPlaying)
+                com.ltots.app.data.StatsThread.post {
+                    com.ltots.app.data.PlayStats.onPlaying(isPlaying)
+                    com.ltots.app.data.ListenHistory.onPlaying(isPlaying)
+                }
                 // A song playing ends a recommendation preview.
                 if (isPlaying) com.ltots.app.recs.SongPreview.stop()
             }
@@ -383,6 +392,7 @@ object AudioEngine : SoundSource {
     }
 
     private fun onSongChanged(item: MediaItem?) {
+        com.ltots.app.CrashReport.note("song", item?.mediaMetadata?.title?.toString()?.take(40) ?: "none")
         PowerStats.onRendered(PreRender.isRendered(item))
         val key = item?.mediaId?.takeIf { it.isNotBlank() }
         _songKey.value = key

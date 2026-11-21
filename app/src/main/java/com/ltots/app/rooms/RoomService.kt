@@ -36,19 +36,29 @@ class RoomService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action != ACTION_LEAVE) starting = false
         if (intent?.action == ACTION_LEAVE) {
             Rooms.leave()
             return START_NOT_STICKY
         }
         Rooms.init(this)
+        // Started with startForegroundService, this service MUST call startForeground, even if
+        // it's about to stop again: Android crashes the whole app otherwise ("did not then call
+        // Service.startForeground()"). So: both types, else media playback alone, and only then stop.
         val types = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK or ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-        runCatching { ServiceCompat.startForeground(this, ID, build(this, Rooms.ui.value), types) }
-            .onFailure {
-                // Not allowed to start from the background right now (Android 12+ rules).
-                com.ltots.app.CrashReport.handled("RoomService.startForeground", it)
-                stopSelf()
-                return START_NOT_STICKY
+        val ok = runCatching { ServiceCompat.startForeground(this, ID, build(this, Rooms.ui.value), types) }
+            .recoverCatching { first ->
+                com.ltots.app.CrashReport.handled("RoomService.startForeground", first)
+                ServiceCompat.startForeground(this, ID, build(this, Rooms.ui.value), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
             }
+            .onFailure { com.ltots.app.CrashReport.handled("RoomService.startForeground (media)", it) }
+            .isSuccess
+        foreground = ok
+        if (!ok || !running) {
+            // Couldn't go foreground, or the room already ended while this was starting.
+            stopSelf()
+            return START_NOT_STICKY
+        }
         if (wake == null) {
             wake = getSystemService(PowerManager::class.java)
                 .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "LToTS:room").apply { setReferenceCounted(false); acquire() }
@@ -63,6 +73,7 @@ class RoomService : Service() {
     }
 
     override fun onDestroy() {
+        foreground = false
         runCatching { wake?.release() }
         runCatching { wifi?.release() }
         runCatching { wifiFast?.release() }
@@ -76,6 +87,10 @@ class RoomService : Service() {
         private const val PAIR_ID = 4402
         private const val ACTION_LEAVE = "com.ltots.app.ROOM_LEAVE"
         @Volatile private var running = false
+        /** The service has called startForeground (only then may it be stopped from outside). */
+        @Volatile private var foreground = false
+        /** Asked to start and not yet in onStartCommand. */
+        @Volatile private var starting = false
         @Volatile private var lastText = ""
 
         private fun channel(context: Context) {
@@ -90,12 +105,19 @@ class RoomService : Service() {
         fun start(context: Context) {
             running = true
             runCatching { context.startForegroundService(Intent(context, RoomService::class.java)) }
+                .onSuccess { starting = true }
                 .onFailure { com.ltots.app.CrashReport.handled("RoomService.start", it) }
         }
 
         fun stop(context: Context) {
             running = false
             lastText = ""
+            // Still starting: stopping now would crash the app (see onStartCommand); the service
+            // sees running = false right after its startForeground and stops itself.
+            if (starting && !foreground) {
+                runCatching { context.getSystemService(NotificationManager::class.java).cancel(PAIR_ID) }
+                return
+            }
             context.stopService(Intent(context, RoomService::class.java))
             context.getSystemService(NotificationManager::class.java).cancel(PAIR_ID)
         }

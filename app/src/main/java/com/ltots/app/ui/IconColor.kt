@@ -51,7 +51,11 @@ object IconColor {
             // Not while the screen is off: nobody sees the icon then, and every swap makes the
             // launcher (and other apps listening for package changes) wake up and redo work.
             // The swap waits and happens when the screen turns back on.
+            // And never while music plays: switching which launcher entry is enabled is a package
+            // change, and on some phones (HyperOS among them) Android ends the app's process for
+            // it — the music stopped and LToTS vanished. The swap waits for a pause.
             combine(DynamicColor.colors, ThemeState.config, inFront, _enabled, ScreenState.screenOn) { _, _, front, _, on -> !front && on }
+                .combine(com.ltots.app.audio.AudioEngine.isPlaying) { due, playing -> due && !playing }
                 .debounce(3_000)
                 .collect { due -> if (due && System.currentTimeMillis() - lastSwitch > MIN_GAP_MS) apply() }
         }
@@ -66,7 +70,7 @@ object IconColor {
     /** Called by the activity: true while it's on screen. Leaving the app swaps the icon. */
     fun onForeground(front: Boolean) {
         inFront.value = front
-        if (!front && ScreenState.screenOn.value) scope.launch { apply() }
+        if (!front && ScreenState.screenOn.value && !playing()) scope.launch { apply() }
     }
 
     /** The colour the UI shows right now, as the theme computes it. */
@@ -91,9 +95,13 @@ object IconColor {
 
     fun componentFor(variant: Int): String = if (variant < 0) DEFAULT else "com.ltots.app.LauncherC%02d".format(variant)
 
+    private fun playing(): Boolean = runCatching { com.ltots.app.audio.AudioEngine.isPlaying.value }.getOrDefault(false)
+
     @Synchronized
     private fun apply() {
         if (!::app.isInitialized || inFront.value) return
+        // (Turning the feature off still restores the original icon at once.)
+        if (_enabled.value && playing()) return
         val want = if (_enabled.value) componentFor(variantFor(currentAccent())) else DEFAULT
         val pm = app.packageManager
         val all = listOf(DEFAULT) + (0 until COUNT).map { componentFor(it) }
