@@ -121,6 +121,8 @@ object Rooms {
         val myAddresses: List<Pair<String, String>> = emptyList(),
         val port: Int = 0,
         val connectError: String = "",
+        /** Speakers mode: the room lines its speakers up by itself (whistle for new ones, music checks). */
+        val autoAlign: Boolean = true,
     )
 
     data class PairPrompt(val peerName: String, val code: String, internal val answer: CompletableFuture<Boolean>)
@@ -150,6 +152,20 @@ object Rooms {
     private var clockToken = 0L
     private val reports = ConcurrentHashMap<String, JSONObject>()
     @Volatile private var activeEarbuds: String? = null
+    /**
+     * Make-before-break: the phone taking the earbuds over starts sending to them while the old
+     * one still plays, and only once its Bluetooth stream runs does the old one stop. (Switching
+     * both at the same instant left a gap while the new phone's Bluetooth stream started up.)
+     */
+    @Volatile private var incomingEarbuds: String? = null
+    private var incomingSinceMs = 0L
+    private var incomingReadyMs = 0L
+    /** After a switch: check that the earbuds really followed (else go back to [leftEarbuds]). */
+    private var followCheckAtMs = 0L
+    private var leftEarbuds: String? = null
+    /** The earbuds didn't follow another phone: keep them on this one until [stuckUntilMs]. */
+    private var stuckWith: String? = null
+    private var stuckUntilMs = 0L
     private val policy = HandoffPolicy()
     private val backlog = ArrayDeque<Pair<AudioChunk, ByteArray>>()
     @Volatile private var calStatus = ""
@@ -165,6 +181,10 @@ object Rooms {
 
     val renderer = RoomRenderer()
     private var earbuds: EarbudLink? = null
+    /** Main thread only. */
+    private var earbudSession: EarbudSession? = null
+
+    private fun releaseEarbudSession() = RoomPlayer.onMain { earbudSession?.release(); earbudSession = null }
 
     // ------------------------------------------------------------------------------------------
     // Setup
@@ -239,11 +259,15 @@ object Rooms {
         runCatching { server?.close() }; server = null
         earbuds?.stop()
         renderer.stop()
+        releaseEarbudSession()
         RoomMediaServer.stop()
         role = Role.OFF
         mainId = null
         nextMain = null
         activeEarbuds = null
+        incomingEarbuds = null
+        followCheckAtMs = 0L
+        stuckWith = null
         reports.clear()
         synchronized(backlog) { backlog.clear() }
         GroupClock.lead()
@@ -515,8 +539,11 @@ object Rooms {
             RoomWire.CAL_RESULT -> if (role == Role.MAIN) onCalResult(f.json())
             RoomWire.ADJUST -> adjust(f.json())
             RoomWire.OUTPUTS -> f.json().optJSONArray("keys")?.let { k -> setOutputs((0 until k.length()).map { k.getString(it) }) }
+            RoomWire.MUSIC_CHECK -> f.json().let { o -> Thread({ musicListen(o) }, "LToTS-room-music").apply { isDaemon = true; start() } }
+            RoomWire.MUSIC_RESULT -> if (role == Role.MAIN) onMusicResult(f.json())
             RoomWire.MAIN_REQUEST -> if (role == Role.MAIN) handOver(link.id)
             RoomWire.MAIN_HANDOFF -> takeOver(link, f.json())
+            RoomWire.MAIN_READY -> if (role == Role.MAIN && link.id == handoffTo) onNewMainReady(f.json().optLong("at"))
             RoomWire.NEW_MAIN -> onNewMain(f.json())
             RoomWire.BYE -> link.close()
         }
@@ -540,6 +567,9 @@ object Rooms {
             inherit.optString("earbuds").takeIf { it.isNotBlank() }?.let { prefs.edit().putString("earbuds", it).putString("earbudsName", inherit.optString("earbudsName")).apply() }
         }
         policy.reset()
+        incomingEarbuds = null
+        followCheckAtMs = 0L
+        stuckWith = null
         RoomStream.delayNs = delayFor(mode)
         RoomStream.stopAtNs = Long.MAX_VALUE
         RoomStream.listener = stream
@@ -650,13 +680,18 @@ object Rooms {
                 val id = r.optString("id").takeIf { it.isNotBlank() } ?: return@mapNotNull null
                 LinkReport(id, r.optBoolean("earbuds"), if (r.has("rssi")) r.optInt("rssi") else null, r.optDouble("stall", 0.0), r.optLong("_at"))
             }
-            val next = policy.decide(nowMs, activeEarbuds, linkReports)
-            if (next != activeEarbuds) {
-                activeEarbuds = next
-                changed = true
+            var next = policy.decide(nowMs, activeEarbuds, linkReports)
+            // The earbuds wouldn't follow another phone a moment ago: don't try again at once.
+            val stuck = stuckWith
+            if (stuck != null && nowMs < stuckUntilMs && next != stuck && linkReports.any { it.nodeId == stuck && it.connected }) next = stuck
+            if (next != activeEarbuds && next != incomingEarbuds) {
+                if (next != stuck) handoffNote = null // the policy's own reason shows
+                if (moveEarbuds(next, nowMs, linkReports)) changed = true
             }
+            if (advanceEarbudHandoff(nowMs)) changed = true
         }
         tuneDelay(nowMs)
+        if (mode == Mode.SPEAKERS) autoAlign(nowMs)
         if (changed || tick % 4 == 0) {
             val st = state()
             for (l in links.values) l.sendJson(RoomWire.STATE, st)
@@ -664,6 +699,66 @@ object Rooms {
         }
         if (tick % 2 == 0) publish()
     }
+
+    /** Starts moving the earbuds to [to]: overlapping when the current phone still has them. */
+    private fun moveEarbuds(to: String?, nowMs: Long, linkReports: List<LinkReport>): Boolean {
+        val cur = activeEarbuds
+        val curOk = cur != null && linkReports.any { it.nodeId == cur && it.connected && nowMs - it.atMs <= 4_000 }
+        if (to != null && curOk) {
+            incomingEarbuds = to
+            incomingSinceMs = nowMs
+            incomingReadyMs = 0L
+        } else {
+            leftEarbuds = cur
+            activeEarbuds = to
+            incomingEarbuds = null
+            followCheckAtMs = if (to != null && cur != null) nowMs + 9_000 else 0L
+        }
+        return true
+    }
+
+    /** The overlap ends once the new phone plays (or after 3.5 s); then checks the earbuds followed. */
+    private fun advanceEarbudHandoff(nowMs: Long): Boolean {
+        val inc = incomingEarbuds
+        if (inc != null) {
+            val r = reports[inc]
+            if (r == null || !r.optBoolean("earbuds")) { incomingEarbuds = null; return true } // it lost them
+            if (r.optBoolean("rendering")) { if (incomingReadyMs == 0L) incomingReadyMs = nowMs } else incomingReadyMs = 0L
+            val ready = incomingReadyMs != 0L && nowMs - incomingReadyMs >= 700
+            if (ready || nowMs - incomingSinceMs >= 3_500) {
+                leftEarbuds = activeEarbuds
+                activeEarbuds = inc
+                incomingEarbuds = null
+                followCheckAtMs = nowMs + 9_000
+                return true
+            }
+            return false
+        }
+        // A few seconds after a switch: if the music stalls on the new phone while the old one
+        // still has the earbuds, they stayed with the old phone. Go back to it rather than play
+        // to nobody, and leave them there for a minute.
+        if (followCheckAtMs != 0L && nowMs >= followCheckAtMs) {
+            followCheckAtMs = 0L
+            val now = activeEarbuds
+            val back = leftEarbuds
+            val stalled = now != null && (reports[now]?.optDouble("stall", 0.0) ?: 0.0) >= 0.5
+            if (stalled && back != null && reports[back]?.optBoolean("earbuds") == true) {
+                stuckWith = back
+                stuckUntilMs = nowMs + 60_000
+                policy.switched(nowMs)
+                handoffNote = "the earbuds stayed with ${nameOf(back)}"
+                leftEarbuds = now
+                incomingEarbuds = back
+                incomingSinceMs = nowMs
+                incomingReadyMs = 0L
+                return true
+            }
+        }
+        return false
+    }
+
+    /** Why the earbuds last moved, when the room (not the policy) decided it. */
+    @Volatile private var handoffNote: String? = null
 
     private fun guessEarbuds() {
         val all = reports.values.flatMap { r ->
@@ -690,12 +785,14 @@ object Rooms {
             .put("mode", mode.name)
             .put("main", me.id).put("mainName", me.name)
             .put("active", activeEarbuds ?: "")
-            .put("reason", policy.lastReason)
+            .put("incoming", incomingEarbuds ?: "")
+            .put("reason", handoffNote ?: policy.lastReason)
             .put("earbuds", earbudsTarget() ?: "")
             .put("earbudsName", prefs.getString("earbudsName", "") ?: "")
             .put("members", members)
             .put("now", RoomPlayer.nowPlayingAnyThread())
             .put("cal", calStatus)
+            .put("align", autoAlignOn())
             .put("delay", RoomStream.delayNs / 1_000_000L)
     }
 
@@ -707,8 +804,17 @@ object Rooms {
             "toggle", "next", "prev", "play", "pause" -> RoomPlayer.control(cmd)
             "earbuds_here" -> {
                 val target = o.optString("node", from)
-                activeEarbuds = target
-                policy.switched(System.currentTimeMillis())
+                val nowMs = System.currentTimeMillis()
+                policy.switched(nowMs)
+                stuckWith = null
+                handoffNote = "by hand"
+                if (target != activeEarbuds) {
+                    val lr = reports.values.mapNotNull { r ->
+                        val id = r.optString("id").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                        LinkReport(id, r.optBoolean("earbuds"), null, 0.0, r.optLong("_at"))
+                    }
+                    moveEarbuds(target, nowMs, lr)
+                }
             }
             "mode" -> setModeHere(runCatching { Mode.valueOf(o.optString("mode")) }.getOrDefault(mode))
             "earbuds_target" -> prefs.edit().putString("earbuds", o.optString("address")).putString("earbudsName", o.optString("name")).apply()
@@ -721,6 +827,7 @@ object Rooms {
                 else links[node]?.sendJson(RoomWire.OUTPUTS, JSONObject().put("keys", keys))
             }
             "calibrate" -> startCalibration(o.optString("node", from))
+            "align" -> setAutoAlign(o.optBoolean("on", true))
         }
         val st = state()
         for (l in links.values) l.sendJson(RoomWire.STATE, st)
@@ -752,10 +859,20 @@ object Rooms {
         val myMember = st.optJSONArray("members")?.let { arr -> (0 until arr.length()).map { arr.getJSONObject(it) }.firstOrNull { it.optString("id") == me.id } }
         val plays = myMember?.optBoolean("plays", true) ?: true
         val active = st.optString("active")
+        val holding = active == me.id || st.optString("incoming") == me.id
         renderer.wantPlay = when (mode) {
             Mode.SPEAKERS -> plays
-            Mode.EARBUDS -> active == me.id
+            Mode.EARBUDS -> holding
         }
+        // A phone that isn't the main tells the earbuds whether it's the one playing to them.
+        if (role == Role.NODE) {
+            val now = st.optJSONObject("now")
+            val hold = mode == Mode.EARBUDS && holding
+            RoomPlayer.onMain {
+                val s = earbudSession ?: EarbudSession(app) { cmd -> transport(cmd) }.also { earbudSession = it }
+                runCatching { s.update(hold, now?.optBoolean("playing") == true, now?.optString("title") ?: "", now?.optString("artist") ?: "") }
+            }
+        } else releaseEarbudSession()
         refreshTargets()
         if (role == Role.NODE) publish()
     }
@@ -841,6 +958,8 @@ object Rooms {
                 }
             })
             .put("clock", GroupClock.ready)
+            .put("mic", canRecord())
+            .put("front", CrashReport.inFront)
             .put("rssiSrc", e?.rssiSource ?: "")
             .put("a2dp", JSONArray().apply { e?.connectedDevices?.forEach { (n, a) -> put(JSONObject().put("n", n).put("a", a)) } })
         e?.rssi?.let { o.put("rssi", it) }
@@ -896,6 +1015,8 @@ object Rooms {
     fun setOutputs(node: String, keys: List<String>) =
         sendToMain(JSONObject().put("cmd", "outputs").put("node", node).put("keys", JSONArray(keys)))
     fun calibrate() = sendToMain(JSONObject().put("cmd", "calibrate").put("node", me.id))
+    /** Keep the speakers lined up by themselves (the room's main decides). */
+    fun autoAlign(on: Boolean) = sendToMain(JSONObject().put("cmd", "align").put("on", on))
 
     /** Make this phone the main. */
     fun makeMeMain() {
@@ -914,13 +1035,37 @@ object Rooms {
         if (handoffTo != null) return
         if (reports[to]?.optBoolean("clock") != true) return
         handoffTo = to
-        val at = GroupClock.now() + 3_000_000_000L
+        handoffConfirmed = false
+        // Further ahead over Tailscale (longer round trips, songs read from farther away).
+        val at = GroupClock.now() + if (RoomLink.isTailscale(link.remoteHost)) 5_000_000_000L else 3_000_000_000L
         val room = JSONObject().put("mode", mode.name).put("active", activeEarbuds ?: "")
             .put("earbuds", earbudsTarget() ?: "").put("earbudsName", prefs.getString("earbudsName", ""))
             .put("plays", JSONObject().apply { for (id in reports.keys) put(id, plays(id)) })
         RoomPlayer.snapshot(app, link.localHost, at) { snap ->
-            snap.put("room", room)
-            link.sendJson(RoomWire.MAIN_HANDOFF, snap)
+            // "confirm": the new main says when it's ready (MAIN_READY), and this one plays on until
+            // that moment. Without an answer in time, this phone simply stays the main.
+            snap.put("room", room).put("confirm", true)
+            scope.launch {
+                link.sendJson(RoomWire.MAIN_HANDOFF, snap)
+                delay(20_000)
+                if (handoffTo == to && !handoffConfirmed) {
+                    handoffTo = null
+                    calStatus = "${nameOf(to)} couldn't take over in time: this phone stays the main."
+                    publish()
+                }
+            }
+        }
+    }
+
+    @Volatile private var handoffConfirmed = false
+
+    /** On the old main: the new one starts at [at]; this one plays until then and steps back. */
+    private fun onNewMainReady(at: Long) {
+        val to = handoffTo ?: return
+        val link = links[to] ?: return
+        if (handoffConfirmed) return
+        handoffConfirmed = true
+        run {
             val news = JSONObject().put("id", to).put("host", link.remoteHost).put("port", link.hello.port).put("at", at)
             for (l in links.values) if (l.id != to) l.sendJson(RoomWire.NEW_MAIN, news)
             RoomStream.stopAtNs = at
@@ -953,6 +1098,7 @@ object Rooms {
     /** On the new main: take the queue and the room, and start exactly at "at". */
     private fun takeOver(from: RoomLink, h: JSONObject) {
         if (role != Role.NODE) return
+        if (h.optBoolean("confirm")) { takeOverWhenReady(from, h); return }
         val at = h.optLong("at")
         // Group time carries on unbroken: this phone's clock as it maps onto the room's now.
         val frozen = GroupClock.map
@@ -965,6 +1111,35 @@ object Rooms {
             publish()
         }
         _ui.value = _ui.value.copy(handingOver = false)
+    }
+
+    /**
+     * On the new main (two-phase): gets the player ready first, then becomes the main and tells
+     * the old one when the music continues here. The old main plays until that moment.
+     */
+    private fun takeOverWhenReady(from: RoomLink, h: JSONObject) {
+        handoffTo = from.id // keep taking the old main's music meanwhile
+        RoomPlayer.prepareTakeOver(app, h, onReady = { at ->
+            scope.launch {
+                if (role != Role.NODE) return@launch
+                // Group time carries on unbroken: this phone's clock as it maps onto the room's now.
+                becomeMain(GroupClock.map, h.optJSONObject("room"))
+                handoffTo = from.id
+                RoomPlayer.startTakeOver(at, h.optBoolean("play"))
+                from.sendJson(RoomWire.MAIN_READY, JSONObject().put("at", at))
+                _ui.value = _ui.value.copy(handingOver = false)
+                delay(((at - GroupClock.now()) / 1_000_000L).coerceAtLeast(0) + 500)
+                handoffTo = null
+                publish()
+            }
+        }, onFail = {
+            scope.launch {
+                if (role == Role.NODE) RoomPlayer.abandonTakeOver()
+                handoffTo = null
+                _ui.value = _ui.value.copy(handingOver = false)
+                publish()
+            }
+        })
     }
 
     @Volatile private var nextMainAt: Nearby? = null
@@ -1033,45 +1208,60 @@ object Rooms {
         }
     }
 
+    /** A stretch of the room recorded with this phone's mic, with when each sample was heard. */
+    private class Recording(val data: FloatArray, val rate: Int, private val tsFrame: Long, private val tsNano: Long) {
+        /** Group time of recorded sample [i]. */
+        fun groupAt(i: Double): Long = GroupClock.toGroup(tsNano + ((i - tsFrame) * 1e9 / rate).roundToLong())
+        /** The (fractional) sample recorded at group time [g]. */
+        fun indexAt(g: Long): Double = tsFrame + (GroupClock.toLocal(g) - tsNano) * rate / 1e9
+    }
+
+    /** Records the room from group time [from] to [to] (waits for [from]). */
+    @SuppressLint("MissingPermission") // only called with the mic allowed
+    private fun recordRoom(from: Long, to: Long): Recording {
+        val rate = 48000
+        val wait = (GroupClock.toLocal(from) - System.nanoTime()) / 1_000_000L
+        if (wait > 0) Thread.sleep(wait)
+        val minBuf = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_FLOAT)
+        val source = MediaRecorder.AudioSource.UNPROCESSED
+        val rec = runCatching { AudioRecord(source, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_FLOAT, maxOf(minBuf, rate)) }
+            .getOrNull()?.takeIf { it.state == AudioRecord.STATE_INITIALIZED }
+            ?: AudioRecord(MediaRecorder.AudioSource.MIC, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_FLOAT, maxOf(minBuf, rate))
+        val total = ((to - from) * rate / 1_000_000_000L).toInt() + rate
+        val data = FloatArray(total)
+        var got = 0
+        val ts = AudioTimestamp()
+        var tsFrame = -1L
+        var tsNano = 0L
+        rec.startRecording()
+        try {
+            while (got < total && GroupClock.now() < to + 200_000_000L) {
+                val n = rec.read(data, got, minOf(2048, total - got), AudioRecord.READ_BLOCKING)
+                if (n <= 0) break
+                got += n
+                if (tsFrame < 0 && rec.getTimestamp(ts, AudioTimestamp.TIMEBASE_MONOTONIC) == AudioRecord.SUCCESS) {
+                    tsFrame = ts.framePosition; tsNano = ts.nanoTime
+                }
+            }
+        } finally {
+            runCatching { rec.stop() }
+            rec.release()
+        }
+        if (tsFrame < 0) throw IOException("The microphone gave no timing")
+        return Recording(data.copyOf(got), rate, tsFrame, tsNano)
+    }
+
     /** Records the chirps with this phone's mic and works out how early or late each speaker was. */
     @SuppressLint("MissingPermission") // the screen asks for the mic before calibrating
     private fun listen(plan: JSONObject) {
-        val rate = 48000
         val result = JSONObject().put("id", plan.getInt("id"))
         val errs = JSONObject()
         try {
-            val from = plan.getLong("from")
-            val to = plan.getLong("to")
-            val wait = (GroupClock.toLocal(from) - System.nanoTime()) / 1_000_000L
-            if (wait > 0) Thread.sleep(wait)
-            val minBuf = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_FLOAT)
-            val source = MediaRecorder.AudioSource.UNPROCESSED
-            val rec = runCatching { AudioRecord(source, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_FLOAT, maxOf(minBuf, rate)) }
-                .getOrNull()?.takeIf { it.state == AudioRecord.STATE_INITIALIZED }
-                ?: AudioRecord(MediaRecorder.AudioSource.MIC, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_FLOAT, maxOf(minBuf, rate))
-            val total = ((to - from) * rate / 1_000_000_000L).toInt() + rate
-            val data = FloatArray(total)
-            var got = 0
-            val ts = AudioTimestamp()
-            var tsFrame = -1L
-            var tsNano = 0L
-            rec.startRecording()
-            try {
-                while (got < total && GroupClock.now() < to + 200_000_000L) {
-                    val n = rec.read(data, got, minOf(2048, total - got), AudioRecord.READ_BLOCKING)
-                    if (n <= 0) break
-                    got += n
-                    if (tsFrame < 0 && rec.getTimestamp(ts, AudioTimestamp.TIMEBASE_MONOTONIC) == AudioRecord.SUCCESS) {
-                        tsFrame = ts.framePosition; tsNano = ts.nanoTime
-                    }
-                }
-            } finally {
-                runCatching { rec.stop() }
-                rec.release()
-            }
-            if (tsFrame < 0) throw IOException("The microphone gave no timing")
-            // Group time of recorded sample i.
-            fun groupAt(i: Double): Long = GroupClock.toGroup(tsNano + ((i - tsFrame) * 1e9 / rate).roundToLong())
+            val rec = recordRoom(plan.getLong("from"), plan.getLong("to"))
+            val rate = rec.rate
+            val data = rec.data
+            val got = data.size
+            fun groupAt(i: Double): Long = rec.groupAt(i)
             val start0 = groupAt(0.0)
             val chirp = Chirp.make(rate)
             val slots = plan.getJSONArray("slots")
@@ -1107,6 +1297,9 @@ object Rooms {
             calStatus = r.optString("error").ifBlank { "Couldn't hear any speaker. Put the phone near them, turn them up, and try again." }
             return
         }
+        // These outputs are lined up now (no automatic whistle for them until they drift).
+        prefs.edit().putStringSet("cal_outs", HashSet(calibratedOutputs()) + heard.keys).apply()
+        drift.reset()
         // Everyone lines up with the middle one: the smallest total change.
         val ref = heard.values.sorted()[heard.size / 2]
         val parts = ArrayList<String>()
@@ -1120,6 +1313,141 @@ object Rooms {
         val missed = (listOf(me.id) + links.keys).filter { n -> plays(n) && heard.keys.none { it.startsWith("$n|") } }
         calStatus = "Lined up: " + parts.joinToString(", ") +
             (if (missed.isNotEmpty()) ". Not heard: " + missed.joinToString(", ") { nameOf(it) } else "")
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // Keeping the speakers lined up by themselves (Speakers mode)
+    //
+    // A speaker that joins the room and was never lined up gets the whistle calibration once it
+    // has played a few seconds. After that a phone's mic listens to the music itself every 90 s
+    // ([MusicSync], nothing audible); when the speakers have drifted apart (a Bluetooth speaker
+    // reconnected with another delay…) the whistle runs again at the start of the next song.
+
+    private val drift = MusicSync.Drift()
+    @Volatile private var musicCheckId = 0
+    private var musicCheckAtMs = 0L
+    private var autoCalAtMs = 0L
+    private var pendingCal: String? = null
+    private var pendingCalSinceMs = 0L
+    private var lastSong = ""
+    private val outputSeenMs = HashMap<String, Long>()
+    private val outputTriedMs = HashMap<String, Long>()
+
+    fun autoAlignOn(): Boolean = initialized && prefs.getBoolean("auto_align", true)
+
+    fun setAutoAlign(on: Boolean) {
+        if (!initialized) return
+        prefs.edit().putBoolean("auto_align", on).apply()
+        pendingCal = null
+        publish()
+    }
+
+    private fun calibratedOutputs(): Set<String> = prefs.getStringSet("cal_outs", null) ?: emptySet()
+
+    /** This phone's mic records real sound now (Android mutes it for apps in the background). */
+    private fun canRecord(): Boolean =
+        app.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED &&
+            (CrashReport.inFront || RoomService.micType)
+
+    /** The phone that listens: one whose mic works now, preferably the one in someone's hand. */
+    private fun pickListener(): String? {
+        val can = (listOf(me.id) + links.keys).filter { id ->
+            plays(id) && if (id == me.id) canRecord() else reports[id]?.let { it.optBoolean("mic") && it.optBoolean("clock") } == true
+        }
+        return can.firstOrNull { id -> if (id == me.id) CrashReport.inFront else reports[id]?.optBoolean("front") == true } ?: can.firstOrNull()
+    }
+
+    /** Every output playing in the room now, as "phone|output". */
+    private fun renderingOutputs(): List<String> = (listOf(me.id) + links.keys).filter { plays(it) }.flatMap { n ->
+        val a = reports[n]?.optJSONArray("sinks") ?: return@flatMap emptyList()
+        (0 until a.length()).map { a.getJSONObject(it) }.filter { it.optBoolean("r") }.map { "$n|${it.optString("k")}" }
+    }
+
+    private fun autoAlign(nowMs: Long) {
+        if (!autoAlignOn() || calStatus.startsWith("Calibrating")) return
+        val now = RoomPlayer.nowPlayingAnyThread()
+        val song = now.optString("title") + "|" + now.optString("artist")
+        val songChanged = song != lastSong
+        lastSong = song
+        val outs = renderingOutputs()
+        outputSeenMs.keys.retainAll(outs.toSet())
+        for (o in outs) outputSeenMs.putIfAbsent(o, nowMs)
+        if (outs.size < 2 || !now.optBoolean("playing")) return
+        // A speaker never lined up (tried at most every half hour, in case it can't be heard).
+        val fresh = outs.filter { o ->
+            o !in calibratedOutputs() && nowMs - (outputSeenMs[o] ?: nowMs) > 4_000 && nowMs - (outputTriedMs[o] ?: 0L) > 30 * 60_000L
+        }
+        if (fresh.isNotEmpty() && nowMs - autoCalAtMs > 60_000) {
+            if (autoCalibrate(if (fresh.size == 1) "a new speaker joined" else "new speakers joined")) fresh.forEach { outputTriedMs[it] = nowMs }
+            return
+        }
+        // Drift heard in the music: line up at the next song (or after 4 min of one long mix).
+        val why = pendingCal
+        if (why != null) {
+            if ((songChanged || nowMs - pendingCalSinceMs > 240_000) && nowMs - autoCalAtMs > 5 * 60_000L) autoCalibrate(why)
+            return
+        }
+        if (nowMs - musicCheckAtMs < 90_000) return
+        val listener = pickListener() ?: return
+        musicCheckAtMs = nowMs
+        val from = GroupClock.now() + 300_000_000L
+        val o = JSONObject().put("id", ++musicCheckId).put("from", from).put("to", from + 2_600_000_000L)
+        if (listener == me.id) Thread({ musicListen(o) }, "LToTS-room-music").apply { isDaemon = true; start() }
+        else links[listener]?.sendJson(RoomWire.MUSIC_CHECK, o)
+    }
+
+    /** Runs the whistle calibration by itself. False when no phone can listen. */
+    private fun autoCalibrate(why: String): Boolean {
+        val listener = pickListener() ?: return false
+        pendingCal = null
+        autoCalAtMs = System.currentTimeMillis()
+        drift.reset()
+        startCalibration(listener)
+        if (calStatus.startsWith("Calibrating")) calStatus = "Calibrating ($why): a short whistle from each speaker…"
+        return true
+    }
+
+    /** On the listening phone: records the music and finds the speakers in it. */
+    private fun musicListen(o: JSONObject) {
+        val res = JSONObject().put("id", o.optInt("id"))
+        try {
+            if (!canRecord()) throw IOException("The microphone can't record now")
+            val from = o.getLong("from")
+            val to = o.getLong("to")
+            val rec = recordRoom(from, to)
+            // Android records silence for an app in the background: nothing to learn from it.
+            if (rec.data.none { kotlin.math.abs(it) > 1e-5f }) throw IOException("The microphone was muted")
+            val fs = MusicSync.RATE
+            val maxLag = fs / 4
+            val t0 = from + 100_000_000L
+            val count = ((to - t0 - 100_000_000L) * fs / 1_000_000_000L).toInt()
+            val stepNs = 1e9 / fs
+            val rec16 = FloatArray(count) { j ->
+                val i = rec.indexAt(t0 + (j * stepNs).roundToLong()).roundToLong().toInt()
+                var s = 0f
+                var n = 0
+                for (k in i - 1..i + 1) if (k in rec.data.indices) { s += rec.data[k]; n++ }
+                if (n == 0) 0f else s / n
+            }
+            val ref = renderer.reference(t0 - maxLag * 1_000_000_000L / fs, count + 2 * maxLag)
+                ?: throw IOException("No music here to compare with")
+            val peaks = MusicSync.peaks(ref, rec16, maxLag)
+            res.put("heard", peaks.isNotEmpty()).put("spread", MusicSync.spreadMs(peaks))
+                .put("peaks", JSONArray().apply { peaks.forEach { put(it.lagMs) } })
+        } catch (e: Throwable) {
+            res.put("heard", false).put("error", e.message ?: "Recording failed")
+        }
+        if (role == Role.MAIN) onMusicResult(res) else mainId?.let { links[it] }?.sendJson(RoomWire.MUSIC_RESULT, res)
+    }
+
+    private fun onMusicResult(r: JSONObject) {
+        if (r.optInt("id") != musicCheckId || !r.optBoolean("heard")) return
+        val spread = r.optDouble("spread", 0.0)
+        if (drift.check(spread) && pendingCal == null) {
+            pendingCal = "the speakers drifted ${"%.0f".format(spread)} ms apart"
+            pendingCalSinceMs = System.currentTimeMillis()
+            calStatus = "The speakers drifted about ${"%.0f".format(spread)} ms apart: lining them up again at the next song."
+        }
     }
 
     private fun nameOf(id: String) = if (id == me.id) me.name else links[id]?.peer?.name ?: "Phone"
@@ -1220,6 +1548,7 @@ object Rooms {
             myAddresses = if (role == Role.OFF) emptyList() else RoomLink.myAddresses(),
             port = serverPort,
             connectError = connectError,
+            autoAlign = st?.optBoolean("align", true) ?: autoAlignOn(),
         )
         RoomService.update(app, _ui.value)
     }

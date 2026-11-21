@@ -48,6 +48,28 @@ newer APK updates the app and keeps your settings.
     further ahead at once, and creeps back down when there's plenty to spare. What it learns is
     kept per mode. The main also tops the stream up every ~0.1 s, so the lead never sags: that was
     behind the music cutting in and out on the WF-1000XM6.
+  - **Speakers line up by themselves** (Speakers mode, on by default, Rooms › Sync) – a speaker
+    that joins and was never lined up gets the whistle calibration by itself after a few seconds.
+    After that, every 90 s a phone whose mic can record (LToTS open, or the room started from the
+    screen with the mic allowed) listens to 2.5 s of the music itself — no whistle — and compares
+    it with what was sent (GCC-PHAT: each speaker shows up as one sharp peak at its delay). When
+    the speakers have drifted apart (a Bluetooth speaker reconnected with a different delay), the
+    whistle runs again at the start of the next song. Room echoes are told apart from drift by
+    comparing with the first check after each calibration, and a change must show twice in a row.
+  - **Smoother earbud handoff** – the phone taking over starts sending to the earbuds while the
+    old one still plays, and the old one stops only once the new stream runs (it used to be both
+    at once, which left a gap while Bluetooth started up). Phones that aren't the main tell the
+    earbuds "playing" / "paused" (a media session), which multipoint earbuds use to pick a phone,
+    and earbud taps work the room from any phone. If the music stalls on the new phone because
+    the earbuds stayed with the old one, the room goes back to it (and leaves them there for a
+    minute) instead of playing to nobody. Signal strengths are smoothed (~2 s) before deciding,
+    so the switch can come a little sooner without flipping on one bad reading; going straight
+    back to the phone just left needs a clearer lead.
+  - **Make this main without a gap** – the new main loads the queue first and only then says when
+    it starts; the old one plays until that moment. When loading takes longer than planned (songs
+    read over the Wi-Fi or Tailscale), the start moves later and the position moves on by as
+    much, so the song continues exactly where it was. If the new main can't get ready, the old
+    one simply stays the main.
   - **Tailscale** – phones on Tailscale (or any network where they can't find each other by
     themselves) connect by address: Rooms > *Connect by address*, type the other phone's
     100.x.y.z or MagicDNS name once (port 47430). Phones remember where they reached each other
@@ -456,6 +478,13 @@ newer APK updates the app and keeps your settings.
   - the moving background only animates while the app is on screen (and not with Battery
     Saver); "Animations" off stops it. On the AMOLED themes it's grayed out (nothing moves on
     pure black), and the switch says when Battery Saver is pausing it.
+
+- **Continue YouTube songs in LToTS** (Profile › App settings) – with notification access, LToTS
+  sees when the YouTube app (or YouTube Music) has played a song for a few seconds and offers
+  *Download & switch*: it finds the same recording on YouTube Music (the very video when its title
+  and length match, else the song with the same length), downloads it — or uses the copy already
+  in your library — pauses YouTube and carries on in LToTS from the same moment, so it can follow
+  you between phones and play in your room. Shorts and clips under a minute are left alone.
 
 ## Roadmap
 

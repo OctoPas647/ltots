@@ -30,6 +30,7 @@
         android:usesPermissionFlags="neverForLocation"
         tools:targetApi="s" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
     <application
         android:name=".LToTSApp"
@@ -343,7 +344,7 @@
         <service
             android:name=".rooms.RoomService"
             android:exported="false"
-            android:foregroundServiceType="mediaPlayback|connectedDevice" />
+            android:foregroundServiceType="mediaPlayback|connectedDevice|microphone" />
         <!-- The crash report (its own process, so it can always open). -->
         <activity
             android:name=".CrashActivity"
@@ -369,5 +370,18 @@
                 android:value="androidx.startup"
                 tools:node="remove" />
         </provider>
+        <!-- Sees a song playing in YouTube (notification access) and offers to continue it in LToTS. -->
+        <service
+            android:name=".watch.YouTubeListener"
+            android:exported="true"
+            android:label="LToTS: continue YouTube songs"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+        <receiver
+            android:name=".watch.YouTubeActionReceiver"
+            android:exported="false" />
     </application>
 </manifest>

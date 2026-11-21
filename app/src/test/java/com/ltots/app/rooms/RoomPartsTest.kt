@@ -213,6 +213,25 @@ class RoomPartsTest {
         assertEquals(listOf("a", "b"), seen)
     }
 
+    @Test fun noisySignalAtSimilarDistanceDoesNotPingPong() {
+        val p = HandoffPolicy()
+        val rnd = java.util.Random(7)
+        var active: String? = null
+        var switches = -1
+        var t = 0L
+        var at = 0L
+        var ra = -70; var rb = -72
+        while (t <= 120_000) {
+            // A new reading each second, ±6 dB of noise around nearly the same strength.
+            if (t - at >= 1_000) { at = t; ra = -70 + rnd.nextInt(13) - 6; rb = -72 + rnd.nextInt(13) - 6 }
+            val next = p.decide(t, active, listOf(r("a", at, rssi = ra), r("b", at, rssi = rb)))
+            if (next != active) switches++
+            active = next
+            t += 250
+        }
+        assertTrue("switched $switches times", switches <= 1)
+    }
+
     @Test fun lostLinkSwitchesAtOnce() {
         val p = HandoffPolicy()
         var active = p.decide(0, null, listOf(r("a", 0), r("b", 0)))!!

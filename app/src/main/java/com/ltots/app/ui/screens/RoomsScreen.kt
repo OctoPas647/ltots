@@ -275,6 +275,17 @@ private fun SpeakersCard(ui: Rooms.Ui, onCalibrate: () -> Unit) {
                 color = pal.textDim, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 10.dp),
             )
             Pill(if (ui.calibrating) "Calibrating…" else "Calibrate with this phone's mic", false, onCalibrate, enabled = !ui.calibrating)
+            val context = androidx.compose.ui.platform.LocalContext.current
+            val askMic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+            com.ltots.app.ui.components.SwitchRow(
+                "Keep the speakers lined up by themselves", ui.autoAlign,
+                { on ->
+                    Rooms.autoAlign(on)
+                    if (on && context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) askMic.launch(Manifest.permission.RECORD_AUDIO)
+                },
+                sub = "A speaker that joins gets the whistle once. After that a phone that has LToTS open (or that opened the room) " +
+                    "listens to the music now and then; when the speakers drift apart, the whistle runs again at the next song.",
+            )
             if (ui.calibration.isNotBlank()) {
                 Text(ui.calibration, color = pal.text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 10.dp))
             }

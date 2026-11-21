@@ -46,7 +46,17 @@ class RoomService : Service() {
         // it's about to stop again: Android crashes the whole app otherwise ("did not then call
         // Service.startForeground()"). So: both types, else media playback alone, and only then stop.
         val types = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK or ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-        val ok = runCatching { ServiceCompat.startForeground(this, ID, build(this, Rooms.ui.value), types) }
+        // With the mic too when allowed (Android only grants it while LToTS is on screen): then
+        // the room can listen to the music now and then with the screen off, to keep the speakers
+        // lined up. Without it, Android records silence in the background and the check skips.
+        val micOk = com.ltots.app.CrashReport.inFront &&
+            checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        micType = false
+        val ok = runCatching {
+            if (!micOk) throw IllegalStateException("no mic")
+            ServiceCompat.startForeground(this, ID, build(this, Rooms.ui.value), types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+            micType = true
+        }.recoverCatching { ServiceCompat.startForeground(this, ID, build(this, Rooms.ui.value), types) }
             .recoverCatching { first ->
                 com.ltots.app.CrashReport.handled("RoomService.startForeground", first)
                 ServiceCompat.startForeground(this, ID, build(this, Rooms.ui.value), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
@@ -87,6 +97,9 @@ class RoomService : Service() {
         private const val PAIR_ID = 4402
         private const val ACTION_LEAVE = "com.ltots.app.ROOM_LEAVE"
         @Volatile private var running = false
+        /** The service runs with the microphone type: it can record with the screen off. */
+        @Volatile var micType = false
+            private set
         /** The service has called startForeground (only then may it be stopped from outside). */
         @Volatile private var foreground = false
         /** Asked to start and not yet in onStartCommand. */

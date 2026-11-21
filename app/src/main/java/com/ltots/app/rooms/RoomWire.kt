@@ -42,12 +42,18 @@ object RoomWire {
     const val ADJUST = 43
     /** Main → one node: play to these outputs (empty: the phone's usual one). */
     const val OUTPUTS = 44
+    /** Main → one phone: record the music from / to these group times and compare (no whistle). */
+    const val MUSIC_CHECK = 45
+    /** That phone → main: the speakers it heard in the music. */
+    const val MUSIC_RESULT = 46
     /** Node → main: "make me the main". */
     const val MAIN_REQUEST = 50
     /** Old main → new main: everything needed to carry on playing. */
     const val MAIN_HANDOFF = 51
     /** Old main → everyone: the main is moving to this phone at this time. */
     const val NEW_MAIN = 52
+    /** New main → old main: ready to start at this group time (the old one plays until then). */
+    const val MAIN_READY = 53
     const val BYE = 60
 
     /** Frames bigger than this are refused (a bad or hostile peer). */

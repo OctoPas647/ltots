@@ -26,6 +26,12 @@ data class LinkReport(
  * moment, so walking past a doorway doesn't flip it back and forth. After a switch the new
  * phone keeps the earbuds for a while ([minDwellMs]) unless its link actually breaks.
  *
+ * Signal strengths jump by several dB from one reading to the next, so each phone's is
+ * smoothed first (about 2 s), which lets the thresholds be tighter: the switch comes sooner
+ * when you really walk away, and not at all from one bad reading. Going straight back to the
+ * phone just left needs a clearer case (ping-pong between two phones at similar distance was
+ * the worst of it).
+ *
  * Pure logic: tested with simulated walks round the apartment.
  */
 class HandoffPolicy(
@@ -34,14 +40,20 @@ class HandoffPolicy(
     /** A stall has to last this long to count. */
     private val stallHoldMs: Long = 1_200,
     /** The other phone must be this much stronger (dB), for [strongerHoldMs]. */
-    private val strongerDb: Int = 10,
-    private val strongerHoldMs: Long = 2_500,
+    private val strongerDb: Int = 8,
+    private val strongerHoldMs: Long = 2_000,
     /** Below this (dBm) the link is about to drop. */
-    private val weakDbm: Int = -84,
+    private val weakDbm: Int = -82,
     private val weakHoldMs: Long = 1_500,
     /** Reports older than this are ignored. */
     private val staleMs: Long = 4_000,
+    /** Going back to the phone just left within this long needs [backExtraDb] more. */
+    private val pingPongMs: Long = 30_000,
+    private val backExtraDb: Int = 5,
 ) {
+    /** Smoothed signal strength per phone: value and the report time it was last fed. */
+    private val smooth = HashMap<String, Pair<Double, Long>>()
+    private var leftWho: String? = null
     private var lastSwitchMs = Long.MIN_VALUE / 2
     private var stallSince = -1L
     private var weakSince = -1L
@@ -53,6 +65,7 @@ class HandoffPolicy(
         private set
 
     fun reset() {
+        smooth.clear(); leftWho = null
         lastSwitchMs = Long.MIN_VALUE / 2
         stallSince = -1L; weakSince = -1L; strongerSince = -1L; strongerWho = null
     }
@@ -65,12 +78,25 @@ class HandoffPolicy(
 
     private fun score(r: LinkReport): Double = (r.rssi ?: -70).toDouble() - r.stall * 25.0
 
+    /** [r] with its signal strength smoothed over the last couple of reports. */
+    private fun smoothed(r: LinkReport): LinkReport {
+        val v = r.rssi ?: run { smooth.remove(r.nodeId); return r }
+        val prev = smooth[r.nodeId]
+        val next = when {
+            prev == null || r.atMs - prev.second > 5_000 -> v.toDouble()
+            r.atMs == prev.second -> prev.first // the same report again
+            else -> prev.first + 0.4 * (v - prev.first)
+        }
+        smooth[r.nodeId] = next to r.atMs
+        return r.copy(rssi = Math.round(next).toInt())
+    }
+
     /**
      * Which phone should have the earbuds now: [active] to keep it, another id to switch, or
      * null when no phone has them.
      */
     fun decide(nowMs: Long, active: String?, reports: Collection<LinkReport>): String? {
-        val fresh = reports.filter { it.connected && nowMs - it.atMs <= staleMs }
+        val fresh = reports.filter { it.connected && nowMs - it.atMs <= staleMs }.map { smoothed(it) }
         if (fresh.isEmpty()) return active.takeIf { a -> reports.any { it.nodeId == a && it.connected } }
         val cur = fresh.firstOrNull { it.nodeId == active }
         val others = fresh.filter { it.nodeId != active }
@@ -80,6 +106,7 @@ class HandoffPolicy(
             if (best.nodeId != active) {
                 lastReason = if (active == null) "started" else "link to the earbuds lost"
                 switched(nowMs)
+                leftWho = active
             }
             return best.nodeId
         }
@@ -92,7 +119,10 @@ class HandoffPolicy(
         // How long each warning sign has lasted.
         stallSince = if (cur.stall >= 0.5) (if (stallSince < 0) nowMs else stallSince) else -1L
         weakSince = if (cur.rssi != null && cur.rssi <= weakDbm) (if (weakSince < 0) nowMs else weakSince) else -1L
-        val stronger = cur.rssi != null && best.rssi != null && best.rssi - cur.rssi >= strongerDb
+        // Straight back to the phone just left: only with a clearer lead.
+        val back = best.nodeId == leftWho && nowMs - lastSwitchMs < pingPongMs
+        val need = strongerDb + if (back) backExtraDb else 0
+        val stronger = cur.rssi != null && best.rssi != null && best.rssi - cur.rssi >= need
         if (stronger) {
             if (strongerSince < 0 || strongerWho != best.nodeId) { strongerSince = nowMs; strongerWho = best.nodeId }
         } else { strongerSince = -1L; strongerWho = null }
@@ -113,6 +143,7 @@ class HandoffPolicy(
         if (reason != null && canSwitch) {
             lastReason = reason
             switched(nowMs)
+            leftWho = active
             return best.nodeId
         }
         return active

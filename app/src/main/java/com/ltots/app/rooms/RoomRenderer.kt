@@ -95,7 +95,7 @@ class RoomRenderer(private val tag: String = "room") {
     fun stop() {
         running = false
         setTargets(emptyList())
-        synchronized(lock) { queue.clear(); chirps.clear() }
+        synchronized(lock) { queue.clear(); chirps.clear(); past.clear() }
     }
 
     /** The outputs to play to now. Sinks come and go to match; one already playing carries on. */
@@ -153,7 +153,7 @@ class RoomRenderer(private val tag: String = "room") {
     }
 
     fun clear() {
-        synchronized(lock) { queue.clear() }
+        synchronized(lock) { queue.clear(); past.clear() }
         synchronized(sinks) { sinks.values.forEach { it.restart() } }
     }
 
@@ -162,9 +162,37 @@ class RoomRenderer(private val tag: String = "room") {
         synchronized(lock) { chirps.add(atGroupNs to key) }
     }
 
+    /** The music already played, kept a few seconds for [reference] (the music-listening check). */
+    private val past = ArrayDeque<AudioChunk>()
+
+    /**
+     * The room's music from group time [fromNs], [count] samples, mono at [MusicSync.RATE]: what
+     * the speakers were due to play then. Null when much of it isn't here (paused, just joined).
+     */
+    fun reference(fromNs: Long, count: Int): FloatArray? {
+        val chunks = synchronized(lock) { (past + queue).filter { it.endNs > fromNs } }.sortedBy { it.groupNs }
+        val out = FloatArray(count)
+        val stepNs = 1_000_000_000.0 / MusicSync.RATE
+        var ci = 0
+        var missing = 0
+        for (j in 0 until count) {
+            val t = fromNs + (j * stepNs).roundToLong()
+            while (ci < chunks.size && chunks[ci].endNs <= t) ci++
+            val c = chunks.getOrNull(ci)
+            if (c == null || c.groupNs > t) { missing++; continue }
+            val a = ((t - c.groupNs) * c.sampleRate / 1_000_000_000L).toInt()
+            val b = (((t + stepNs.toLong()) - c.groupNs) * c.sampleRate / 1_000_000_000L).toInt().coerceIn(a + 1, c.frames)
+            var s = 0f
+            for (f in a until b) for (k in 0 until c.channels) s += c.samples[f * c.channels + k]
+            out[j] = s / ((b - a) * c.channels)
+        }
+        return out.takeIf { missing < count / 5 }
+    }
+
     /** Called by each sink: drops what nobody can use any more; the format of what's next. */
     private fun housekeep(now: Long): Pair<Int, Int>? = synchronized(lock) {
-        while (queue.isNotEmpty() && queue[0].endNs < now - 200_000_000L) queue.removeAt(0)
+        while (queue.isNotEmpty() && queue[0].endNs < now - 200_000_000L) past.addLast(queue.removeAt(0))
+        while (past.isNotEmpty() && past.first().endNs < now - 8_000_000_000L) past.removeFirst()
         chirps.removeAll { it.first + 2_000_000_000L < now }
         queue.firstOrNull()?.let { it.sampleRate to it.channels }
     }

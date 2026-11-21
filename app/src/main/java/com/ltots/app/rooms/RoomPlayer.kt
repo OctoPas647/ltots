@@ -140,6 +140,118 @@ object RoomPlayer {
         }, ms)
     }
 
+    /** The queue in a handoff snapshot as media items. */
+    private fun itemsOf(h: JSONObject): List<MediaItem> {
+        val arr = h.optJSONArray("items") ?: JSONArray()
+        return (0 until arr.length()).map { i ->
+            val o = arr.getJSONObject(i)
+            val uri = Uri.parse(o.getString("uri"))
+            MediaItem.Builder()
+                .setMediaId(o.optString("id"))
+                .setUri(uri)
+                .setRequestMetadata(MediaItem.RequestMetadata.Builder().setMediaUri(uri).build())
+                .setMediaMetadata(
+                    MediaMetadata.Builder()
+                        .setTitle(o.optString("title"))
+                        .setArtist(o.optString("artist"))
+                        .setAlbumTitle(o.optString("album"))
+                        .setDurationMs(o.optLong("dur").takeIf { it > 0 })
+                        .setExtras(Bundle().apply { putLong("trackId", -1L) })
+                        .build()
+                )
+                .build()
+        }
+    }
+
+    /**
+     * Taking over, step 1: loads the queue into this phone's player (its sound already going to
+     * the room) without starting it, waits until it can play, and picks the moment to start:
+     * the agreed one, or — when loading took longer (songs read over the Wi-Fi, Tailscale) — a
+     * later one, moving the position on by as much so the song carries on exactly where the
+     * old main will have got to. [onReady] gets that moment (group time); the old main keeps
+     * playing until then, so there's no gap. [onFail] after 12 s without getting ready.
+     */
+    fun prepareTakeOver(context: Context, h: JSONObject, onReady: (Long) -> Unit, onFail: () -> Unit) = onMain {
+        PlayerConnection.connect(context)
+        val began = System.currentTimeMillis()
+        fun attempt() {
+            val p = player
+            if (p == null) {
+                if (System.currentTimeMillis() - began < 4000) main.postDelayed({ attempt() }, 50) else onFail()
+                return
+            }
+            val items = itemsOf(h)
+            if (items.isEmpty()) { onFail(); return }
+            val profiles = h.optJSONObject("profiles")
+            if (profiles != null) for (k in profiles.keys()) runCatching { Store.saveProfile(k, Json.profile(profiles.getJSONObject(k))) }
+            h.optJSONObject("eq")?.let { runCatching { AudioEngine.defaultEq.value = Json.eq(it) } }
+            // Whatever this phone was playing stops; from now on its sound would go to the room.
+            p.playWhenReady = false
+            p.stop()
+            RoomStream.active = true
+            AudioEngine.roomChanged()
+            p.shuffleModeEnabled = h.optBoolean("shuffle")
+            p.repeatMode = h.optInt("repeat", Player.REPEAT_MODE_OFF)
+            val at0 = h.optLong("at")
+            val index0 = h.optInt("index").coerceIn(0, items.size - 1)
+            val pos0 = h.optLong("pos").coerceAtLeast(0L)
+            p.setMediaItems(items, index0, pos0)
+            p.prepare()
+            val playing = h.optBoolean("play")
+            var at = at0
+            var seeks = 0
+            var done = false
+            lateinit var listener: Player.Listener
+            val timeout = Runnable {
+                if (done) return@Runnable
+                done = true
+                p.removeListener(listener)
+                onFail()
+            }
+            fun check() {
+                if (done || p.playbackState != Player.STATE_READY) return
+                // Room to start: the anchor must be a little ahead of now when the first sound is written.
+                val earliest = GroupClock.now() + RoomAudioOutput.MIN_LEAD_NS + 600_000_000L
+                if (playing && at < earliest && seeks < 3) {
+                    // Late: start later, and further into the song by as much.
+                    at = earliest + 300_000_000L
+                    seeks++
+                    val speed = p.playbackParameters.speed
+                    var idx = index0
+                    var pos = pos0 + ((at - at0) / 1_000_000L * speed).toLong()
+                    val dur = p.duration
+                    if (dur > 0 && pos >= dur - 500 && idx + 1 < p.mediaItemCount) { pos -= dur; idx++ }
+                    p.seekTo(idx, pos.coerceAtLeast(0L))
+                    return // ready again shortly (it's buffered)
+                }
+                done = true
+                main.removeCallbacks(timeout)
+                p.removeListener(listener)
+                onReady(at)
+            }
+            listener = object : Player.Listener {
+                override fun onPlaybackStateChanged(playbackState: Int) = check()
+            }
+            p.addListener(listener)
+            main.postDelayed(timeout, 12_000)
+            check()
+        }
+        attempt()
+    }
+
+    /** Taking over, step 2: the room is this phone's now; the music starts at "at". */
+    fun startTakeOver(atNs: Long, play: Boolean) = onMain {
+        RoomStream.pendingAnchorNs = atNs
+        player?.playWhenReady = play
+    }
+
+    /** Taking over didn't work out: this phone's player goes back to its own speaker. */
+    fun abandonTakeOver() = onMain {
+        player?.let { it.playWhenReady = false; it.stop(); it.clearMediaItems() }
+        RoomStream.active = false
+        AudioEngine.roomChanged()
+    }
+
     /** This phone takes over: loads the queue and starts so the first sound lands at "at". */
     fun takeOver(context: Context, h: JSONObject) = onMain {
         PlayerConnection.connect(context)

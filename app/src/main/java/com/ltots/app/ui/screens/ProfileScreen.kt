@@ -461,6 +461,7 @@ private fun AppSettingsCard() {
                     "Off lets the phone choose, which may be 60 Hz to save a little battery.",
             )
             SmoothnessSetting(cfg.effects) { m -> set { it.copy(effects = m) } }
+            YouTubeSwitchSetting()
             val iconFollows by com.ltots.app.ui.IconColor.enabled.collectAsState()
             SwitchRow(
                 "Icon follows the song colour", iconFollows, { on -> com.ltots.app.ui.IconColor.setEnabled(on) },
@@ -680,4 +681,33 @@ private fun SmallAction(icon: androidx.compose.ui.graphics.vector.ImageVector, d
     androidx.compose.material3.IconButton(onClick = onClick, modifier = Modifier.size(36.dp)) {
         Icon(icon, description, tint = pal.textDim, modifier = Modifier.size(20.dp))
     }
+}
+
+/** Offer to continue songs from YouTube in LToTS (needs notification access to see them). */
+@Composable
+private fun YouTubeSwitchSetting() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val watch = com.ltots.app.watch.YouTubeWatch
+    var on by remember { mutableStateOf(watch.enabled(context)) }
+    var access by remember { mutableStateOf(watch.hasAccess(context)) }
+    // Coming back from Android's settings page: look again.
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycle) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, e ->
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) access = watch.hasAccess(context)
+        }
+        lifecycle.lifecycle.addObserver(obs)
+        onDispose { lifecycle.lifecycle.removeObserver(obs) }
+    }
+    SwitchRow(
+        "Continue YouTube songs in LToTS", on && access,
+        { want ->
+            on = want
+            watch.setEnabled(context, want)
+            if (want && !access) watch.openAccessSettings(context)
+        },
+        sub = "When a song plays in YouTube for a few seconds, LToTS offers to download it and carry on from the same moment " +
+            "— then it can follow you between phones and play in your room. " +
+            (if (access) "" else "Needs notification access (Android's only way to see what other apps play): turning this on opens that page."),
+    )
 }
