@@ -18,6 +18,7 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
@@ -110,6 +111,23 @@ class NewControlsUiTest {
     private fun loadProfile(name: String) {
         rule.onNode(hasText(name) and hasText("Saved · tap to load")).performSemanticsAction(SemanticsActions.OnClick)
         idle(500)
+    }
+
+    /**
+     * Brings [text] into view by scrolling its page a step at a time, with frames in between.
+     * (performScrollTo waits for the node to stop moving, which with the clock held never comes.)
+     */
+    private fun scrollTo(text: String) {
+        repeat(30) {
+            val b = rule.onNodeWithText(text).fetchSemanticsNode().boundsInRoot
+            val root = rule.onRoot().fetchSemanticsNode().boundsInRoot
+            if (b.top >= root.top + 100f && b.bottom <= root.bottom - 400f) return
+            val delta = b.top - (root.top + root.height / 3f)
+            rule.onAllNodes(androidx.compose.ui.test.hasScrollAction() and androidx.compose.ui.test.hasAnyDescendant(androidx.compose.ui.test.hasText(text)))
+                .onLast()
+                .performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, delta) }
+            idle(200)
+        }
     }
 
     private fun click(text: String) {
@@ -371,7 +389,7 @@ class NewControlsUiTest {
         rule.mainClock.autoAdvance = false
         idle()
         tab("Profile")
-        rule.onNodeWithText("EQ with the screen off").performScrollTo()
+        scrollTo("EQ with the screen off")
         idle()
         screen("45_profile_screen_off")
         // Pick Off for the EQ (the first "Off" on the page is the EQ's).
