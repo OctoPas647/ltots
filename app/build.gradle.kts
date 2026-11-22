@@ -119,6 +119,9 @@ android {
             // Live tests (-Dltots.live=true) and their local files (-Dltots.models=…, -Dltots.clips=…).
             System.getProperties().stringPropertyNames().filter { it.startsWith("ltots.") }
                 .forEach { test.systemProperty(it, System.getProperty(it)) }
+            // Robolectric fetches its Android image (~150 MB) when a test starts. Maven Central
+            // rate-limits the shared CI machines (HTTP 429), so take it from Google's mirror of it.
+            test.systemProperty("robolectric.dependency.repo.url", "https://maven-central.storage-download.googleapis.com/maven2")
             test.maxHeapSize = "2g"
             // A failing test prints its whole message and stack in the CI log, not just "AssertionError".
             test.testLogging {

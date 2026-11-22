@@ -37,6 +37,13 @@ jobs:
         if: env.HAS_KEY == 'true'
         run: echo "${{ secrets.LTOTS_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/ltots.jks"
 
+      # Robolectric's Android image, kept between builds instead of downloaded every time.
+      - uses: actions/cache@v6
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-${{ hashFiles('app/build.gradle.kts') }}
+          restore-keys: robolectric-
+
       - name: Tests (audio engine, YouTube Music parser, UI screens)
         run: ./gradlew --no-daemon :app:testDebugUnitTest
 
