@@ -192,7 +192,7 @@ fun OtherAppsSettings() {
     )
     Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(
-            if (access) "On" + (if (plays.isNotEmpty()) " · ${plays.size} songs heard elsewhere so far" else "") else "Off",
+            if (access) "On" + (if (plays.isNotEmpty()) " · ${plays.size} songs heard elsewhere so far" else "") else "Not turned on",
             color = if (access) pal.accent else pal.text, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
         )
         Pill(if (access) "Android settings" else "Turn on", !access, { OtherApps.openAccessSettings(context) })
