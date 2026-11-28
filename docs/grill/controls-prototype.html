@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>
+/* Prototype only — real code goes in Compose.
+   Switch: From Uiverse.io by gharsh11032000 - https://uiverse.io/gharsh11032000/brave-pug-20
+   MIT License, Copyright (c) gharsh11032000 (Harsh Gupta)
+   Slider: From Uiverse.io by javierBarroso - https://uiverse.io/javierBarroso/blue-lion-57
+   MIT License, Copyright (c) seyed-mohsen-mousavi (SEYED), javierBarroso (Javier Barroso) */
+:root{--accent:#8B6CFF;--text:#fff;--dim:rgba(255,255,255,.62);--faint:rgba(255,255,255,.38)}
+*{box-sizing:border-box;margin:0;padding:0}
+html{overflow:hidden}body{width:1480px;background:#050507;font-family:"Inter","Segoe UI",Roboto,sans-serif;color:var(--text);padding:36px 40px 40px;position:relative;overflow:hidden}
+.blob{position:absolute;border-radius:50%;filter:blur(120px);opacity:.55;z-index:0}
+h1{font-size:26px;font-weight:700;letter-spacing:-.3px;position:relative;z-index:1}
+.sub{color:var(--dim);font-size:14px;margin:6px 0 26px;position:relative;z-index:1}
+.grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:26px;position:relative;z-index:1}
+.phone{background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.08);border-radius:34px;padding:22px 20px 24px;backdrop-filter:blur(20px)}
+.ph-title{font-size:12px;letter-spacing:1.4px;text-transform:uppercase;color:var(--faint);margin:0 0 4px 4px}
+.ph-h{font-size:19px;font-weight:700;margin:0 0 16px 4px}
+.card{background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.09);border-radius:22px;padding:8px 16px;margin-bottom:14px}
+.row{display:flex;align-items:center;padding:12px 0}
+.row+.row{border-top:1px solid rgba(255,255,255,.05)}
+.lbl{flex:1}.lbl b{display:block;font-weight:500;font-size:15px}.lbl span{font-size:12.5px;color:var(--faint)}
+.tag{display:inline-block;font-size:11px;font-weight:600;padding:3px 9px;border-radius:99px;background:rgba(255,255,255,.08);color:var(--dim);margin:0 0 8px 4px}
+.note{font-size:12px;color:var(--faint);margin:6px 4px 0;line-height:1.45}
+
+/* ---------- Switch A: Uiverse as written (accent instead of blue) ---------- */
+.swA{position:relative;width:52px;height:30px;flex:none}
+.swA .tr{position:absolute;inset:0;border:2px solid #414141;border-radius:50px}
+.swA .kn{position:absolute;width:21px;height:21px;left:2.5px;top:2.5px;background:#fff;border-radius:50px}
+.swA.on .tr{border-color:var(--accent);box-shadow:0 0 20px color-mix(in srgb,var(--accent) 80%,transparent)}
+.swA.on .kn{transform:translateX(22px)}
+
+/* ---------- Switch B: Uiverse glow + iOS 26 liquid-glass knob ---------- */
+.swB{position:relative;width:56px;height:30px;flex:none}
+.swB .tr{position:absolute;inset:0;border-radius:50px;background:rgba(120,120,128,.32);border:1.5px solid rgba(255,255,255,.10)}
+.swB.on .tr{background:var(--accent);border-color:color-mix(in srgb,var(--accent) 60%,#fff);box-shadow:0 0 20px color-mix(in srgb,var(--accent) 75%,transparent)}
+.swB .kn{position:absolute;width:36px;height:26px;left:2px;top:2px;border-radius:50px;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,.35)}
+.swB.on .kn{transform:translateX(16px)}
+/* pressed: knob turns into a clear glass lens, bigger than the track (like iOS 26) */
+.swB.press .kn{width:44px;height:36px;top:-3px;left:8px;background:rgba(255,255,255,.10);
+  backdrop-filter:blur(1.5px) brightness(1.25) saturate(1.4);
+  border:1.5px solid rgba(255,255,255,.75);
+  box-shadow:inset 0 1px 1px rgba(255,255,255,.9),inset 0 -6px 10px rgba(255,255,255,.18),0 4px 14px rgba(0,0,0,.45)}
+
+/* ---------- Slider: Uiverse glow level + clear glass thumb ---------- */
+.sl{position:relative;height:34px;display:flex;align-items:center;margin:2px 0 4px}
+.sl .bar{position:relative;width:100%;height:15px;border-radius:5px;background:rgba(82,82,82,.322);overflow:hidden}
+.sl.outl .bar{border:1px solid rgba(255,255,255,.8)}
+.sl .lvl{position:absolute;left:0;top:0;bottom:0;background:var(--accent);
+  /* the Uiverse thumb's blurred box-shadow: a soft glowing front edge, kept inside the bar */
+  box-shadow:5px 0 5px var(--accent),10px 0 20px var(--accent)}
+.sl .th{position:absolute;top:50%;width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;
+  background:rgba(255,255,255,.06);backdrop-filter:blur(2px) brightness(1.35) saturate(1.5);
+  border:1.5px solid rgba(255,255,255,.7);
+  box-shadow:inset 0 1px 1.5px rgba(255,255,255,.95),inset 0 -5px 9px rgba(255,255,255,.14),0 3px 10px rgba(0,0,0,.5)}
+.sl.held .th{width:40px;height:40px;margin:-20px 0 0 -20px}
+.green{--accent:#92ff77}.blue{--accent:#0974f1}
+.slrow{display:flex;align-items:center;padding-top:10px}
+.slrow .k{flex:1;color:var(--dim);font-size:14.5px}.slrow .v{font-weight:600;font-size:14.5px}
+.rst{width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,.10);margin-left:8px;display:grid;place-items:center;font-size:15px;color:#fff}
+.dis{opacity:.38}
+.times{display:flex;justify-content:space-between;font-size:12px;color:var(--dim);padding:0 2px}
+.grad .bar{background:linear-gradient(90deg,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00);height:26px;border-radius:13px}
+.grad{height:38px}
+.cover{height:190px;border-radius:22px;background:linear-gradient(135deg,#3a1d8f,#8B6CFF 55%,#00c8ff);margin-bottom:14px;position:relative;overflow:hidden}
+.cover:after{content:"";position:absolute;inset:0;background:radial-gradient(circle at 70% 30%,rgba(255,255,255,.35),transparent 45%)}
+.song b{font-size:18px}.song span{display:block;color:var(--dim);font-size:13.5px;margin:2px 0 6px}
+.legend{display:flex;gap:10px;align-items:center;font-size:12px;color:var(--dim);margin:10px 4px 0}
+</style></head><body>
+<div class="blob" style="width:520px;height:520px;background:#5A30D8;left:-120px;top:-160px"></div>
+<div class="blob" style="width:460px;height:460px;background:#00a0d8;right:-140px;bottom:-180px;opacity:.35"></div>
+
+<h1>LToTS · new switches & sliders — prototype</h1>
+<div class="sub">Drawn in your default accent (#8B6CFF) on the AMOLED-dark look. Every colour below follows Look › Colours, the same way the current controls do.</div>
+
+<div class="grid">
+<!-- ================= SWITCHES ================= -->
+<div class="phone">
+  <div class="ph-title">Profile › App settings</div>
+  <div class="ph-h">Switches</div>
+
+  <div class="tag">Option A · Uiverse switch as written</div>
+  <div class="card">
+    <div class="row"><div class="lbl"><b>Pre-render while in other apps</b><span>Off</span></div><div class="swA"><div class="tr"></div><div class="kn"></div></div></div>
+    <div class="row"><div class="lbl"><b>Sleep timer in notification</b><span>On — glowing outline</span></div><div class="swA on"><div class="tr"></div><div class="kn"></div></div></div>
+  </div>
+
+  <div class="tag">Option B · Uiverse glow + iOS 26 glass knob</div>
+  <div class="card">
+    <div class="row"><div class="lbl"><b>Pre-render while in other apps</b><span>Off</span></div><div class="swB"><div class="tr"></div><div class="kn"></div></div></div>
+    <div class="row"><div class="lbl"><b>Sleep timer in notification</b><span>On — filled + glow</span></div><div class="swB on"><div class="tr"></div><div class="kn"></div></div></div>
+    <div class="row"><div class="lbl"><b>While your finger is on it</b><span>Knob turns into a clear glass lens</span></div><div class="swB on press"><div class="tr"></div><div class="kn"></div></div></div>
+  </div>
+  <div class="note">Both move with the Uiverse springy curve (slight overshoot, 0.4 s). In the app it becomes a spring so it can be caught mid-way, like your other springs.</div>
+  <div class="legend">Uiverse's own colours: <div class="swA on blue" style="transform:scale(.8)"><div class="tr"></div><div class="kn"></div></div></div>
+</div>
+
+<!-- ================= SLIDERS (settings) ================= -->
+<div class="phone">
+  <div class="ph-title">Sound / EQ</div>
+  <div class="ph-h">Sliders</div>
+  <div class="card" style="padding-bottom:12px">
+    <div class="slrow"><div class="k">Bass boost</div><div class="v">+4.0 dB</div><div class="rst">↺</div></div>
+    <div class="sl"><div class="bar"><div class="lvl" style="width:62%"></div></div><div class="th" style="left:62%"></div></div>
+
+    <div class="slrow"><div class="k">Preamp</div><div class="v">−2.5 dB</div><div class="rst" style="opacity:.4">↺</div></div>
+    <div class="sl held"><div class="bar"><div class="lvl" style="width:34%"></div></div><div class="th" style="left:34%"></div></div>
+    <div class="note" style="margin:-2px 0 4px">↑ while held: the glass thumb grows a little</div>
+
+    <div class="slrow"><div class="k">Pitch</div><div class="v">+3 st</div></div>
+    <div class="sl outl"><div class="bar"><div class="lvl" style="width:62.5%"></div></div><div class="th" style="left:62.5%"></div></div>
+    <div class="note" style="margin:-2px 0 4px">↑ with Look › Colours › Outlines on</div>
+
+    <div class="dis"><div class="slrow"><div class="k">Speed (tape mode on)</div><div class="v">1.00×</div></div>
+    <div class="sl"><div class="bar"><div class="lvl" style="width:33%"></div></div><div class="th" style="left:33%"></div></div></div>
+    <div class="note" style="margin:-2px 0 0">↑ grayed out (enabled = false), same as today</div>
+  </div>
+  <div class="tag">Look › Colours · gradient sliders keep their rainbow, only the thumb changes</div>
+  <div class="card" style="padding:6px 16px 10px">
+    <div class="slrow"><div class="k">Hue</div><div class="v">262°</div></div>
+    <div class="sl grad"><div class="bar"></div><div class="th" style="left:73%"></div></div>
+  </div>
+  <div class="legend">Uiverse's own green: <div class="sl green" style="width:160px;height:20px"><div class="bar"><div class="lvl" style="width:55%"></div></div><div class="th" style="left:55%;width:22px;height:22px;margin:-11px 0 0 -11px"></div></div></div>
+</div>
+
+<!-- ================= NOW PLAYING ================= -->
+<div class="phone">
+  <div class="ph-title">Playing</div>
+  <div class="ph-h">Seek bar</div>
+  <div class="cover"></div>
+  <div class="song"><b>Song title</b><span>Artist · Album</span></div>
+  <div class="sl"><div class="bar"><div class="lvl" style="width:41%"></div></div><div class="th" style="left:41%"></div></div>
+  <div class="times"><span>1:24</span><span>3:27</span></div>
+  <div class="note" style="margin-top:14px">The glass thumb sits on the song cover's colours, so you see them through it. The glow edge moves smoothly every frame instead of jumping 4× a second (one of the micro-stutters — see grill file).</div>
+  <div class="tag" style="margin-top:18px">Speed panel</div>
+  <div class="card" style="padding-bottom:12px">
+    <div class="slrow"><div class="k">Speed</div><div class="v">1.15×</div></div>
+    <div class="sl"><div class="bar"><div class="lvl" style="width:43%"></div></div><div class="th" style="left:43%"></div></div>
+    <div class="slrow"><div class="k" style="font-size:12.5px;flex:none;width:40px;color:var(--faint)">Fine</div><div class="sl" style="flex:1"><div class="bar"><div class="lvl" style="width:70%"></div></div><div class="th" style="left:70%"></div></div><div style="width:50px;text-align:right;font-size:12.5px;color:var(--dim)">+20 ct</div></div>
+  </div>
+</div>
+</div>
+</body></html>
