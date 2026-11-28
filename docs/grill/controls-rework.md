@@ -1,6 +1,6 @@
 # Grill: controls rework + micro-stutters
 
-Status: **waiting for answers** · started 2026-11-28
+Status: **4 of 25 answered** (Q1, Q8, Q16, Q24) · started 2026-11-28
 
 This is the question sheet for the visual rework of LToTS's switches, sliders and buttons, and for the micro-stutter pass. Every question has my recommended answer. Write yours under **Answer:** (or just say "rec" to take mine). Nothing in the app is changed until the questions are answered.
 
@@ -55,7 +55,7 @@ Rec: yes.
 - B: the Uiverse glow plus iOS 26: the track fills when on, the knob is a white pill, and while your finger is on it the knob turns into a clear glass lens bigger than the track.
 
 Rec: **B**. "Apple buttons" + Uiverse can only both be true with B, and it ties into the liquid-glass look the app already has.
-**Answer:**
+**Answer:** B: glow + iOS 26 glass knob.
 
 **Q2. Colour when on: your accent (Look › Colours), or Uiverse's fixed blue `#0974f1`?**
 Rec: **accent**, so it follows profiles, cover colours and AMOLED themes like everything else.
@@ -87,7 +87,7 @@ Rec: **horizontal**. Vertical would break every row layout.
 
 **Q8. "Transparent button on top": is the clear glass circle in the picture what you meant (30 dp, white rim, see-through, grows a bit while held)?**
 Rec: **yes, as drawn**.
-**Answer:**
+**Answer:** Yes, as drawn (accent colour; Look gradient sliders only get the new thumb).
 
 **Q9. Glow: Uiverse's glow is a soft blurred front edge *inside* the bar (that's what the picture shows). Add a halo *outside* the bar as well?**
 Rec: **inside only** (faithful to Uiverse). It's also drawn as a gradient, not a real blur, so it costs nothing on a low-end phone.
@@ -127,7 +127,7 @@ Rec: **yes**.
 - (c) + every tappable thing: glass circle buttons (play/pause, history…), icon buttons, text buttons in dialogs
 
 Rec: **(c)**, with dialog text buttons getting only the spring, no glow.
-**Answer:**
+**Answer:** (c) everything tappable.
 
 **Q17. iOS 26 glass press on the round glass buttons: while pressed the button swells ~6 %, its glass brightens, and a highlight follows your finger. OK?**
 Rec: **yes**, on `GlassCircleButton` and the bottom bar.
@@ -172,7 +172,7 @@ Rec: **yes, gfxinfo at least**.
 
 **Q24. Push target for both requests: straight to `main` like your last batches (CI builds the APK), or a branch + PR so your consultant can see the diff for the diploma project?**
 Rec: **branch + PR**. It's a big visual change and the PR doubles as documentation for the project.
-**Answer:**
+**Answer:** Straight to `main`.
 
 ---
 
@@ -182,4 +182,7 @@ Filled in as answers come in.
 
 | # | Decision |
 |---|---|
-| | |
+| Q1 | Switch = Option B (Uiverse glow + iOS 26 glass knob) |
+| Q8/Q10/Q12 | Slider = clear glass thumb on a glowing accent bar, horizontal, no icon; gradient sliders keep their rainbow |
+| Q16 | New feel on everything tappable; dialog text buttons get only the spring |
+| Q24 | Push straight to main |
